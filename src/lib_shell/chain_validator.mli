@@ -55,16 +55,16 @@ val create :
   Peer_validator.limits ->
   Prevalidator.limits ->
   Block_validator.t ->
-  State.Block.t Lwt_watcher.input ->
+  Store.Block.t Lwt_watcher.input ->
   (Chain_id.t * bool) Lwt_watcher.input ->
   Distributed_db.t ->
-  State.Chain.t ->
+  Store.chain_store ->
   limits ->
   t tzresult Lwt.t
 
 val chain_id : t -> Chain_id.t
 
-val chain_state : t -> State.Chain.t
+val chain_store : t -> Store.chain_store
 
 (** - If there are at least `boostrap_threshold` active peers, which validated
       at least one block, we consider the peers with the most recent
@@ -97,13 +97,13 @@ val validate_block :
   Block_hash.t ->
   Block_header.t ->
   Operation.t list list ->
-  State.Block.t option tzresult Lwt.t
+  Store.Block.t option tzresult Lwt.t
 
 val shutdown : t -> unit Lwt.t
 
-val valid_block_watcher : t -> State.Block.t Lwt_stream.t * Lwt_watcher.stopper
+val valid_block_watcher : t -> Store.Block.t Lwt_stream.t * Lwt_watcher.stopper
 
-val new_head_watcher : t -> State.Block.t Lwt_stream.t * Lwt_watcher.stopper
+val new_head_watcher : t -> Store.Block.t Lwt_stream.t * Lwt_watcher.stopper
 
 val running_workers : unit -> (Chain_id.t * t) list
 

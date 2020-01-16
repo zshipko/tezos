@@ -48,7 +48,8 @@ val restore_context_integrity : t -> int option tzresult Lwt.t
 
 val apply_block :
   t ->
-  predecessor:State.Block.t ->
+  Store.chain_store ->
+  predecessor:Store.Block.t ->
   Block_header.t ->
   Operation.t list list ->
   Block_validation.result tzresult Lwt.t
@@ -56,4 +57,5 @@ val apply_block :
 val commit_genesis : t -> chain_id:Chain_id.t -> Context_hash.t tzresult Lwt.t
 
 (** [init_test_chain] must only be called on a forking block. *)
-val init_test_chain : t -> State.Block.t -> Block_header.t tzresult Lwt.t
+val init_test_chain :
+  t -> Store.chain_store -> Store.Block.t -> Block_header.t tzresult Lwt.t

@@ -392,3 +392,42 @@ let rec retry ?(log = fun _ -> Lwt.return_unit) ?(n = 5) ?(sleep = 1.) f =
         >>= fun () ->
         Lwt_unix.sleep sleep >>= fun () -> retry ~log ~n:(n - 1) ~sleep f
       else Lwt.return x
+
+let display_progress ?(every = 1) ?(out = Lwt_unix.stdout) ~pp_print_step f =
+  (* pp_print_step must only write on a single-line with no carriage return*)
+  Lwt_unix.isatty out
+  >>= fun is_a_tty ->
+  if not is_a_tty then f (fun () -> Lwt.return_unit)
+  else
+    let clear_line fmt = Format.fprintf fmt "\027[2K\r" in
+    let (stream, notifier) = Lwt_stream.create () in
+    let wrapped_notifier () = notifier (Some ()) ; Lwt_unix.yield () in
+    let thread =
+      Lwt.finalize
+        (fun () -> f wrapped_notifier)
+        (fun () -> notifier None ; Lwt.return_unit)
+    in
+    let oc = Unix.out_channel_of_descr (Lwt_unix.unix_file_descr out) in
+    let fmt = Format.formatter_of_out_channel oc in
+    let cpt = ref 0 in
+    let pp () =
+      clear_line fmt ; pp_print_step fmt !cpt ; Format.fprintf fmt "%!"
+    in
+    pp () ;
+    incr cpt ;
+    let printer =
+      Lwt_stream.iter_s
+        (fun () ->
+          ( if !cpt mod every = 0 then (pp () ; Lwt.return_unit)
+          else Lwt.return_unit )
+          >>= fun () -> incr cpt ; Lwt.return_unit)
+        stream
+    in
+    thread
+    >>= fun e ->
+    printer
+    >>= fun () ->
+    decr cpt ;
+    pp () ;
+    Format.fprintf fmt " Done@\n%!" ;
+    Lwt.return e

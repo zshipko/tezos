@@ -54,9 +54,9 @@ type db = t
 
 type p2p = (Message.t, Peer_metadata.t, Connection_metadata.t) P2p.net
 
-val create : State.t -> p2p -> t
+val create : Store.t -> p2p -> t
 
-val state : db -> State.t
+val store : db -> Store.t
 
 val shutdown : t -> unit Lwt.t
 
@@ -70,7 +70,7 @@ type chain_db
     where [chain_id] is the identifier of [chain]. This informs the neighbors
     that this node expects notifications for new heads/mempools. Subsequent
     calls simply return the existing [chain_db]. *)
-val activate : t -> State.Chain.t -> chain_db
+val activate : t -> Store.Chain.t -> chain_db
 
 (** Look for the database of an active chain. *)
 val get_chain : t -> Chain_id.t -> chain_db option
@@ -90,7 +90,9 @@ val disconnect : chain_db -> P2p_peer.Id.t -> unit Lwt.t
 (** Greylist a given peer. *)
 val greylist : chain_db -> P2p_peer.Id.t -> unit Lwt.t
 
-val chain_state : chain_db -> State.Chain.t
+(** Various accessors. *)
+
+val chain_store : chain_db -> Store.chain_store
 
 val db : chain_db -> db
 
@@ -128,7 +130,7 @@ module Advertise : sig
     chain_db ->
     ?peer:P2p_peer.Id.t ->
     ?mempool:Mempool.t ->
-    State.Block.t ->
+    Store.Block.t ->
     unit
 
   (** [current_branch ?peer chain_db] sends a
@@ -180,8 +182,7 @@ val commit_block :
   Operation.t list list ->
   Bytes.t list list ->
   Block_validation.validation_store ->
-  forking_testchain:bool ->
-  State.Block.t option tzresult Lwt.t
+  Store.Block.t option tzresult Lwt.t
 
 (** Store on disk all the data associated to an invalid block. *)
 val commit_invalid_block :
@@ -189,7 +190,7 @@ val commit_invalid_block :
   Block_hash.t ->
   Block_header.t ->
   Error_monad.error list ->
-  bool tzresult Lwt.t
+  unit tzresult Lwt.t
 
 (** Monitor all the fetched block headers (for all activate chains). *)
 val watch_block_header :

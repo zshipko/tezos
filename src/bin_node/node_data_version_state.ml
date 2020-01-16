@@ -26,7 +26,7 @@
 type status =
   | Dir_is_up_to_date
   | Upgrading_node of string * string
-  | Update_success
+  | Upgrade_success of string
   | Aborting_upgrade of string
   | Upgrade_status of bool * string * string option
 
@@ -40,8 +40,11 @@ let status_pp ppf = function
          the process."
         version
         data_version
-  | Update_success ->
-      Format.fprintf ppf "The node data dir is now up-to-date!"
+  | Upgrade_success success_message ->
+      Format.fprintf
+        ppf
+        "The node data dir is now up-to-date! %s"
+        success_message
   | Aborting_upgrade errs ->
       Format.fprintf
         ppf
@@ -85,9 +88,9 @@ module Definition = struct
            case
              (Tag 2)
              ~title:"Update_success"
-             empty
-             (function Update_success -> Some () | _ -> None)
-             (fun () -> Update_success);
+             (obj1 (req "message" string))
+             (function Upgrade_success msg -> Some msg | _ -> None)
+             (fun msg -> Upgrade_success msg);
            case
              (Tag 3)
              ~title:"Aborting_upgrade"
@@ -109,7 +112,7 @@ module Definition = struct
 
   let level (status : t) =
     match status.data with
-    | Dir_is_up_to_date | Upgrading_node _ | Update_success ->
+    | Dir_is_up_to_date | Upgrading_node _ | Upgrade_success _ ->
         Internal_event.Notice
     | Upgrade_status _ | Aborting_upgrade _ ->
         Internal_event.Error

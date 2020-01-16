@@ -1,0 +1,192 @@
+(*****************************************************************************)
+(*                                                                           *)
+(* Open Source License                                                       *)
+(* Copyright (c) 2020 Nomadic Labs, <contact@nomadic-labs.com>               *)
+(*                                                                           *)
+(* Permission is hereby granted, free of charge, to any person obtaining a   *)
+(* copy of this software and associated documentation files (the "Software"),*)
+(* to deal in the Software without restriction, including without limitation *)
+(* the rights to use, copy, modify, merge, publish, distribute, sublicense,  *)
+(* and/or sell copies of the Software, and to permit persons to whom the     *)
+(* Software is furnished to do so, subject to the following conditions:      *)
+(*                                                                           *)
+(* The above copyright notice and this permission notice shall be included   *)
+(* in all copies or substantial portions of the Software.                    *)
+(*                                                                           *)
+(* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR*)
+(* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,  *)
+(* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL   *)
+(* THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER*)
+(* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING   *)
+(* FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER       *)
+(* DEALINGS IN THE SOFTWARE.                                                 *)
+(*                                                                           *)
+(*****************************************************************************)
+
+(*
+   Index : Hash -> <offset> x <length> x Hash^{12}
+   File: <block_repr>*
+*)
+
+type t = {
+  floating_block_index : Floating_block_index.t;
+  filename : string;
+  fd : Lwt_unix.file_descr;
+  kind : Naming.floating_kind;
+  scheduler : Lwt_idle_waiter.t;
+}
+
+let floating_blocks_log_size = 100_000
+
+open Floating_block_index.Block_info
+
+let find_predecessors floating_store hash =
+  Lwt_idle_waiter.when_idle floating_store.scheduler (fun () ->
+      try
+        let {predecessors; _} =
+          Floating_block_index.find floating_store.floating_block_index hash
+        in
+        Lwt.return_some predecessors
+      with Not_found -> Lwt.return_none)
+
+let get_block floating_store hash =
+  Lwt_idle_waiter.when_idle floating_store.scheduler (fun () ->
+      try
+        let {offset; _} =
+          Floating_block_index.find floating_store.floating_block_index hash
+        in
+        Lwt_unix.lseek floating_store.fd offset Unix.SEEK_SET
+        >>= fun _ ->
+        (* Read dynamic length prefix *)
+        let length_bytes = Bytes.create 4 in
+        Lwt_utils_unix.read_bytes ~pos:0 ~len:4 floating_store.fd length_bytes
+        >>= fun () ->
+        let length = Data_encoding.(Binary.of_bytes_exn int31 length_bytes) in
+        let block_bytes = Bytes.create (4 + length) in
+        Lwt_unix.lseek floating_store.fd offset Unix.SEEK_SET
+        >>= fun _ ->
+        Lwt_utils_unix.read_bytes
+          ~pos:0
+          ~len:(4 + length)
+          floating_store.fd
+          block_bytes
+        >>= fun () ->
+        let block =
+          Data_encoding.Binary.of_bytes_exn Block_repr.encoding block_bytes
+        in
+        Lwt.return_some block
+      with Not_found -> Lwt.return_none)
+
+let locked_write_block floating_store ~offset ~block ~predecessors =
+  ( match Data_encoding.Binary.to_bytes_opt Block_repr.encoding block with
+  | None ->
+      Format.kasprintf
+        Lwt.fail_invalid_arg
+        "floating_block_store.write_block: cannot encode block %a"
+        Block_hash.pp
+        block.Block_repr.hash
+  | Some bytes ->
+      Lwt.return bytes )
+  >>= fun block_bytes ->
+  let block_length = Bytes.length block_bytes in
+  Lwt_utils_unix.write_bytes
+    ~pos:0
+    ~len:block_length
+    floating_store.fd
+    block_bytes
+  >>= fun () ->
+  Floating_block_index.replace
+    floating_store.floating_block_index
+    block.Block_repr.hash
+    {offset; predecessors} ;
+  Lwt.return block_length
+
+let append_block ?(should_flush = true) floating_store predecessors
+    (block : Block_repr.t) =
+  Lwt_idle_waiter.force_idle floating_store.scheduler (fun () ->
+      Lwt_unix.lseek floating_store.fd 0 Unix.SEEK_END
+      >>= fun offset ->
+      locked_write_block floating_store ~offset ~block ~predecessors
+      >>= fun _written_len ->
+      if should_flush then
+        Floating_block_index.flush floating_store.floating_block_index ;
+      Lwt.return_unit)
+
+let append_all floating_store
+    (blocks : (Block_hash.t list * Block_repr.t) list) =
+  Lwt_idle_waiter.force_idle floating_store.scheduler (fun () ->
+      Lwt_unix.lseek floating_store.fd 0 Unix.SEEK_END
+      >>= fun eof_offset ->
+      Lwt_list.fold_left_s
+        (fun offset (predecessors, block) ->
+          locked_write_block floating_store ~offset ~block ~predecessors
+          >>= fun written_len -> Lwt.return (offset + written_len))
+        eof_offset
+        blocks
+      >>= fun _last_offset ->
+      (* Flush for some reason *)
+      Floating_block_index.flush floating_store.floating_block_index ;
+      Lwt.return_unit)
+
+let iter_raw f fd =
+  Lwt_unix.lseek fd 0 Unix.SEEK_END
+  >>= fun eof_offset ->
+  Lwt_unix.lseek fd 0 Unix.SEEK_SET
+  >>= fun _ ->
+  let rec loop nb_bytes_left =
+    if nb_bytes_left = 0 then Lwt.return_unit
+    else
+      Block_repr.read_next_block_opt fd
+      >>= function
+      | None ->
+          Lwt.return_unit
+      | Some (block, length) ->
+          f block >>= fun () -> loop (nb_bytes_left - length)
+  in
+  loop eof_offset
+
+(* Iter on every blocks in file *)
+let iter f floating_store =
+  Lwt_idle_waiter.force_idle floating_store.scheduler (fun () ->
+      (* We open a new fd *)
+      let (flags, perms) = ([Unix.O_CREAT; O_RDONLY], 0o444) in
+      Lwt_unix.openfile floating_store.filename flags perms
+      >>= fun fd -> iter_raw f fd)
+
+let fold f init floating_store =
+  let set = ref Block_hash.Set.empty in
+  Floating_block_index.iter
+    (fun k _v -> set := Block_hash.Set.add k !set)
+    floating_store.floating_block_index ;
+  Block_hash.Set.fold
+    (fun h acc ->
+      acc
+      >>= fun acc ->
+      get_block floating_store h
+      >>= fun block_opt ->
+      let block = Option.unopt_assert ~loc:__POS__ block_opt in
+      f block acc)
+    !set
+    (Lwt.return init)
+
+let init ~chain_dir ~readonly kind =
+  let (flag, perms) =
+    (* Only RO is readonly: when we open RO_TMP, we actually write in it. *)
+    if kind = Naming.RO then (Unix.O_RDONLY, 0o444) else (Unix.O_RDWR, 0o644)
+  in
+  let filename = Naming.(chain_dir // floating_blocks kind) in
+  Lwt_unix.openfile filename [flag; Unix.O_CREAT] perms
+  >>= fun fd ->
+  let floating_block_index =
+    Floating_block_index.v
+      ~log_size:floating_blocks_log_size
+      ~readonly
+      Naming.(chain_dir // floating_block_index kind)
+  in
+  let scheduler = Lwt_idle_waiter.create () in
+  Lwt.return {floating_block_index; fd; filename; kind; scheduler}
+
+let close {floating_block_index; fd; scheduler; _} =
+  Lwt_idle_waiter.force_idle scheduler (fun () ->
+      Floating_block_index.close floating_block_index ;
+      Lwt_unix.close fd)

@@ -99,6 +99,10 @@ module type Dump_interface = sig
 
     val header : t -> Block_header.t
 
+    val operations : t -> Operation.t list list
+
+    val predecessor_header : t -> Block_header.t
+
     val encoding : t Data_encoding.t
   end
 
@@ -172,7 +176,41 @@ module type S = sig
 
   type protocol_data
 
-  val dump_contexts_fd :
+  (*Dump a context and returns the number of elements written*)
+  val dump_context_fd :
+    index -> block_data -> context_fd:Lwt_unix.file_descr -> int tzresult Lwt.t
+
+  val restore_context_fd :
+    index ->
+    ?expected_block:string ->
+    fd:Lwt_unix.file_descr ->
+    metadata:Snapshot_version.metadata ->
+    block_data tzresult Lwt.t
+end
+
+module Make (I : Dump_interface) :
+  S
+    with type index := I.index
+     and type context := I.context
+     and type block_header := I.Block_header.t
+     and type block_data := I.Block_data.t
+     and type pruned_block := I.Pruned_block.t
+     and type protocol_data := I.Protocol_data.t
+
+module type S_legacy = sig
+  type index
+
+  type context
+
+  type block_header
+
+  type block_data
+
+  type pruned_block
+
+  type protocol_data
+
+  val dump_context_fd :
     index ->
     block_header
     * block_data
@@ -182,7 +220,7 @@ module type S = sig
     fd:Lwt_unix.file_descr ->
     unit tzresult Lwt.t
 
-  val restore_contexts_fd :
+  val restore_context_fd :
     index ->
     fd:Lwt_unix.file_descr ->
     ((Block_hash.t * pruned_block) list -> unit tzresult Lwt.t) ->
@@ -200,8 +238,8 @@ module type S = sig
     Lwt.t
 end
 
-module Make (I : Dump_interface) :
-  S
+module Make_legacy (I : Dump_interface) :
+  S_legacy
     with type index := I.index
      and type context := I.context
      and type block_header := I.Block_header.t

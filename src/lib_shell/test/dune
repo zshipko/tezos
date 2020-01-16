@@ -1,7 +1,7 @@
 (executables
- (names test
-        test_locator)
+ (names test_locator test_shell)
  (libraries tezos-base
+            tezos-store
             tezos-storage
             tezos-shell-context
             tezos-p2p
@@ -15,6 +15,7 @@
             tezos-test-services
             alcotest-lwt)
  (flags (:standard -open Tezos_base__TzPervasives
+                   -open Tezos_store
                    -open Tezos_storage
                    -open Tezos_shell_context
                    -open Tezos_protocol_updater
@@ -28,12 +29,11 @@
 
 (alias
  (name buildtest)
- (deps test.exe
-       test_locator.exe))
+ (deps test_shell.exe test_locator.exe))
 
 (alias
  (name runtest_shell)
- (action (run %{exe:test.exe})))
+ (action (run %{exe:test_shell.exe})))
 
 (alias
  (name runtest_locator)
@@ -46,8 +46,7 @@
 (alias
  (name runtest)
  (package tezos-shell)
- (deps (alias runtest_shell)
-       (alias runtest_locator)))
+ (deps (alias runtest_locator) (alias runtest_shell)))
 
 (alias
  (name runtest_lint)

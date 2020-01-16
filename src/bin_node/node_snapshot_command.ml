@@ -52,7 +52,7 @@ module Event = struct
 end
 
 module Term = struct
-  type subcommand = Export | Import
+  type subcommand = Export | Import | Info
 
   let dir_cleaner data_dir =
     Event.(emit cleaning_up_after_failure) data_dir
@@ -61,28 +61,31 @@ module Term = struct
     >>= fun () ->
     Lwt_utils_unix.remove_dir @@ Node_data_version.context_dir data_dir
 
-  let process subcommand args snapshot_file block export_rolling reconstruct
-      sandbox_file =
+  let process subcommand args snapshot_dir block rolling reconstruct
+      sandbox_file import_legacy =
     let run =
       Internal_event_unix.init ()
       >>= fun () ->
       Node_shared_arg.read_and_patch_config_file args
       >>=? fun node_config ->
       let data_dir = node_config.data_dir in
-      let genesis = node_config.blockchain_network.genesis in
+      let ({genesis; chain_name; _} : Node_config_file.blockchain_network) =
+        node_config.blockchain_network
+      in
       match subcommand with
       | Export ->
           Node_data_version.ensure_data_dir data_dir
           >>=? fun () ->
-          let context_root = Node_data_version.context_dir data_dir in
-          let store_root = Node_data_version.store_dir data_dir in
+          let context_dir = Node_data_version.context_dir data_dir in
+          let store_dir = Node_data_version.store_dir data_dir in
           Snapshots.export
-            ~export_rolling
-            ~context_root
-            ~store_root
-            ~genesis
-            snapshot_file
+            ~rolling
+            ~store_dir
+            ~context_dir
+            ~chain_name
             ~block
+            ~snapshot_dir
+            genesis
       | Import ->
           Node_data_version.ensure_data_dir ~bare:true data_dir
           >>=? fun () ->
@@ -105,21 +108,61 @@ module Term = struct
               | Ok json ->
                   return_some ("sandbox_parameter", json) ) )
           >>=? fun sandbox_parameters ->
+          let context_root = Node_data_version.context_dir data_dir in
+          let store_root = Node_data_version.store_dir data_dir in
           let patch_context =
             Patch_context.patch_context genesis sandbox_parameters
           in
-          Snapshots.import
-            ~reconstruct
-            ~patch_context
-            ~data_dir
-            ~dir_cleaner
-            ~genesis
-            ~user_activated_upgrades:
-              node_config.blockchain_network.user_activated_upgrades
-            ~user_activated_protocol_overrides:
-              node_config.blockchain_network.user_activated_protocol_overrides
-            snapshot_file
-            ~block
+          ( if import_legacy then (
+            Format.printf "Importing a legacy snapshot@." ;
+            Snapshots.import_legacy
+              ~patch_context
+              ~store_root
+              ~context_root
+              ~data_dir
+              ~chain_name:
+                (Format.asprintf
+                   "%a"
+                   Distributed_db_version.Name.pp
+                   node_config.blockchain_network.chain_name)
+              ~dir_cleaner
+              ~genesis
+              ~user_activated_upgrades:
+                node_config.blockchain_network.user_activated_upgrades
+              ~user_activated_protocol_overrides:
+                node_config.blockchain_network
+                  .user_activated_protocol_overrides
+              snapshot_dir
+              block )
+          else
+            (* FIXME: what to do with dir_cleaner *)
+            Snapshots.import
+              ~patch_context
+              ~snapshot_dir
+              ~dst_store_dir:store_root
+              ~dst_context_dir:context_root
+              ~user_activated_upgrades:
+                node_config.blockchain_network.user_activated_upgrades
+              ~user_activated_protocol_overrides:
+                node_config.blockchain_network
+                  .user_activated_protocol_overrides
+              ~block
+              genesis )
+          >>=? fun () ->
+          if reconstruct then
+            Reconstruction.reconstruct
+              ~patch_context
+              ~store_root
+              ~context_root
+              ~genesis
+              ~user_activated_upgrades:
+                node_config.blockchain_network.user_activated_upgrades
+              ~user_activated_protocol_overrides:
+                node_config.blockchain_network
+                  .user_activated_protocol_overrides
+          else return_unit
+      | Info ->
+          Snapshots.snapshot_info ~snapshot_dir >>= fun () -> return_unit
     in
     match Lwt_main.run run with
     | Ok () ->
@@ -127,12 +170,16 @@ module Term = struct
     | Error err ->
         `Error (false, Format.asprintf "%a" pp_print_error err)
 
+  open Cmdliner.Arg
+
   let subcommand_arg =
     let parser = function
       | "export" ->
           `Ok Export
       | "import" ->
           `Ok Import
+      | "info" ->
+          `Ok Info
       | s ->
           `Error ("invalid argument: " ^ s)
     and printer ppf = function
@@ -140,8 +187,9 @@ module Term = struct
           Format.fprintf ppf "export"
       | Import ->
           Format.fprintf ppf "import"
+      | Info ->
+          Format.fprintf ppf "info"
     in
-    let open Cmdliner.Arg in
     let doc =
       "Operation to perform. Possible values: $(b,export), $(b,import)."
     in
@@ -149,17 +197,15 @@ module Term = struct
     & pos 0 (some (parser, printer)) None
     & info [] ~docv:"OPERATION" ~doc
 
-  let file_arg =
-    let open Cmdliner.Arg in
-    required & pos 1 (some string) None & info [] ~docv:"FILE"
+  let file_arg = required & pos 1 (some string) None & info [] ~docv:"FILE"
 
   let block =
     let open Cmdliner.Arg in
     let doc =
       "The block to export/import. When exporting, either the block_hash, the \
        level or an alias (such as $(i,caboose), $(i,checkpoint), \
-       $(i,save_point) or $(i,head) in combination with ~ and + operators) \
-       can be used. When importing, only the block hash you are expected to \
+       $(i,savepoint) or $(i,head) in combination with ~ and + operators) can \
+       be used. When importing, only the block hash you are expected to \
        restore is allowed."
     in
     value
@@ -205,11 +251,18 @@ module Term = struct
           ~docv:"FILE.json"
           ["sandbox"])
 
+  let import_legacy =
+    let open Cmdliner in
+    let doc = "Force import command to process a lagacy snapshot file." in
+    Arg.(
+      value & flag
+      & info ~docs:Node_shared_arg.Manpage.misc_section ~doc ["legacy"])
+
   let term =
     let open Cmdliner.Term in
     ret
       ( const process $ subcommand_arg $ Node_shared_arg.Term.args $ file_arg
-      $ block $ export_rolling $ reconstruct $ sandbox )
+      $ block $ export_rolling $ reconstruct $ sandbox $ import_legacy )
 end
 
 module Manpage = struct
@@ -222,7 +275,8 @@ module Manpage = struct
       `P
         "$(b,export) allows to export a snapshot of the current node state \
          into a file.";
-      `P "$(b,import) allows to import a snapshot from a given file." ]
+      `P "$(b,import) allows to import a snapshot from a given file.";
+      `P "$(b,info) displays information about the snapshot file." ]
 
   let options = [`S "OPTIONS"]
 

@@ -166,9 +166,9 @@ module Term = struct
       | "archive" ->
           `Ok Archive
       | "full" ->
-          `Ok Full
-      | "experimental-rolling" ->
-          `Ok Rolling
+          `Ok (Full {offset = default_offset})
+      | "rolling" ->
+          `Ok (Rolling {offset = default_offset})
       | s ->
           `Error s),
       pp )
@@ -208,12 +208,11 @@ module Term = struct
   let history_mode =
     let doc =
       "Set the mode for the chain's data history storage. Possible values are \
-       $(i,archive), $(i,full) (default), $(i,experimental-rolling). Archive \
-       mode retains all data since the genesis block. Full mode only \
-       maintains block headers and operations allowing replaying the chain \
-       since the genesis if wanted. (Experimental-)Rolling mode retains only \
-       the most recent data (i.e. from the 5 last cycles) and deletes the \
-       rest."
+       $(i,archive), $(i,full) (default), $(i,rolling). Archive mode retains \
+       all data since the genesis block. Full mode only maintains block \
+       headers and operations allowing replaying the chain since the genesis \
+       if wanted. Rolling mode retains only the most recent data (i.e. from \
+       the 5 last cycles) and deletes the rest."
     in
     Arg.(
       value

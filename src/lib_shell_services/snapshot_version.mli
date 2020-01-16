@@ -1,8 +1,8 @@
 (*****************************************************************************)
 (*                                                                           *)
 (* Open Source License                                                       *)
-(* Copyright (c) 2019 Dynamic Ledger Solutions, Inc. <contact@tezos.com>     *)
-(* Copyright (c) 2019 Nomadic Labs. <nomadic@tezcore.com>                    *)
+(* Copyright (c) 2018-2019 Dynamic Ledger Solutions, Inc. <contact@tezos.com>*)
+(* Copyright (c) 2018-2019 Nomadic Labs. <nomadic@tezcore.com>               *)
 (*                                                                           *)
 (* Permission is hereby granted, free of charge, to any person obtaining a   *)
 (* copy of this software and associated documentation files (the "Software"),*)
@@ -24,34 +24,32 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-type error += Cannot_reconstruct of History_mode.t
+(* Mainnet version is "tezos-snapshot-1.0.0".
+   It is not necessary to update the current_version if it is
+   already greater than mainnet version.
+   This comment should be updated every time a mainnet release is done.
+*)
 
-val export :
-  ?export_rolling:bool ->
-  context_root:string ->
-  store_root:string ->
-  genesis:Genesis.t ->
-  string ->
-  block:string option ->
-  unit tzresult Lwt.t
+(* Snapshot metadata v2.0.0 *)
+(* Includes :
+ *    - History_mode
+ *    - Contained Block_hash, timestamp and level
+ *    - Elements (context, store) *)
 
-val import :
-  ?reconstruct:bool ->
-  ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->
-  data_dir:string ->
-  user_activated_upgrades:User_activated.upgrades ->
-  user_activated_protocol_overrides:User_activated.protocol_overrides ->
-  dir_cleaner:(string -> unit Lwt.t) ->
-  genesis:Genesis.t ->
-  string ->
-  block:string option ->
-  unit tzresult Lwt.t
+val current_version : string
 
-val reconstruct :
-  Chain_id.t ->
-  user_activated_upgrades:User_activated.upgrades ->
-  user_activated_protocol_overrides:User_activated.protocol_overrides ->
-  Store.t ->
-  State.Chain.t ->
-  Context.index ->
-  unit tzresult Lwt.t
+type metadata_v_2_0_0 = {
+  snapshot_version : string;
+  chain_name : Distributed_db_version.Name.t;
+  history_mode : History_mode.t;
+  block_hash : Block_hash.t;
+  level : Int32.t;
+  timestamp : Time.Protocol.t;
+  context_elements : int;
+}
+
+and metadata = metadata_v_2_0_0
+
+val metadata_encoding : metadata Data_encoding.t
+
+val metadata_pp : Format.formatter -> metadata -> unit

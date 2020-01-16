@@ -141,7 +141,7 @@ end)
 end
 
 module Fake_operation_storage = struct
-  type store = State.Chain.t
+  type store = Store.chain_store
 
   type value = Operation.t
 
@@ -172,18 +172,19 @@ module Raw_operation =
     end)
 
 module Block_header_storage = struct
-  type store = State.Chain.t
+  type store = Store.chain_store
 
   type value = Block_header.t
 
-  let known = State.Block.known_valid
+  let known = Store.Block.is_known_valid
 
-  let read chain_state h =
-    State.Block.read chain_state h >>=? fun b -> return (State.Block.header b)
+  let read chain_store h =
+    Store.Block.read_block chain_store h
+    >>=? fun b -> return (Store.Block.header b)
 
-  let read_opt chain_state h =
-    State.Block.read_opt chain_state h
-    >>= fun b -> Lwt.return (Option.map ~f:State.Block.header b)
+  let read_opt chain_store h =
+    Store.Block.read_block_opt chain_store h
+    >>= fun b -> Lwt.return (Option.map ~f:Store.Block.header b)
 end
 
 module Raw_block_header =
@@ -206,25 +207,26 @@ module Raw_block_header =
     end)
 
 module Operation_hashes_storage = struct
-  type store = State.Chain.t
+  type store = Store.chain_store
 
   type value = Operation_hash.t list
 
-  let known chain_state (h, _) = State.Block.known_valid chain_state h
+  let known chain_store (h, _) = Store.Block.is_known_valid chain_store h
 
-  let read chain_state (h, i) =
-    State.Block.read chain_state h
+  let read chain_store (h, i) =
+    Store.Block.read_block chain_store h
     >>=? fun b ->
-    State.Block.operation_hashes b i >>= fun (ops, _) -> return ops
+    let (ops, _) = Store.Block.operations_hashes_path b i in
+    return ops
 
-  let read_opt chain_state (h, i) =
-    State.Block.read_opt chain_state h
+  let read_opt chain_store (h, i) =
+    Store.Block.read_block_opt chain_store h
     >>= function
     | None ->
         Lwt.return_none
     | Some b ->
-        State.Block.operation_hashes b i
-        >>= fun (ops, _) -> Lwt.return_some ops
+        let (ops, _) = Store.Block.operations_hashes_path b i in
+        Lwt.return_some ops
 end
 
 module Operations_table = Hashtbl.Make (struct
@@ -290,23 +292,25 @@ module Raw_operation_hashes = struct
 end
 
 module Operations_storage = struct
-  type store = State.Chain.t
+  type store = Store.chain_store
 
   type value = Operation.t list
 
-  let known chain_state (h, _) = State.Block.known_valid chain_state h
+  let known chain_store (h, _) = Store.Block.is_known_valid chain_store h
 
-  let read chain_state (h, i) =
-    State.Block.read chain_state h
-    >>=? fun b -> State.Block.operations b i >>= fun (ops, _) -> return ops
+  let read chain_store (h, i) =
+    Store.Block.read_block chain_store h
+    >>=? fun b ->
+    let ops = List.nth (Store.Block.operations b) i in
+    return ops
 
-  let read_opt chain_state (h, i) =
-    State.Block.read_opt chain_state h
+  let read_opt chain_store (h, i) =
+    Store.Block.read_block_opt chain_store h
     >>= function
     | None ->
         Lwt.return_none
     | Some b ->
-        State.Block.operations b i >>= fun (ops, _) -> Lwt.return_some ops
+        Lwt.return (List.nth_opt (Store.Block.operations b) i)
 end
 
 module Raw_operations = struct
@@ -364,15 +368,18 @@ module Raw_operations = struct
 end
 
 module Protocol_storage = struct
-  type store = State.t
+  type store = Store.store
 
   type value = Protocol.t
 
-  let known = State.Protocol.known
+  let known store ph = Lwt.return (Store.Protocol.is_protocol_stored store ph)
 
-  let read = State.Protocol.read
+  let read_opt store ph = Store.Protocol.read_protocol store ph
 
-  let read_opt = State.Protocol.read_opt
+  let read store ph =
+    read_opt store ph
+    >>= function
+    | None -> Lwt.return (Error_monad.error_exn Not_found) | Some p -> return p
 end
 
 module Raw_protocol =

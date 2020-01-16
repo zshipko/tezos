@@ -59,9 +59,9 @@ module Seq_validator = struct
 
   let close _ = lwt_emit Close
 
-  let apply_block validator_process chain_state ~max_operations_ttl
+  let apply_block validator_process chain_store ~max_operations_ttl
       ~(predecessor_block_header : Block_header.t) ~block_header operations =
-    let chain_id = State.Chain.id chain_state in
+    let chain_id = Store.Chain.chain_id chain_store in
     get_context
       validator_process.context_index
       predecessor_block_header.shell.context
@@ -262,49 +262,51 @@ let close = function
   | External vp ->
       External_validator.close vp
 
-let apply_block bvp ~predecessor block_header operations =
-  let chain_state = State.Block.chain_state predecessor in
-  let predecessor_block_header = State.Block.header predecessor in
-  State.Block.max_operations_ttl predecessor
-  >>=? fun max_operations_ttl ->
-  let block_hash = Block_header.hash block_header in
-  Chain.data chain_state
-  >>= (fun chain_data ->
-        if State.Block.equal chain_data.current_head predecessor then
-          return (chain_data.live_blocks, chain_data.live_operations)
-        else Chain_traversal.live_blocks predecessor max_operations_ttl)
-  >>=? fun (live_blocks, live_operations) ->
-  Block_validation.check_liveness
-    ~live_operations
-    ~live_blocks
-    block_hash
-    operations
-  >>=? fun () ->
-  match bvp with
-  | Sequential vp ->
-      Seq_validator.apply_block
-        vp
-        ~max_operations_ttl
-        chain_state
-        ~predecessor_block_header
-        ~block_header
-        operations
-  | External vp ->
-      let chain_id = State.Chain.id chain_state in
-      let request =
-        External_validation.Validate
-          {
-            chain_id;
-            block_header;
-            predecessor_block_header;
-            operations;
-            max_operations_ttl;
-          }
+let apply_block bvp chain_store ~predecessor block_header operations =
+  let predecessor_block_header = Store.Block.header predecessor in
+  Store.Block.get_block_metadata_opt chain_store predecessor
+  >>= function
+  | None ->
+      Lwt.fail_with "apply_block: could not retrieve metadata"
+  | Some predecessor_metadata -> (
+      let max_operations_ttl =
+        Store.Block.max_operations_ttl predecessor_metadata
       in
-      External_validator.send_request
-        vp
-        request
-        Block_validation.result_encoding
+      let block_hash = Block_header.hash block_header in
+      Store.Chain.compute_live_blocks chain_store ~block:predecessor
+      >>=? fun (live_blocks, live_operations) ->
+      Block_validation.check_liveness
+        ~live_operations
+        ~live_blocks
+        block_hash
+        operations
+      >>= (function Error _ as err -> Lwt.return err | Ok () -> return_unit)
+      >>=? fun () ->
+      match bvp with
+      | Sequential vp ->
+          Seq_validator.apply_block
+            vp
+            ~max_operations_ttl
+            chain_store
+            ~predecessor_block_header
+            ~block_header
+            operations
+      | External vp ->
+          let chain_id = Store.Chain.chain_id chain_store in
+          let request =
+            External_validation.Validate
+              {
+                chain_id;
+                block_header;
+                predecessor_block_header;
+                operations;
+                max_operations_ttl;
+              }
+          in
+          External_validator.send_request
+            vp
+            request
+            Block_validation.result_encoding )
 
 let commit_genesis bvp ~chain_id =
   match bvp with
@@ -318,11 +320,11 @@ let commit_genesis bvp ~chain_id =
       let request = External_validation.Commit_genesis {chain_id} in
       External_validator.send_request vp request Context_hash.encoding
 
-let init_test_chain bvp forking_block =
-  let forked_header = State.Block.header forking_block in
+let init_test_chain bvp chain_store forking_block =
+  let forked_header = Store.Block.header forking_block in
   match bvp with
   | Sequential _ ->
-      State.Block.context forking_block
+      Store.Block.context chain_store forking_block
       >>=? fun context ->
       Block_validation.init_test_chain context forked_header
   | External vp ->

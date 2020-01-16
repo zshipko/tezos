@@ -67,18 +67,16 @@ let chain_id = Chain_id.of_block_hash genesis_block_hash
 (** [init_chain base_dir] with working directory [base_dir] returns a new state
    with a single genesis block *)
 let init_chain base_dir =
-  let store_root = base_dir // "store" in
-  let context_root = base_dir // "context" in
-  State.init
-    ~store_root
-    ~context_root
+  let store_dir = base_dir // "store" in
+  let context_dir = base_dir // "context" in
+  Store.init
+    ~store_dir
+    ~context_dir
     ~history_mode:Archive
+    ~allow_testchains:true
     state_genesis_block
   >>= function
-  | Error _ ->
-      Stdlib.failwith "read err"
-  | Ok (state, chain, index, history_mode) ->
-      Lwt.return (state, chain, index, history_mode)
+  | Error _ -> Stdlib.failwith "read err" | Ok store -> Lwt.return store
 
 (** [init_mock_p2p] initializes a mock p2p *)
 let init_mock_p2p chain_name =

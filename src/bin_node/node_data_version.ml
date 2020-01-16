@@ -49,8 +49,9 @@ let version_file_name = "version.json"
  *  - 0.0.1 : original storage
  *  - 0.0.2 : never released
  *  - 0.0.3 : store upgrade (introducing history mode)
- *  - 0.0.4 : context upgrade (switching from LMDB to IRMIN v2) *)
-let data_version = "0.0.4"
+ *  - 0.0.4 : context upgrade (switching from LMDB to IRMIN v2)
+ *  - 0.0.5 : store upgrade (switching from LMDB) *)
+let data_version = "0.0.5"
 
 (* List of upgrade functions from each still supported previous
    version to the current [data_version] above. If this list grows too
@@ -58,9 +59,10 @@ let data_version = "0.0.4"
    converter), and to sequence them dynamically instead of
    statically. *)
 let upgradable_data_version =
-  [ ( "0.0.3",
-      fun ~data_dir ->
-        Context.upgrade_0_0_3 ~context_dir:(context_dir data_dir) ) ]
+  [ ( "0.0.4",
+      fun ~data_dir genesis ~chain_name ->
+        let patch_context = Some (Patch_context.patch_context genesis None) in
+        Legacy.upgrade_0_0_4 ~data_dir genesis patch_context ~chain_name ) ]
 
 let version_encoding = Data_encoding.(obj1 (req "version" string))
 
@@ -94,7 +96,8 @@ let () =
       Format.fprintf
         ppf
         "Invalid data directory version '%s' (expected '%s').@,\
-         Your data directory is outdated and cannot be automatically upgraded."
+         Your data directory is incompatible and cannot be automatically \
+         upgraded."
         got
         exp)
     Data_encoding.(
@@ -240,7 +243,7 @@ let ensure_data_dir bare data_dir =
       | exc ->
           raise exc)
 
-let upgrade_data_dir data_dir =
+let upgrade_data_dir ~data_dir genesis ~chain_name =
   ensure_data_dir false data_dir
   >>=? function
   | None ->
@@ -248,11 +251,12 @@ let upgrade_data_dir data_dir =
   | Some (version, upgrade) -> (
       lwt_emit (Upgrading_node (version, data_version))
       >>= fun () ->
-      upgrade ~data_dir
+      upgrade ~data_dir genesis ~chain_name
       >>= function
-      | Ok () ->
+      | Ok success_message ->
           write_version_file data_dir
-          >>=? fun () -> lwt_emit Update_success >>= fun () -> return_unit
+          >>=? fun () ->
+          lwt_emit (Upgrade_success success_message) >>= fun () -> return_unit
       | Error e ->
           Format.kasprintf
             (fun errs -> lwt_emit (Aborting_upgrade errs))

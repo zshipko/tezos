@@ -1,7 +1,7 @@
 (*****************************************************************************)
 (*                                                                           *)
 (* Open Source License                                                       *)
-(* Copyright (c) 2019 Nomadic Labs. <contact@tezcore.com>                    *)
+(* Copyright (c) 2019-2020 Nomadic Labs. <contact@tezcore.com>               *)
 (*                                                                           *)
 (* Permission is hereby granted, free of charge, to any person obtaining a   *)
 (* copy of this software and associated documentation files (the "Software"),*)
@@ -23,25 +23,94 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-type t = Archive | Full | Rolling
+type additional_cycles = {offset : int}
+
+type t = Archive | Full of additional_cycles | Rolling of additional_cycles
+
+let default_offset = 5
+
+let default = Full {offset = default_offset}
 
 let encoding =
-  Data_encoding.string_enum
-    [("archive", Archive); ("full", Full); ("rolling", Rolling)]
+  let open Data_encoding in
+  let additional_cycles_encoding =
+    obj1
+      (req
+         ~title:"additional cycles"
+         ~description:
+           (Format.sprintf
+              "Number of additional cycles preserved below the savepoint. By \
+               default: %d additional cycles will be stored."
+              default_offset)
+         "additional_cycles"
+         int31)
+  in
+  def
+    "history_mode"
+    ~title:"history mode"
+    ~description:"Storage mode for the Tezos shell."
+    (union
+       ~tag_size:`Uint8
+       [ case
+           ~title:"archive"
+           ~description:
+             "Archive mode retains every block and operations since the \
+              genesis block including their metadata and their associated \
+              contexts."
+           (Tag 0)
+           (constant "archive")
+           (function Archive -> Some () | _ -> None)
+           (fun () -> Archive);
+         case
+           ~title:"full"
+           ~description:
+             "Full mode retains every block and operations since the genesis \
+              block but periodically prunes older blocks' metadata to reduce \
+              the storage size."
+           (Tag 1)
+           (obj1 (req "full" additional_cycles_encoding))
+           (function Full {offset} -> Some offset | _ -> None)
+           (fun offset -> Full {offset});
+         case
+           ~title:"rolling"
+           ~description:
+             "Rolling mode only retain the most recent cycles by periodically \
+              periodically discarding older blocks to reduce the storage size."
+           (Tag 2)
+           (obj1 (req "rolling" additional_cycles_encoding))
+           (function Rolling {offset} -> Some offset | _ -> None)
+           (fun offset -> Rolling {offset}) ])
 
 let equal hm1 hm2 =
   match (hm1, hm2) with
-  | (Archive, Archive) | (Full, Full) | (Rolling, Rolling) ->
+  | (Archive, Archive) ->
       true
-  | (Archive, _) | (Full, _) | (Rolling, _) ->
+  | (Full {offset}, Full {offset = offset'})
+  | (Rolling {offset}, Rolling {offset = offset'}) ->
+      Compare.Int.(offset = offset')
+  | _ ->
       false
 
 let pp ppf = function
   | Archive ->
+      Format.fprintf ppf "Archive mode"
+  | Full {offset} ->
+      Format.fprintf
+        ppf
+        "Full mode%s"
+        (if offset = 0 then "" else Format.sprintf " + %d extra cycles" offset)
+  | Rolling {offset} ->
+      Format.fprintf
+        ppf
+        "Rolling mode%s"
+        (if offset = 0 then "" else Format.sprintf " + %d extra cycles" offset)
+
+let pp_short ppf = function
+  | Archive ->
       Format.fprintf ppf "archive"
-  | Full ->
+  | Full _ ->
       Format.fprintf ppf "full"
-  | Rolling ->
+  | Rolling _ ->
       Format.fprintf ppf "rolling"
 
 let tag = Tag.def "history_mode" pp

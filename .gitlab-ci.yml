@@ -1,7 +1,7 @@
 variables:
   ## Please update `scripts/version.sh` accordingly
-  build_deps_image_version: 8605138b07c44ed063d5bee3143a0b8c2bd9d346
-  build_deps_image_name: registry.gitlab.com/tezos/opam-repository
+  build_deps_image_version: 5bf955c2fefa0a6ab812e22c59b8b45bbe37cce8
+  build_deps_image_name: registry.gitlab.com/nomadic-labs/opam-repository
   public_docker_image_name: docker.io/${CI_PROJECT_PATH}
   GIT_STRATEGY: fetch
   GIT_DEPTH: "1"
@@ -94,25 +94,10 @@ build:
 
 # this section is updated using the script scripts/update_unit_test.sh
 ##BEGIN_UNITEST##
-unit:shell:
+unit:stdlib:
   <<: *test_definition
   script:
-    - dune build @src/lib_shell/runtest
-
-unit:client_base:
-  <<: *test_definition
-  script:
-    - dune build @src/lib_client_base/runtest
-
-unit:requester:
-  <<: *test_definition
-  script:
-    - dune build @src/lib_requester/runtest
-
-unit:error_monad:
-  <<: *test_definition
-  script:
-    - dune build @src/lib_error_monad/runtest
+    - dune build @src/lib_stdlib/runtest
 
 unit:src/proto_006_PsCARTHA/lib_client:
   <<: *test_definition
@@ -124,6 +109,46 @@ unit:src/proto_006_PsCARTHA/lib_protocol:
   script:
     - dune build @src/proto_006_PsCARTHA/lib_protocol/runtest
 
+unit:p2p:
+  <<: *test_definition
+  script:
+    - dune build @src/lib_p2p/runtest
+
+unit:shell:
+  <<: *test_definition
+  script:
+    - dune build @src/lib_shell/runtest
+
+unit:signer_backends:
+  <<: *test_definition
+  script:
+    - dune build @src/lib_signer_backends/runtest
+
+unit:signer_backends/unix:
+  <<: *test_definition
+  script:
+    - dune build @src/lib_signer_backends/unix/runtest
+
+unit:src/bin_client:
+  <<: *test_definition
+  script:
+    - dune build @src/bin_client/runtest
+
+unit:client_base:
+  <<: *test_definition
+  script:
+    - dune build @src/lib_client_base/runtest
+
+unit:store:
+  <<: *test_definition
+  script:
+    - dune build @src/lib_store/runtest
+
+unit:protocol_environment:
+  <<: *test_definition
+  script:
+    - dune build @src/lib_protocol_environment/runtest
+
 unit:src/proto_alpha/lib_client:
   <<: *test_definition
   script:
@@ -134,71 +159,45 @@ unit:src/proto_alpha/lib_protocol:
   script:
     - dune build @src/proto_alpha/lib_protocol/runtest
 
-unit:crypto:
+unit:requester:
   <<: *test_definition
   script:
-    - dune build @src/lib_crypto/runtest
-
-unit:stdlib:
-  <<: *test_definition
-  script:
-    - dune build @src/lib_stdlib/runtest
+    - dune build @src/lib_requester/runtest
 
 unit:storage:
   <<: *test_definition
   script:
     - dune build @src/lib_storage/runtest
 
-unit:p2p:
+unit:error_monad:
   <<: *test_definition
   script:
-    - dune build @src/lib_p2p/runtest
+    - dune build @src/lib_error_monad/runtest
+
+unit:crypto:
+  <<: *test_definition
+  script:
+    - dune build @src/lib_crypto/runtest
 
 unit:micheline:
   <<: *test_definition
   script:
     - dune build @src/lib_micheline/runtest
 
-unit:protocol_environment:
-  <<: *test_definition
-  script:
-    - dune build @src/lib_protocol_environment/runtest
-
-unit:signer_backends/unix:
-  <<: *test_definition
-  script:
-    - dune build @src/lib_signer_backends/unix/runtest
-
-unit:signer_backends:
-  <<: *test_definition
-  script:
-    - dune build @src/lib_signer_backends/runtest
-
-unit:src/bin_client:
-  <<: *test_definition
-  script:
-    - dune build @src/bin_client/runtest
-
-unit:ocaml-uecc:
-  <<: *test_definition
-  script:
-    - dune build @vendors/ocaml-uecc/runtest
-
 unit:ocaml-ledger-wallet:
   <<: *test_definition
   script:
     - dune build @vendors/ocaml-ledger-wallet/runtest
 
-unit:ocaml-secp256k1:
+unit:ocaml-blake2:
   <<: *test_definition
   script:
-    - dune build @vendors/ocaml-secp256k1/runtest
+    - dune build @vendors/ocaml-blake2/runtest
 
 unit:ocaml-lmdb:
   <<: *test_definition
   script:
     - dune build @vendors/ocaml-lmdb/runtest
-
 
 ##END_UNITEST##
 
@@ -1100,6 +1099,11 @@ opam:tezos-storage:
   <<: *opam_definition
   variables:
     package: tezos-storage
+
+opam:tezos-store:
+  <<: *opam_definition
+  variables:
+    package: tezos-store
 
 opam:tezos-test-services:
   <<: *opam_definition

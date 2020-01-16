@@ -43,8 +43,8 @@ val fetch_and_compile_protocols :
   t ->
   ?peer:P2p_peer.Id.t ->
   ?timeout:Ptime.Span.t ->
-  State.Block.t ->
+  Store.Block.t ->
   unit tzresult Lwt.t
 
 val prefetch_and_compile_protocols :
-  t -> ?peer:P2p_peer.Id.t -> ?timeout:Ptime.Span.t -> State.Block.t -> unit
+  t -> ?peer:P2p_peer.Id.t -> ?timeout:Ptime.Span.t -> Store.Block.t -> unit

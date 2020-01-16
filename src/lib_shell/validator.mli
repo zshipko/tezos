@@ -29,7 +29,7 @@
 type t
 
 val create :
-  State.t ->
+  Store.t ->
   Distributed_db.t ->
   Peer_validator.limits ->
   Block_validator.limits ->
@@ -46,7 +46,7 @@ val activate :
   t ->
   start_prevalidator:bool ->
   validator_process:Block_validator_process.t ->
-  State.Chain.t ->
+  Store.chain_store ->
   Chain_validator.t tzresult Lwt.t
 
 val get : t -> Chain_id.t -> Chain_validator.t tzresult
@@ -62,10 +62,10 @@ val validate_block :
   ?chain_id:Chain_id.t ->
   Bytes.t ->
   Operation.t list list ->
-  (Block_hash.t * State.Block.t option tzresult Lwt.t) tzresult Lwt.t
+  (Block_hash.t * Store.Block.t option tzresult Lwt.t) tzresult Lwt.t
 
 (** Monitor all the valid block (for all activate chains). *)
-val watcher : t -> State.Block.t Lwt_stream.t * Lwt_watcher.stopper
+val watcher : t -> Store.Block.t Lwt_stream.t * Lwt_watcher.stopper
 
 val chains_watcher :
   t -> (Chain_id.t * bool) Lwt_stream.t * Lwt_watcher.stopper

@@ -23,12 +23,20 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-type t = Archive | Full | Rolling
+type additional_cycles = {offset : int}
+
+type t = Archive | Full of additional_cycles | Rolling of additional_cycles
+
+val default_offset : int
+
+val default : t
 
 val encoding : t RPC_encoding.t
 
 val equal : t -> t -> bool
 
 val pp : Format.formatter -> t -> unit
+
+val pp_short : Format.formatter -> t -> unit
 
 val tag : t Tag.def

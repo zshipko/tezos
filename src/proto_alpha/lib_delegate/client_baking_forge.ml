@@ -366,7 +366,7 @@ let trim_manager_operations ~max_size ~hard_gas_limit_per_block
     - 1 -> Votes and proposals
     - 2 -> Anonymous operations
     - 3 -> High-priority manager operations.
-    Returns two list :
+      Returns two list :
     - A desired set of operations to be included
     - Potentially overflowing operations *)
 let classify_operations (cctxt : #Protocol_client_context.full) ~chain ~block
@@ -853,7 +853,7 @@ let forge_block cctxt ?force ?operations ?(best_effort = operations = None)
       let context =
         Shell_context.unwrap_disk_context validation_result.context
       in
-      Context.get_protocol context
+      Context.get_protocol_exn context
       >>= fun next_protocol ->
       if Protocol_hash.equal current_protocol next_protocol then
         finalize_block_header
@@ -1222,7 +1222,7 @@ let build_block cctxt ~user_activated_upgrades state seed_nonce_hash
             let context =
               Shell_context.unwrap_disk_context validation_result.context
             in
-            Context.get_protocol context
+            Context.get_protocol_exn context
             >>= fun next_protocol ->
             if Protocol_hash.equal current_protocol next_protocol then
               finalize_block_header

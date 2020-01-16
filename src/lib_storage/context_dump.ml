@@ -25,9 +25,6 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-let current_version = "tezos-snapshot-1.0.0"
-
-(*****************************************************************************)
 module type Dump_interface = sig
   type index
 
@@ -83,6 +80,10 @@ module type Dump_interface = sig
     val of_bytes : Bytes.t -> t option
 
     val header : t -> Block_header.t
+
+    val operations : t -> Operation.t list list
+
+    val predecessor_header : t -> Block_header.t
 
     val encoding : t Data_encoding.t
   end
@@ -157,7 +158,31 @@ module type S = sig
 
   type protocol_data
 
-  val dump_contexts_fd :
+  val dump_context_fd :
+    index -> block_data -> context_fd:Lwt_unix.file_descr -> int tzresult Lwt.t
+
+  val restore_context_fd :
+    index ->
+    ?expected_block:string ->
+    fd:Lwt_unix.file_descr ->
+    metadata:Snapshot_version.metadata ->
+    block_data tzresult Lwt.t
+end
+
+module type S_legacy = sig
+  type index
+
+  type context
+
+  type block_header
+
+  type block_data
+
+  type pruned_block
+
+  type protocol_data
+
+  val dump_context_fd :
     index ->
     block_header
     * block_data
@@ -167,7 +192,7 @@ module type S = sig
     fd:Lwt_unix.file_descr ->
     unit tzresult Lwt.t
 
-  val restore_contexts_fd :
+  val restore_context_fd :
     index ->
     fd:Lwt_unix.file_descr ->
     ((Block_hash.t * pruned_block) list -> unit tzresult Lwt.t) ->
@@ -202,6 +227,8 @@ type error += Missing_snapshot_data
 type error += Invalid_snapshot_version of string * string
 
 type error += Restore_context_failure
+
+type error += Inconsistent_imported_block of Block_hash.t * Block_hash.t
 
 let () =
   let open Data_encoding in
@@ -321,9 +348,367 @@ let () =
       Format.fprintf ppf "Internal error while restoring the context.")
     empty
     (function Restore_context_failure -> Some () | _ -> None)
-    (fun () -> Restore_context_failure)
+    (fun () -> Restore_context_failure) ;
+  register_error_kind
+    `Permanent
+    ~id:"InconsistentImportedBlock"
+    ~title:"Inconsistent imported block"
+    ~description:"The imported block is not the expected one."
+    ~pp:(fun ppf (got, exp) ->
+      Format.fprintf
+        ppf
+        "The block contained in the file is %a instead of %a."
+        Block_hash.pp
+        got
+        Block_hash.pp
+        exp)
+    (obj2
+       (req "block_hash" Block_hash.encoding)
+       (req "block_hash_expected" Block_hash.encoding))
+    (function
+      | Inconsistent_imported_block (got, exp) -> Some (got, exp) | _ -> None)
+    (fun (got, exp) -> Inconsistent_imported_block (got, exp))
 
 module Make (I : Dump_interface) = struct
+  type command =
+    | Root of {block_data : I.Block_data.t}
+    | Node of (string * I.hash) list
+    | Blob of string
+    | Eoc of {info : I.commit_info; parents : I.Commit_hash.t list}
+    | Eof
+
+  (* Command encoding. *)
+
+  let blob_encoding =
+    let open Data_encoding in
+    case
+      ~title:"blob"
+      (Tag (Char.code 'b'))
+      string
+      (function Blob string -> Some string | _ -> None)
+      (function string -> Blob string)
+
+  let node_encoding =
+    let open Data_encoding in
+    case
+      ~title:"node"
+      (Tag (Char.code 'n'))
+      (list (obj2 (req "name" string) (req "hash" I.hash_encoding)))
+      (function Node x -> Some x | _ -> None)
+      (function x -> Node x)
+
+  let eof_encoding =
+    let open Data_encoding in
+    case
+      ~title:"eof"
+      (Tag (Char.code 'e'))
+      empty
+      (function Eof -> Some () | _ -> None)
+      (fun () -> Eof)
+
+  let root_encoding =
+    let open Data_encoding in
+    case
+      ~title:"root"
+      (Tag (Char.code 'r'))
+      (obj1 (req "block_data" I.Block_data.encoding))
+      (function Root {block_data} -> Some block_data | _ -> None)
+      (fun block_data -> Root {block_data})
+
+  let eoc_encoding =
+    let open Data_encoding in
+    case
+      ~title:"eoc"
+      (Tag (Char.code 'c'))
+      (obj2
+         (req "info" I.commit_info_encoding)
+         (req "parents" (list I.Commit_hash.encoding)))
+      (function Eoc {info; parents} -> Some (info, parents) | _ -> None)
+      (fun (info, parents) -> Eoc {info; parents})
+
+  let command_encoding =
+    Data_encoding.union
+      ~tag_size:`Uint8
+      [blob_encoding; node_encoding; eoc_encoding; root_encoding; eof_encoding]
+
+  (* IO toolkit. *)
+
+  let rec read_string rbuf ~len =
+    let (fd, buf, ofs, total) = !rbuf in
+    if Bytes.length buf - ofs < len then (
+      let blen = Bytes.length buf - ofs in
+      let neu = Bytes.create (blen + 1_000_000) in
+      Bytes.blit buf ofs neu 0 blen ;
+      Lwt_unix.read fd neu blen 1_000_000
+      >>= fun bread ->
+      total := !total + bread ;
+      if bread = 0 then fail Inconsistent_snapshot_file
+      else
+        let neu =
+          if bread <> 1_000_000 then Bytes.sub neu 0 (blen + bread) else neu
+        in
+        rbuf := (fd, neu, 0, total) ;
+        read_string rbuf ~len )
+    else
+      let res = Bytes.sub_string buf ofs len in
+      rbuf := (fd, buf, ofs + len, total) ;
+      return res
+
+  let read_mbytes rbuf b =
+    read_string rbuf ~len:(Bytes.length b)
+    >>=? fun string ->
+    Bytes.blit_string string 0 b 0 (Bytes.length b) ;
+    return ()
+
+  let set_int64 buf i =
+    let b = Bytes.create 8 in
+    EndianBytes.BigEndian.set_int64 b 0 i ;
+    Buffer.add_bytes buf b
+
+  let get_int64 rbuf =
+    read_string ~len:8 rbuf
+    >>=? fun s -> return @@ EndianString.BigEndian.get_int64 s 0
+
+  let set_mbytes buf b =
+    set_int64 buf (Int64.of_int (Bytes.length b)) ;
+    Buffer.add_bytes buf b
+
+  let get_mbytes rbuf =
+    get_int64 rbuf >>|? Int64.to_int
+    >>=? fun l ->
+    let b = Bytes.create l in
+    read_mbytes rbuf b >>=? fun () -> return b
+
+  (* Getter and setters *)
+
+  let get_command rbuf =
+    get_mbytes rbuf
+    >>|? fun bytes -> Data_encoding.Binary.of_bytes_exn command_encoding bytes
+
+  let set_root buf block_data =
+    let root = Root {block_data} in
+    let bytes = Data_encoding.Binary.to_bytes_exn command_encoding root in
+    set_mbytes buf bytes
+
+  let set_node buf contents =
+    let bytes =
+      Data_encoding.Binary.to_bytes_exn command_encoding (Node contents)
+    in
+    set_mbytes buf bytes
+
+  let set_blob buf data =
+    let bytes =
+      Data_encoding.Binary.to_bytes_exn command_encoding (Blob data)
+    in
+    set_mbytes buf bytes
+
+  let set_eoc buf info parents =
+    let eoc = Eoc {info; parents} in
+    let bytes = Data_encoding.Binary.to_bytes_exn command_encoding eoc in
+    set_mbytes buf bytes
+
+  (* let _set_pblock buf pruned_block =
+   *   let pblock = Pblock pruned_block in
+   *   let bytes = Data_encoding.Binary.to_bytes_exn command_encoding pblock in
+   *   set_mbytes buf bytes
+   *
+   * let _set_pdata buf protocol_data =
+   *   let pdata = Pdata protocol_data in
+   *   let bytes = Data_encoding.Binary.to_bytes_exn command_encoding pdata in
+   *   set_mbytes buf bytes *)
+
+  let set_end buf =
+    let bytes = Data_encoding.Binary.to_bytes_exn command_encoding Eof in
+    set_mbytes buf bytes
+
+  let dump_context_fd idx block_data ~context_fd =
+    (* Dumping *)
+    let buf = Buffer.create 1_000_000 in
+    let written = ref 0 in
+    let flush fd () =
+      let contents = Buffer.contents buf in
+      Buffer.clear buf ;
+      written := !written + String.length contents ;
+      Lwt_utils_unix.write_string fd contents
+    in
+    let maybe_flush fd () =
+      if Buffer.length buf > 500_000 then flush fd () else Lwt.return_unit
+    in
+    (* Noticing the visited hashes *)
+    let visited_hash = Hashtbl.create 1000 in
+    let visited h = Hashtbl.mem visited_hash h in
+    let set_visit h = Hashtbl.add visited_hash h () in
+    (* Folding through a node *)
+    let fold_tree_path ctxt tree notify =
+      let elements = ref 0 in
+      let rec fold_tree_path ctxt tree =
+        I.tree_list tree
+        >>= fun keys ->
+        let keys = List.sort (fun (a, _) (b, _) -> String.compare a b) keys in
+        Lwt_list.map_s
+          (fun (name, kind) ->
+            I.sub_tree tree [name]
+            >>= function
+            | None ->
+                assert false
+            | Some sub_tree ->
+                let hash = I.tree_hash sub_tree in
+                ( if visited hash then Lwt.return_unit
+                else
+                  notify ()
+                  >>= fun () ->
+                  incr elements ;
+                  set_visit hash ;
+                  (* There cannot be a cycle *)
+                  match kind with
+                  | `Node ->
+                      fold_tree_path ctxt sub_tree
+                  | `Contents -> (
+                      I.tree_content sub_tree
+                      >>= function
+                      | None ->
+                          assert false
+                      | Some data ->
+                          set_blob buf data ; maybe_flush context_fd () ) )
+                >|= fun () -> (name, hash))
+          keys
+        >>= fun sub_keys -> set_node buf sub_keys ; maybe_flush context_fd ()
+      in
+      fold_tree_path ctxt tree >>= fun () -> Lwt.return !elements
+    in
+    Lwt.catch
+      (fun () ->
+        let pred_block_header = I.Block_data.predecessor_header block_data in
+        I.get_context idx pred_block_header
+        >>= function
+        | None ->
+            fail
+            @@ Context_not_found (I.Block_header.to_bytes pred_block_header)
+        | Some ctxt ->
+            Lwt_utils_unix.display_progress
+              ~every:1000
+              ~pp_print_step:(fun fmt i ->
+                Format.fprintf
+                  fmt
+                  "Copying context: %dK elements, %s written..."
+                  (i / 1000)
+                  ( if !written > 1_048_576 then
+                    Format.asprintf "%dMiB" (!written / 1_048_576)
+                  else Format.asprintf "%dKiB" (!written / 1_024) ))
+              (fun notify ->
+                set_root buf block_data ;
+                let tree = I.context_tree ctxt in
+                fold_tree_path ctxt tree notify
+                >>= fun nb_elements ->
+                let parents = I.context_parents ctxt in
+                set_eoc buf (I.context_info ctxt) parents ;
+                set_end buf ;
+                return_unit
+                >>=? fun () ->
+                flush context_fd () >>= fun () -> return nb_elements))
+      (function
+        | Unix.Unix_error (e, _, _) ->
+            fail @@ System_write_error (Unix.error_message e)
+        | err ->
+            Lwt.fail err)
+
+  (* Restoring *)
+  let restore_context_fd index ?expected_block ~fd ~metadata =
+    let read = ref 0 in
+    let rbuf = ref (fd, Bytes.empty, 0, read) in
+    (* Editing the repository *)
+    let add_blob t blob = I.add_string t blob >>= fun tree -> return tree in
+    let add_dir t keys =
+      I.add_dir t keys
+      >>= function
+      | None -> fail Restore_context_failure | Some tree -> return tree
+    in
+    let restore (metadata : Snapshot_version.metadata) =
+      let context_elements = metadata.context_elements in
+      let first_pass () =
+        get_command rbuf
+        >>=? function
+        | Root {block_data} ->
+            (* Checks that the block hash imported by the snapshot is the expected one *)
+            let imported_block_header = I.Block_data.header block_data in
+            let imported_block_hash =
+              Block_header.hash imported_block_header
+            in
+            ( match expected_block with
+            | Some str ->
+                let bh = Block_hash.of_b58check_exn str in
+                fail_unless
+                  (Block_hash.equal bh imported_block_hash)
+                  (Inconsistent_imported_block (imported_block_hash, bh))
+            | None ->
+                return_unit )
+            >>=? fun () ->
+            (* Checks that the block hash of the metadata is the expected one *)
+            fail_unless
+              (Block_hash.equal metadata.block_hash imported_block_hash)
+              (Inconsistent_imported_block
+                 (imported_block_hash, metadata.block_hash))
+            >>=? fun () -> return block_data
+        | _ ->
+            fail Inconsistent_snapshot_data
+      in
+      let rec second_pass batch ctxt block_header notify =
+        notify ()
+        >>= fun () ->
+        get_command rbuf
+        >>=? function
+        | Node contents ->
+            add_dir batch contents
+            >>=? fun tree ->
+            second_pass batch (I.update_context ctxt tree) block_header notify
+        | Blob data ->
+            add_blob batch data
+            >>=? fun tree ->
+            second_pass batch (I.update_context ctxt tree) block_header notify
+        | Eoc {info; parents} -> (
+            I.set_context ~info ~parents ctxt block_header
+            >>= function
+            | None -> fail Inconsistent_snapshot_data | Some _ -> return_unit )
+        | _ ->
+            fail Inconsistent_snapshot_data
+      in
+      let check_eof () =
+        get_command rbuf
+        >>=? function
+        | Eof -> return_unit | _ -> fail Inconsistent_snapshot_data
+      in
+      first_pass ()
+      >>=? fun block_data ->
+      let pred_block_header = I.Block_data.predecessor_header block_data in
+      Lwt_utils_unix.display_progress
+        ~every:1000
+        ~pp_print_step:(fun fmt i ->
+          Format.fprintf
+            fmt
+            "Writing context: %dK/%dK (%d%%) elements, %s read..."
+            (i / 1_000)
+            (context_elements / 1_000)
+            (100 * i / context_elements)
+            ( if !read > 1_048_576 then
+              Format.asprintf "%dMiB" (!read / 1_048_576)
+            else Format.asprintf "%dKiB" (!read / 1_024) ))
+        (fun notify ->
+          I.batch index (fun batch ->
+              second_pass batch (I.make_context index) pred_block_header notify))
+      >>=? fun () -> check_eof () >>=? fun () -> return block_data
+    in
+    Lwt.catch
+      (fun () -> restore metadata)
+      (function
+        | Unix.Unix_error (e, _, _) ->
+            fail @@ System_read_error (Unix.error_message e)
+        | err ->
+            Lwt.fail err)
+end
+
+module Make_legacy (I : Dump_interface) = struct
+  let current_version = "tezos-snapshot-1.0.0"
+
   type command =
     | Root of {
         block_header : I.Block_header.t;
@@ -441,18 +826,18 @@ module Make (I : Dump_interface) = struct
     Bytes.blit_string string 0 b 0 (Bytes.length b) ;
     return ()
 
-  let set_int64 buf i =
-    let b = Bytes.create 8 in
-    EndianBytes.BigEndian.set_int64 b 0 i ;
-    Buffer.add_bytes buf b
+  (* let set_int64 buf i =
+   *   let b = Bytes.create 8 in
+   *   EndianBytes.BigEndian.set_int64 b 0 i ;
+   *   Buffer.add_bytes buf b *)
 
   let get_int64 rbuf =
     read_string ~len:8 rbuf
     >>=? fun s -> return @@ EndianString.BigEndian.get_int64 s 0
 
-  let set_mbytes buf b =
-    set_int64 buf (Int64.of_int (Bytes.length b)) ;
-    Buffer.add_bytes buf b
+  (* let set_mbytes buf b =
+   *   set_int64 buf (Int64.of_int (Bytes.length b)) ;
+   *   Buffer.add_bytes buf b *)
 
   let get_mbytes rbuf =
     get_int64 rbuf >>|? Int64.to_int
@@ -466,36 +851,36 @@ module Make (I : Dump_interface) = struct
     get_mbytes rbuf
     >>|? fun bytes -> Data_encoding.Binary.of_bytes_exn command_encoding bytes
 
-  let set_root buf block_header info parents block_data =
-    let root = Root {block_header; info; parents; block_data} in
-    let bytes = Data_encoding.Binary.to_bytes_exn command_encoding root in
-    set_mbytes buf bytes
-
-  let set_node buf contents =
-    let bytes =
-      Data_encoding.Binary.to_bytes_exn command_encoding (Node contents)
-    in
-    set_mbytes buf bytes
-
-  let set_blob buf data =
-    let bytes =
-      Data_encoding.Binary.to_bytes_exn command_encoding (Blob data)
-    in
-    set_mbytes buf bytes
-
-  let set_proot buf pruned_block =
-    let proot = Proot pruned_block in
-    let bytes = Data_encoding.Binary.to_bytes_exn command_encoding proot in
-    set_mbytes buf bytes
-
-  let set_loot buf protocol_data =
-    let loot = Loot protocol_data in
-    let bytes = Data_encoding.Binary.to_bytes_exn command_encoding loot in
-    set_mbytes buf bytes
-
-  let set_end buf =
-    let bytes = Data_encoding.Binary.to_bytes_exn command_encoding End in
-    set_mbytes buf bytes
+  (* let set_root buf block_header info parents block_data =
+   *   let root = Root {block_header; info; parents; block_data} in
+   *   let bytes = Data_encoding.Binary.to_bytes_exn command_encoding root in
+   *   set_mbytes buf bytes
+   *
+   * let set_node buf contents =
+   *   let bytes =
+   *     Data_encoding.Binary.to_bytes_exn command_encoding (Node contents)
+   *   in
+   *   set_mbytes buf bytes
+   *
+   * let set_blob buf data =
+   *   let bytes =
+   *     Data_encoding.Binary.to_bytes_exn command_encoding (Blob data)
+   *   in
+   *   set_mbytes buf bytes
+   *
+   * let set_proot buf pruned_block =
+   *   let proot = Proot pruned_block in
+   *   let bytes = Data_encoding.Binary.to_bytes_exn command_encoding proot in
+   *   set_mbytes buf bytes
+   *
+   * let set_loot buf protocol_data =
+   *   let loot = Loot protocol_data in
+   *   let bytes = Data_encoding.Binary.to_bytes_exn command_encoding loot in
+   *   set_mbytes buf bytes
+   *
+   * let set_end buf =
+   *   let bytes = Data_encoding.Binary.to_bytes_exn command_encoding End in
+   *   set_mbytes buf bytes *)
 
   (* Snapshot metadata *)
 
@@ -514,13 +899,6 @@ module Make (I : Dump_interface) = struct
          (req "version" string)
          (req "mode" Tezos_shell_services.History_mode.encoding))
 
-  let write_snapshot_metadata ~mode buf =
-    let version = {version = current_version; mode} in
-    let bytes =
-      Data_encoding.(Binary.to_bytes_exn snapshot_metadata_encoding version)
-    in
-    set_mbytes buf bytes
-
   let read_snapshot_metadata rbuf =
     get_mbytes rbuf
     >>|? fun bytes ->
@@ -531,130 +909,13 @@ module Make (I : Dump_interface) = struct
       (v.version <> current_version)
       (Invalid_snapshot_version (v.version, current_version))
 
-  let dump_contexts_fd idx data ~fd =
-    (* Dumping *)
-    let buf = Buffer.create 1_000_000 in
-    let written = ref 0 in
-    let flush () =
-      let contents = Buffer.contents buf in
-      Buffer.clear buf ;
-      written := !written + String.length contents ;
-      Lwt_utils_unix.write_string fd contents
-    in
-    let maybe_flush () =
-      if Buffer.length buf > 1_000_000 then flush () else Lwt.return_unit
-    in
-    (* Noting the visited hashes *)
-    let visited_hash = Hashtbl.create 1000 in
-    let visited h = Hashtbl.mem visited_hash h in
-    let set_visit h = Hashtbl.add visited_hash h () in
-    (* Folding through a node *)
-    let fold_tree_path ctxt tree =
-      let cpt = ref 0 in
-      let rec fold_tree_path ctxt tree =
-        I.tree_list tree
-        >>= fun keys ->
-        let keys = List.sort (fun (a, _) (b, _) -> String.compare a b) keys in
-        Lwt_list.map_s
-          (fun (name, kind) ->
-            I.sub_tree tree [name]
-            >>= function
-            | None ->
-                assert false
-            | Some sub_tree ->
-                let hash = I.tree_hash sub_tree in
-                ( if visited hash then Lwt.return_unit
-                else (
-                  Tezos_stdlib_unix.Utils.display_progress
-                    ~refresh_rate:(!cpt, 1_000)
-                    "Context: %dK elements, %dMiB written%!"
-                    (!cpt / 1_000)
-                    (!written / 1_048_576) ;
-                  incr cpt ;
-                  set_visit hash ;
-                  (* There cannot be a cycle *)
-                  match kind with
-                  | `Node ->
-                      fold_tree_path ctxt sub_tree
-                  | `Contents -> (
-                      I.tree_content sub_tree
-                      >>= function
-                      | None ->
-                          assert false
-                      | Some data ->
-                          set_blob buf data ; maybe_flush () ) ) )
-                >|= fun () -> (name, hash))
-          keys
-        >>= fun sub_keys -> set_node buf sub_keys ; maybe_flush ()
-      in
-      fold_tree_path ctxt tree
-    in
-    Lwt.catch
-      (fun () ->
-        let (bh, block_data, mode, pruned_iterator) = data in
-        write_snapshot_metadata ~mode buf ;
-        I.get_context idx bh
-        >>= function
-        | None ->
-            fail @@ Context_not_found (I.Block_header.to_bytes bh)
-        | Some ctxt ->
-            let tree = I.context_tree ctxt in
-            fold_tree_path ctxt tree
-            >>= fun () ->
-            Tezos_stdlib_unix.Utils.display_progress_end () ;
-            let parents = I.context_parents ctxt in
-            set_root buf bh (I.context_info ctxt) parents block_data ;
-            (* Dump pruned blocks *)
-            let dump_pruned cpt pruned =
-              Tezos_stdlib_unix.Utils.display_progress
-                ~refresh_rate:(cpt, 1_000)
-                "History: %dK block, %dMiB written"
-                (cpt / 1_000)
-                (!written / 1_048_576) ;
-              set_proot buf pruned ;
-              maybe_flush ()
-            in
-            let rec aux cpt acc header =
-              pruned_iterator header
-              >>=? function
-              | (None, None) ->
-                  return acc (* assert false *)
-              | (None, Some protocol_data) ->
-                  return (protocol_data :: acc)
-              | (Some pred_pruned, Some protocol_data) ->
-                  dump_pruned cpt pred_pruned
-                  >>= fun () ->
-                  aux
-                    (succ cpt)
-                    (protocol_data :: acc)
-                    (I.Pruned_block.header pred_pruned)
-              | (Some pred_pruned, None) ->
-                  dump_pruned cpt pred_pruned
-                  >>= fun () ->
-                  aux (succ cpt) acc (I.Pruned_block.header pred_pruned)
-            in
-            let starting_block_header = I.Block_data.header block_data in
-            aux 0 [] starting_block_header
-            >>=? fun protocol_datas ->
-            (* Dump protocol data *)
-            Lwt_list.iter_s
-              (fun proto -> set_loot buf proto ; maybe_flush ())
-              protocol_datas
-            >>= fun () ->
-            Tezos_stdlib_unix.Utils.display_progress_end () ;
-            return_unit
-            >>=? fun () ->
-            set_end buf ;
-            flush () >>= fun () -> return_unit)
-      (function
-        | Unix.Unix_error (e, _, _) ->
-            fail @@ System_write_error (Unix.error_message e)
-        | err ->
-            Lwt.fail err)
+  let dump_context_fd idx data ~fd =
+    ignore (idx, data, fd) ;
+    (* Do not export legacy snasphot anymore*)
+    assert false
 
-  (* Restoring *)
-
-  let restore_contexts_fd index ~fd k_store_pruned_blocks block_validation =
+  (* Legacy !*)
+  let restore_context_fd index ~fd k_store_pruned_blocks block_validation =
     let read = ref 0 in
     let rbuf = ref (fd, Bytes.empty, 0, read) in
     (* Editing the repository *)
@@ -693,11 +954,6 @@ module Make (I : Dump_interface) = struct
       in
       let rec second_pass pred_header (rev_block_hashes, protocol_datas) todo
           cpt =
-        Tezos_stdlib_unix.Utils.display_progress
-          ~refresh_rate:(cpt, 1_000)
-          "Store: %dK elements, %dMiB read"
-          (cpt / 1_000)
-          (!read / 1_048_576) ;
         get_command rbuf
         >>=? function
         | Proot pruned_block ->

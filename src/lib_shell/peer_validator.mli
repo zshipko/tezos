@@ -49,7 +49,7 @@ val time_last_validated_head : t -> Time.Protocol.t
 val updated_once : t -> bool
 
 val create :
-  ?notify_new_block:(State.Block.t -> unit) ->
+  ?notify_new_block:(Store.Block.t -> unit) ->
   ?notify_termination:(unit -> unit) ->
   limits ->
   Block_validator.t ->

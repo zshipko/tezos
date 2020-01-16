@@ -38,7 +38,7 @@ type callback = {
 }
 
 type chain_db = {
-  chain_state : State.Chain.t;
+  chain_store : Store.Chain.t;
   operation_db : Distributed_db_requester.Raw_operation.t;
   block_header_db : Distributed_db_requester.Raw_block_header.t;
   operation_hashes_db : Distributed_db_requester.Raw_operation_hashes.t;
@@ -54,7 +54,7 @@ type t = {
   conn : connection;
   peer_active_chains : chain_db Chain_id.Table.t;
       (** chains known to be active for the remote peer *)
-  disk : State.t;
+  disk : Store.t;
   canceler : Lwt_canceler.t;
   mutable worker : unit Lwt.t;
   protocol_db : Distributed_db_requester.Raw_protocol.t;
@@ -173,13 +173,26 @@ let read_operation state h =
     state.active_chains
     Lwt.return_none
 
-let read_block_header {disk; _} h =
-  State.read_block disk h
+let read_block {disk; _} h =
+  Store.all_chain_stores disk
+  >>= fun chain_stores ->
+  Lwt_utils.find_map_s
+    (fun chain_store ->
+      Store.Block.read_block_opt chain_store h
+      >>= function
+      | None ->
+          Lwt.return_none
+      | Some b ->
+          Lwt.return_some (Store.Chain.chain_id chain_store, b))
+    chain_stores
+
+let read_block_header db h =
+  read_block db h
   >>= function
-  | Some b ->
-      Lwt.return_some (State.Block.chain_id b, State.Block.header b)
   | None ->
       Lwt.return_none
+  | Some (chain_id, block) ->
+      Lwt.return_some (chain_id, Store.Block.header block)
 
 let find_pending_block_header {peer_active_chains; _} h =
   Chain_id.Table.fold
@@ -236,7 +249,9 @@ let handle_msg state msg =
       let seed =
         {Block_locator.receiver_id = state.gid; sender_id = my_peer_id state}
       in
-      Chain.locator chain_db.chain_state seed
+      Store.Chain.current_head chain_db.chain_store
+      >>= fun current_head ->
+      Store.Block.compute_locator chain_db.chain_store current_head seed
       >>= fun locator ->
       Peer_metadata.update_responses meta Branch
       @@ P2p.try_send state.p2p state.conn
@@ -247,7 +262,7 @@ let handle_msg state msg =
       @@ fun chain_db ->
       let (head, hist) = (locator :> Block_header.t * Block_hash.t list) in
       Lwt_list.exists_p
-        (State.Block.known_invalid chain_db.chain_state)
+        (Store.Block.is_known_invalid chain_db.chain_store)
         (Block_header.hash head :: hist)
       >>= fun known_invalid ->
       if known_invalid then (
@@ -283,11 +298,12 @@ let handle_msg state msg =
       let {Connection_metadata.disable_mempool; _} =
         P2p.connection_remote_metadata state.p2p state.conn
       in
-      ( if disable_mempool then
-        Chain.head chain_db.chain_state
-        >>= fun head -> Lwt.return (State.Block.header head, Mempool.empty)
-      else State.Current_mempool.get chain_db.chain_state )
-      >>= fun (head, mempool) ->
+      Store.Chain.current_head chain_db.chain_store
+      >>= fun current_head ->
+      let head = Store.Block.header current_head in
+      ( if disable_mempool then Lwt.return Mempool.empty
+      else Store.Chain.mempool chain_db.chain_store )
+      >>= fun mempool ->
       (* TODO bound the sent mempool size *)
       Peer_metadata.update_responses meta Head
       @@ P2p.try_send state.p2p state.conn
@@ -297,7 +313,7 @@ let handle_msg state msg =
       may_handle state chain_id
       @@ fun chain_db ->
       let head = Block_header.hash header in
-      State.Block.known_invalid chain_db.chain_state head
+      Store.Block.is_known_invalid chain_db.chain_store head
       >>= fun known_invalid ->
       let {Connection_metadata.disable_mempool; _} =
         P2p.connection_local_metadata state.p2p state.conn
@@ -393,7 +409,7 @@ let handle_msg state msg =
       Peer_metadata.incr meta @@ Received_request Protocols ;
       Lwt_list.iter_p
         (fun hash ->
-          State.Protocol.read_opt state.disk hash
+          Store.Protocol.read_protocol state.disk hash
           >>= function
           | None ->
               Peer_metadata.incr meta @@ Unadvertised Protocol ;
@@ -418,13 +434,14 @@ let handle_msg state msg =
       Peer_metadata.incr meta @@ Received_request Operation_hashes_for_block ;
       Lwt_list.iter_p
         (fun (hash, ofs) ->
-          State.read_block state.disk hash
+          read_block state hash
           >>= function
           | None ->
               Lwt.return_unit
-          | Some block ->
-              State.Block.operation_hashes block ofs
-              >>= fun (hashes, path) ->
+          | Some (_chain_id, block) ->
+              let (hashes, path) =
+                Store.Block.operations_hashes_path block ofs
+              in
               Peer_metadata.update_responses meta Operation_hashes_for_block
               @@ P2p.try_send state.p2p state.conn
               @@ Operation_hashes_for_block (hash, ofs, hashes, path) ;
@@ -448,13 +465,12 @@ let handle_msg state msg =
       Peer_metadata.incr meta @@ Received_request Operations_for_block ;
       Lwt_list.iter_p
         (fun (hash, ofs) ->
-          State.read_block state.disk hash
+          read_block state hash
           >>= function
           | None ->
               Lwt.return_unit
-          | Some block ->
-              State.Block.operations block ofs
-              >>= fun (ops, path) ->
+          | Some (_, block) ->
+              let (ops, path) = Store.Block.operations_path block ofs in
               Peer_metadata.update_responses meta Operations_for_block
               @@ P2p.try_send state.p2p state.conn
               @@ Operations_for_block (hash, ofs, ops, path) ;

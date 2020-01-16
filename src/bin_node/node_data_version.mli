@@ -64,7 +64,8 @@ val ensure_data_dir : ?bare:bool -> string -> unit tzresult Lwt.t
 (** Upgrade data directory from an older version.
 
     Usage: [upgrade_data_dir dir] *)
-val upgrade_data_dir : string -> unit tzresult Lwt.t
+val upgrade_data_dir :
+  data_dir:string -> Genesis.t -> chain_name:string -> unit tzresult Lwt.t
 
 (** [store_dir dir] is a directory within [dir] that the node uses for its
     store. In order for [store_dir dir] to be valid, [dir] must be a valid

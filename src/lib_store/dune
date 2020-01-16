@@ -1,0 +1,24 @@
+(library
+ (name tezos_store)
+ (public_name tezos-store)
+ (libraries tezos-base
+            tezos-shell-services
+            index
+	    irmin-pack
+            tezos-stdlib-unix
+	    tezos-storage
+	    tezos-validation
+	    lwt-watcher
+            camlzip)
+ (flags (:standard -open Tezos_shell_services
+                   -open Tezos_base
+                   -open Tezos_base__TzPervasives
+                   -open Tezos_storage
+		   -open Tezos_validation
+                   -open Tezos_stdlib_unix
+                   -open Tezos_stdlib)))
+
+(alias
+ (name runtest_lint)
+ (deps (glob_files *.ml{,i}))
+ (action (run %{lib:tezos-tooling:lint.sh} %{deps})))

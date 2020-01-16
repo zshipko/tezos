@@ -25,6 +25,73 @@
 (*                                                                           *)
 (*****************************************************************************)
 
+(* Errors *)
+
+type error += Cannot_create_file of string
+
+let () =
+  register_error_kind
+    `Permanent
+    ~id:"context_dump.write.cannot_open"
+    ~title:"Cannot open file for context dump"
+    ~description:""
+    ~pp:(fun ppf uerr ->
+      Format.fprintf
+        ppf
+        "@[Error while opening file for context dumping: %s@]"
+        uerr)
+    Data_encoding.(obj1 (req "context_dump_cannot_open" string))
+    (function Cannot_create_file e -> Some e | _ -> None)
+    (fun e -> Cannot_create_file e)
+
+type error += Cannot_open_file of string
+
+let () =
+  register_error_kind
+    `Permanent
+    ~id:"context_dump.read.cannot_open"
+    ~title:"Cannot open file for context restoring"
+    ~description:""
+    ~pp:(fun ppf uerr ->
+      Format.fprintf
+        ppf
+        "@[Error while opening file for context restoring: %s@]"
+        uerr)
+    Data_encoding.(obj1 (req "context_restore_cannot_open" string))
+    (function Cannot_open_file e -> Some e | _ -> None)
+    (fun e -> Cannot_open_file e)
+
+type error += Cannot_find_protocol
+
+let () =
+  register_error_kind
+    `Permanent
+    ~id:"context_dump.cannot_find_protocol"
+    ~title:"Cannot find protocol"
+    ~description:""
+    ~pp:(fun ppf () ->
+      Format.fprintf ppf "@[Cannot find protocol in context@]")
+    Data_encoding.unit
+    (function Cannot_find_protocol -> Some () | _ -> None)
+    (fun () -> Cannot_find_protocol)
+
+type error += Suspicious_file of int
+
+let () =
+  register_error_kind
+    `Permanent
+    ~id:"context_dump.read.suspicious"
+    ~title:"Suspicious file: data after end"
+    ~description:""
+    ~pp:(fun ppf uerr ->
+      Format.fprintf
+        ppf
+        "@[Remaining bytes in file after context restoring: %d@]"
+        uerr)
+    Data_encoding.(obj1 (req "context_restore_suspicious" int31))
+    (function Suspicious_file e -> Some e | _ -> None)
+    (fun e -> Suspicious_file e)
+
 (** Tezos - Versioned (key x value) store (over Irmin) *)
 
 module Path = Irmin.Path.String_list
@@ -255,6 +322,8 @@ let restore_integrity ?ppf index =
            "unable to fix the corrupted context: %d bad entries detected"
            n)
 
+let close index = Store.Repo.close index.repo
+
 let exists index key =
   Store.Commit.of_hash index.repo (Hash.of_context_hash key)
   >|= function None -> false | Some _ -> true
@@ -383,9 +452,21 @@ let get_protocol v =
   raw_get v current_protocol_key
   >>= function
   | None ->
-      assert false
-  | Some data ->
-      Lwt.return (Protocol_hash.of_bytes_exn data)
+      fail Cannot_find_protocol
+  | Some data -> (
+    match Protocol_hash.of_bytes data with
+    | Ok x ->
+        return x
+    | Error e ->
+        Lwt.return (Error e) )
+
+let get_protocol_exn v =
+  get_protocol v
+  >>= function
+  | Ok x ->
+      Lwt.return x
+  | Error _ ->
+      Lwt.fail (Failure "Unexpected error (Context.get_protocol_exn)")
 
 let set_protocol v key =
   let key = Protocol_hash.to_bytes key in
@@ -416,7 +497,7 @@ let fork_test_chain v ~protocol ~expiration =
 
 (*-- Initialisation ----------------------------------------------------------*)
 
-let init ?patch_context ?mapsize:_ ?readonly root =
+let init ?patch_context ?readonly root =
   Store.Repo.v
     (Irmin_pack.config ?readonly ?index_log_size:!index_log_size root)
   >>= fun repo ->
@@ -538,18 +619,29 @@ module Pruned_block = struct
 end
 
 module Block_data = struct
-  type t = {block_header : Block_header.t; operations : Operation.t list list}
+  type t = {
+    block_header : Block_header.t;
+    operations : Operation.t list list;
+    predecessor_header : Block_header.t;
+  }
 
   let header {block_header; _} = block_header
+
+  let operations {operations; _} = operations
+
+  let predecessor_header {predecessor_header; _} = predecessor_header
 
   let encoding =
     let open Data_encoding in
     conv
-      (fun {block_header; operations} -> (operations, block_header))
-      (fun (operations, block_header) -> {block_header; operations})
-      (obj2
+      (fun {block_header; operations; predecessor_header} ->
+        (operations, block_header, predecessor_header))
+      (fun (operations, block_header, predecessor_header) ->
+        {block_header; operations; predecessor_header})
+      (obj3
          (req "operations" (list (list (dynamic_size Operation.encoding))))
-         (req "block_header" Block_header.encoding))
+         (req "block_header" (dynamic_size Block_header.encoding))
+         (req "predecessor_header" Block_header.encoding))
 
   let to_bytes = Data_encoding.Binary.to_bytes_exn encoding
 
@@ -557,6 +649,56 @@ module Block_data = struct
 end
 
 module Protocol_data = struct
+  type info = {author : string; message : string; timestamp : Time.Protocol.t}
+
+  let info_encoding =
+    let open Data_encoding in
+    conv
+      (fun {author; message; timestamp} -> (author, message, timestamp))
+      (fun (author, message, timestamp) -> {author; message; timestamp})
+      (obj3
+         (req "author" string)
+         (req "message" string)
+         (req "timestamp" Time.Protocol.encoding))
+
+  type data = {
+    info : info;
+    protocol_hash : Protocol_hash.t;
+    test_chain_status : Test_chain_status.t;
+    data_key : Context_hash.t;
+    parents : Context_hash.t list;
+    protocol : Protocol.t;
+  }
+
+  let data_encoding =
+    let open Data_encoding in
+    conv
+      (fun {info; protocol_hash; test_chain_status; data_key; parents; protocol}
+           ->
+        (info, protocol_hash, test_chain_status, data_key, parents, protocol))
+      (fun (info, protocol_hash, test_chain_status, data_key, parents, protocol)
+           ->
+        {info; protocol_hash; test_chain_status; data_key; parents; protocol})
+      (obj6
+         (req "info" info_encoding)
+         (req "protocol_hash" Protocol_hash.encoding)
+         (req "test_chain_status" Test_chain_status.encoding)
+         (req "data_key" Context_hash.encoding)
+         (req "parents" (list Context_hash.encoding))
+         (req "protocol" Protocol.encoding))
+
+  type t = Int32.t * data
+
+  let encoding =
+    let open Data_encoding in
+    tup2 int32 data_encoding
+
+  let to_bytes = Data_encoding.Binary.to_bytes_exn encoding
+
+  let of_bytes = Data_encoding.Binary.of_bytes_opt encoding
+end
+
+module Protocol_data_legacy = struct
   type info = {author : string; message : string; timestamp : Time.Protocol.t}
 
   let info_encoding =
@@ -596,6 +738,30 @@ module Protocol_data = struct
   let encoding =
     let open Data_encoding in
     tup2 int32 data_encoding
+
+  let to_bytes = Data_encoding.Binary.to_bytes_exn encoding
+
+  let of_bytes = Data_encoding.Binary.of_bytes_opt encoding
+end
+
+module Block_data_legacy = struct
+  type t = {block_header : Block_header.t; operations : Operation.t list list}
+
+  let header {block_header; _} = block_header
+
+  let operations {operations; _} = operations
+
+  (*TODO: duplicated sigs*)
+  let predecessor_header _ = assert false
+
+  let encoding =
+    let open Data_encoding in
+    conv
+      (fun {block_header; operations} -> (operations, block_header))
+      (fun (operations, block_header) -> {block_header; operations})
+      (obj2
+         (req "operations" (list (list (dynamic_size Operation.encoding))))
+         (req "block_header" Block_header.encoding))
 
   let to_bytes = Data_encoding.Binary.to_bytes_exn encoding
 
@@ -750,16 +916,163 @@ module Dumpable_context = struct
   module Protocol_data = Protocol_data
 end
 
+module Dumpable_context_legacy = struct
+  type nonrec index = index
+
+  type nonrec context = context
+
+  type tree = Store.tree
+
+  type hash = [`Blob of Store.hash | `Node of Store.hash]
+
+  type step = string
+
+  type key = step list
+
+  type commit_info = Irmin.Info.t
+
+  type batch =
+    | Batch of
+        Store.repo * [`Read | `Write] P.Contents.t * [`Read | `Write] P.Node.t
+
+  let batch index f =
+    P.Repo.batch index.repo (fun x y _ -> f (Batch (index.repo, x, y)))
+
+  let commit_info_encoding =
+    let open Data_encoding in
+    conv
+      (fun irmin_info ->
+        let author = Irmin.Info.author irmin_info in
+        let message = Irmin.Info.message irmin_info in
+        let date = Irmin.Info.date irmin_info in
+        (author, message, date))
+      (fun (author, message, date) -> Irmin.Info.v ~author ~date message)
+      (obj3 (req "author" string) (req "message" string) (req "date" int64))
+
+  let hash_encoding : hash Data_encoding.t =
+    let open Data_encoding in
+    let kind_encoding = string_enum [("node", `Node); ("blob", `Blob)] in
+    conv
+      (function
+        | `Blob h ->
+            (`Blob, Context_hash.to_bytes (Hash.to_context_hash h))
+        | `Node h ->
+            (`Node, Context_hash.to_bytes (Hash.to_context_hash h)))
+      (function
+        | (`Blob, h) ->
+            `Blob (Hash.of_context_hash (Context_hash.of_bytes_exn h))
+        | (`Node, h) ->
+            `Node (Hash.of_context_hash (Context_hash.of_bytes_exn h)))
+      (obj2 (req "kind" kind_encoding) (req "value" bytes))
+
+  let context_parents ctxt =
+    match ctxt with
+    | {parents = [commit]; _} ->
+        let parents = Store.Commit.parents commit in
+        let parents = List.map Hash.to_context_hash parents in
+        List.sort Context_hash.compare parents
+    | _ ->
+        assert false
+
+  let context_info = function
+    | {parents = [c]; _} ->
+        Store.Commit.info c
+    | _ ->
+        assert false
+
+  let get_context idx bh = checkout idx bh.Block_header.shell.context
+
+  let set_context ~info ~parents ctxt bh =
+    let parents = List.sort Context_hash.compare parents in
+    let parents = List.map Hash.of_context_hash parents in
+    Store.Commit.v ctxt.index.repo ~info ~parents ctxt.tree
+    >>= fun c ->
+    let h = Store.Commit.hash c in
+    if
+      Context_hash.equal bh.Block_header.shell.context (Hash.to_context_hash h)
+    then Lwt.return_some bh
+    else Lwt.return_none
+
+  let context_tree ctxt = ctxt.tree
+
+  let tree_hash = function
+    | `Node _ as tree ->
+        `Node (Store.Tree.hash tree)
+    | `Contents (b, _) ->
+        `Blob (Store.Contents.hash b)
+
+  let sub_tree tree key = Store.Tree.find_tree tree key
+
+  let tree_list tree = Store.Tree.list tree []
+
+  let tree_content tree = Store.Tree.find tree []
+
+  let make_context index = {index; tree = Store.Tree.empty; parents = []}
+
+  let update_context context tree = {context with tree}
+
+  let add_blob_hash (Batch (repo, _, _)) tree key hash =
+    Store.Contents.of_hash repo hash
+    >>= function
+    | None ->
+        Lwt.return_none
+    | Some v ->
+        Store.Tree.add tree key v >>= Lwt.return_some
+
+  let add_node_hash (Batch (repo, _, _)) tree key hash =
+    Store.Tree.of_hash repo hash
+    >>= function
+    | None ->
+        Lwt.return_none
+    | Some t ->
+        Store.Tree.add_tree tree key (t :> tree) >>= Lwt.return_some
+
+  let add_string (Batch (_, t, _)) string =
+    (* Save the contents in the store *)
+    Store.save_contents t string >|= fun _ -> Store.Tree.of_contents string
+
+  let add_dir batch l =
+    let rec fold_list sub_tree = function
+      | [] ->
+          Lwt.return_some sub_tree
+      | (step, hash) :: tl -> (
+        match hash with
+        | `Blob hash -> (
+            add_blob_hash batch sub_tree [step] hash
+            >>= function
+            | None -> Lwt.return_none | Some sub_tree -> fold_list sub_tree tl
+            )
+        | `Node hash -> (
+            add_node_hash batch sub_tree [step] hash
+            >>= function
+            | None -> Lwt.return_none | Some sub_tree -> fold_list sub_tree tl
+            ) )
+    in
+    fold_list Store.Tree.empty l
+    >>= function
+    | None ->
+        Lwt.return_none
+    | Some tree ->
+        let (Batch (repo, x, y)) = batch in
+        (* Save the node in the store ... *)
+        Store.save_tree ~clear:true repo x y tree >|= fun _ -> Some tree
+
+  module Commit_hash = Context_hash
+  module Block_header = Block_header
+  module Block_data = Block_data_legacy
+  module Pruned_block = Pruned_block
+  module Protocol_data = Protocol_data_legacy
+end
+
 (* Protocol data *)
 
 let data_node_hash context =
   Store.Tree.get_tree context.tree current_data_key
   >|= fun tree -> Hash.to_context_hash (Store.Tree.hash tree)
 
-let get_protocol_data_from_header index block_header =
+let get_context_protocol_data_from_header index block_header =
   checkout_exn index block_header.Block_header.shell.context
   >>= fun context ->
-  let level = block_header.shell.level in
   let irmin_info = Dumpable_context.context_info context in
   let date = Irmin.Info.date irmin_info in
   let author = Irmin.Info.author irmin_info in
@@ -769,15 +1082,12 @@ let get_protocol_data_from_header index block_header =
   in
   let parents = Dumpable_context.context_parents context in
   get_protocol context
-  >>= fun protocol_hash ->
+  >>=? fun protocol_hash ->
   get_test_chain context
   >>= fun test_chain_status ->
   data_node_hash context
   >>= fun data_key ->
-  Lwt.return
-    ( level,
-      {Protocol_data.parents; protocol_hash; test_chain_status; data_key; info}
-    )
+  return (parents, protocol_hash, test_chain_status, data_key, info)
 
 let validate_context_hash_consistency_and_commit ~data_hash
     ~expected_context_hash ~timestamp ~test_chain ~protocol_hash ~message
@@ -825,67 +1135,18 @@ let validate_context_hash_consistency_and_commit ~data_hash
 (* Context dumper *)
 
 module Context_dumper = Context_dump.Make (Dumpable_context)
-include Context_dumper
+module Context_dumper_legacy =
+  Context_dump.Make_legacy (Dumpable_context_legacy)
 
-(* provides functions dump_contexts and restore_contexts *)
-
-type error += Cannot_create_file of string
-
-let () =
-  register_error_kind
-    `Permanent
-    ~id:"context_dump.write.cannot_open"
-    ~title:"Cannot open file for context dump"
-    ~description:""
-    ~pp:(fun ppf uerr ->
-      Format.fprintf
-        ppf
-        "@[Error while opening file for context dumping: %s@]"
-        uerr)
-    Data_encoding.(obj1 (req "context_dump_cannot_open" string))
-    (function Cannot_create_file e -> Some e | _ -> None)
-    (fun e -> Cannot_create_file e)
-
-type error += Cannot_open_file of string
-
-let () =
-  register_error_kind
-    `Permanent
-    ~id:"context_dump.read.cannot_open"
-    ~title:"Cannot open file for context restoring"
-    ~description:""
-    ~pp:(fun ppf uerr ->
-      Format.fprintf
-        ppf
-        "@[Error while opening file for context restoring: %s@]"
-        uerr)
-    Data_encoding.(obj1 (req "context_restore_cannot_open" string))
-    (function Cannot_open_file e -> Some e | _ -> None)
-    (fun e -> Cannot_open_file e)
-
-type error += Suspicious_file of int
-
-let () =
-  register_error_kind
-    `Permanent
-    ~id:"context_dump.read.suspicious"
-    ~title:"Suspicious file: data after end"
-    ~description:""
-    ~pp:(fun ppf uerr ->
-      Format.fprintf
-        ppf
-        "@[Remaining bytes in file after context restoring: %d@]"
-        uerr)
-    Data_encoding.(obj1 (req "context_restore_suspicious" int31))
-    (function Suspicious_file e -> Some e | _ -> None)
-    (fun e -> Suspicious_file e)
-
-let dump_contexts idx datas ~filename =
-  let file_init () =
+(* provides functions dump_context and restore_context *)
+let dump_context idx data ~context_file_path =
+  (*TODO better naming*)
+  let file_init filename () =
     Lwt_unix.openfile filename Lwt_unix.[O_WRONLY; O_CREAT; O_TRUNC] 0o666
     >>= return
   in
-  Lwt.catch file_init (function
+  (* TODO : add file name to namming *)
+  Lwt.catch (file_init context_file_path) (function
       | Unix.Unix_error (e, _, _) ->
           fail @@ Cannot_create_file (Unix.error_message e)
       | exc ->
@@ -893,9 +1154,36 @@ let dump_contexts idx datas ~filename =
             Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
           in
           fail (Cannot_create_file msg))
-  >>=? fun fd -> dump_contexts_fd idx datas ~fd
+  >>=? fun context_fd -> Context_dumper.dump_context_fd idx data ~context_fd
 
-let restore_contexts idx ~filename k_store_pruned_block pipeline_validation =
+let restore_context ?expected_block idx ~context_file_path ~metadata =
+  let file_init () =
+    Lwt_unix.openfile context_file_path Lwt_unix.[O_RDONLY] 0o600 >>= return
+  in
+  Lwt.catch file_init (function
+      | Unix.Unix_error (e, _, _) ->
+          fail @@ Cannot_open_file (Unix.error_message e)
+      | exc ->
+          let msg =
+            Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
+          in
+          fail (Cannot_open_file msg))
+  >>=? fun fd ->
+  Lwt.finalize
+    (fun () ->
+      Context_dumper.restore_context_fd idx ~fd ?expected_block ~metadata
+      >>=? fun result ->
+      Lwt_unix.lseek fd 0 Lwt_unix.SEEK_CUR
+      >>= fun current ->
+      Lwt_unix.fstat fd
+      >>= fun stats ->
+      let total = stats.Lwt_unix.st_size in
+      if current = total then return result
+      else fail @@ Suspicious_file (total - current))
+    (fun () -> Lwt_unix.close fd)
+
+let restore_context_legacy idx ~filename k_store_pruned_block
+    pipeline_validation =
   let file_init () =
     Lwt_unix.openfile filename Lwt_unix.[O_RDONLY] 0o600 >>= return
   in
@@ -910,7 +1198,11 @@ let restore_contexts idx ~filename k_store_pruned_block pipeline_validation =
   >>=? fun fd ->
   Lwt.finalize
     (fun () ->
-      restore_contexts_fd idx ~fd k_store_pruned_block pipeline_validation
+      Context_dumper_legacy.restore_context_fd
+        idx
+        ~fd
+        k_store_pruned_block
+        pipeline_validation
       >>=? fun result ->
       Lwt_unix.lseek fd 0 Lwt_unix.SEEK_CUR
       >>= fun current ->
@@ -920,33 +1212,3 @@ let restore_contexts idx ~filename k_store_pruned_block pipeline_validation =
       if current = total then return result
       else fail @@ Suspicious_file (total - current))
     (fun () -> Lwt_unix.close fd)
-
-let upgrade_0_0_3 ~context_dir =
-  Lwt_unix.file_exists (context_dir ^ "/" ^ "data.mdb")
-  (* We assume that the data.mdb file is representative of a lmdb context *)
-  >>= fun is_lmdb ->
-  Lwt_unix.file_exists (context_dir ^ "/" ^ "store.pack")
-  (* We assume that the store.pack file is representative of an irmin context *)
-  >>= fun is_irmin ->
-  match (is_lmdb, is_irmin) with
-  | (true, true) ->
-      Format.printf
-        "Your directory contains both the LMDB and Irmin2 chain's data. From \
-         now, the node only uses Irmin2. LMDB data can be safely removed. To \
-         do so, delete the following files: %s/data.mdb and %s/lock.mdb@."
-        context_dir
-        context_dir ;
-      return_unit
-  | (true, false) ->
-      failwith
-        "Your directory contains the lmdb database which cannot be handled \
-         with this version of the node. Please upgrade to the new irmin \
-         storage.@.A guide to upgrade toward the new storage can be found \
-         here: http://tezos.gitlab.io/releases/october-2019.html"
-  | (false, true) ->
-      return_unit
-  | (false, false) ->
-      failwith
-        "Cannot find any context data in the provided directory (located at: \
-         %s). Please make sure that the path to the storage is correct."
-        context_dir

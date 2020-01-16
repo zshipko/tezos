@@ -350,7 +350,8 @@ let run ?verbosity ?sandbox ?checkpoint ~singleprocess
         | Ok node ->
             return node
         | Error
-            (State.Incorrect_history_mode_switch {previous_mode; next_mode}
+            (Store_errors.Incorrect_history_mode_switch
+               {previous_mode; next_mode}
             :: _) ->
             failwith
               "@[Cannot switch from history mode '%a' to '%a'. In order to \

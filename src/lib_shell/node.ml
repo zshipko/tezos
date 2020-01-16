@@ -86,7 +86,7 @@ module Initialization_event = struct
 end
 
 type t = {
-  state : State.t;
+  store : Store.t;
   distributed_db : Distributed_db.t;
   validator : Validator.t;
   mainchain_validator : Chain_validator.t;
@@ -197,36 +197,16 @@ let default_chain_validator_limits =
     worker_limits = {backlog_size = 1000; backlog_level = Internal_event.Info};
   }
 
-let may_update_checkpoint chain_state checkpoint history_mode =
-  match checkpoint with
-  | None ->
-      return_unit
-  | Some checkpoint -> (
-      State.best_known_head_for_checkpoint chain_state checkpoint
-      >>= fun new_head ->
-      Chain.set_head chain_state new_head
-      >>= fun _old_head ->
-      match history_mode with
-      | History_mode.Archive ->
-          State.Chain.set_checkpoint chain_state checkpoint
-          >>= fun () -> return_unit
-      | Full ->
-          State.Chain.set_checkpoint_then_purge_full chain_state checkpoint
-      | Rolling ->
-          State.Chain.set_checkpoint_then_purge_rolling chain_state checkpoint
-      )
-
 module Local_logging = Internal_event.Legacy_logging.Make_semantic (struct
   let name = "node.worker"
 end)
 
-let store_known_protocols state =
+let store_known_protocols store =
   let open Local_logging in
   let embedded_protocols = Registered_protocol.list_embedded () in
   Lwt_list.iter_s
     (fun protocol_hash ->
-      State.Protocol.known state protocol_hash
-      >>= function
+      match Store.Protocol.is_protocol_stored store protocol_hash with
       | true ->
           lwt_log_info
             Tag.DSL.(
@@ -253,10 +233,9 @@ let store_known_protocols state =
                     -% a Protocol_hash.Logging.tag protocol_hash
                     -% t event "embedded_protocol_inconsistent_hash")
             else
-              State.Protocol.store state protocol
+              Store.Protocol.store_protocol store hash protocol
               >>= function
-              | Some hash' ->
-                  assert (hash = hash') ;
+              | Some _ ->
                   lwt_log_info
                     Tag.DSL.(
                       fun f ->
@@ -290,7 +269,7 @@ let () =
     (function Non_recoverable_context -> Some () | _ -> None)
     (fun () -> Non_recoverable_context)
 
-let check_and_fix_storage_consistency state vp =
+let check_and_fix_storage_consistency store vp =
   let restore_context_integrity () =
     let open Local_logging in
     Local_logging.lwt_log_error
@@ -324,13 +303,14 @@ let check_and_fix_storage_consistency state vp =
           Tag.DSL.(fun f -> f "@[Error: %a@]" -% a Error_monad.errs_tag err)
         >>= fun () -> fail Non_recoverable_context
   in
-  State.Chain.all state
+  Store.all_chain_stores store
   >>= fun chains ->
-  let rec check_block n chain_state block =
+  let rec check_block n chain_store block =
     fail_unless (n > 0) Validation_errors.Bad_data_dir
     >>=? fun () ->
     Lwt.catch
-      (fun () -> State.Block.context_exists block >>= fun b -> return b)
+      (fun () ->
+        Store.Block.context_exists chain_store block >>= fun b -> return b)
       (fun _exn ->
         restore_context_integrity ()
         >>=? fun () ->
@@ -340,20 +320,17 @@ let check_and_fix_storage_consistency state vp =
     >>=? fun is_context_known ->
     if is_context_known then
       (* Found a known context for the block: setting as consistent head *)
-      Chain.set_head chain_state block >>=? fun _ -> return_unit
+      Store.Chain.set_head chain_store block >>= fun _ -> return_unit
     else
       (* Did not find a known context. Need to backtrack the head up *)
-      let header = State.Block.header block in
-      State.Block.read chain_state header.shell.predecessor
-      >>=? fun pred ->
-      check_block (n - 1) chain_state pred
-      >>=? fun () ->
-      (* Make sure to remove the block only after updating the head *)
-      State.Block.remove block
+      let header = Store.Block.header block in
+      Store.Block.read_block chain_store header.shell.predecessor
+      >>=? fun pred -> check_block (n - 1) chain_store pred
   in
   iter_s
-    (fun chain_state ->
-      Chain.head chain_state >>= fun block -> check_block 500 chain_state block)
+    (fun chain_store ->
+      Store.Chain.current_head chain_store
+      >>= fun block -> check_block 500 chain_store block)
     chains
 
 let create ?(sandboxed = false) ?sandbox_parameters ~singleprocess
@@ -385,15 +362,20 @@ let create ?(sandboxed = false) ?sandbox_parameters ~singleprocess
   >>=? fun p2p ->
   (let open Block_validator_process in
   if singleprocess then
-    State.init ~store_root ~context_root ?history_mode ?patch_context genesis
-    >>=? fun (state, mainchain_state, context_index, history_mode) ->
+    Store.init
+      ?patch_context
+      ?history_mode
+      ~store_dir:store_root
+      ~context_dir:context_root
+      ~allow_testchains:start_testchain
+      genesis
+    >>=? fun store ->
     init
       ~genesis
       ~user_activated_upgrades
       ~user_activated_protocol_overrides
-      (Internal context_index)
-    >>=? fun validator_process ->
-    return (validator_process, state, mainchain_state, history_mode)
+      (Internal (Store.context_index store))
+    >>=? fun validator_process -> return (validator_process, store)
   else
     init
       ~genesis
@@ -410,25 +392,34 @@ let create ?(sandboxed = false) ?sandbox_parameters ~singleprocess
     let commit_genesis ~chain_id =
       Block_validator_process.commit_genesis validator_process ~chain_id
     in
-    State.init
-      ~store_root
-      ~context_root
-      ?history_mode
+    Store.init
       ?patch_context
+      ?history_mode
       ~commit_genesis
+      ~store_dir:store_root
+      ~context_dir:context_root
+      ~allow_testchains:start_testchain
       genesis
-    >>=? fun (state, mainchain_state, _context_index, history_mode) ->
-    return (validator_process, state, mainchain_state, history_mode))
-  >>=? fun (validator_process, state, mainchain_state, history_mode) ->
-  check_and_fix_storage_consistency state validator_process
+    >>=? fun store -> return (validator_process, store))
+  >>=? fun (validator_process, store) ->
+  let main_chain_store = Store.main_chain_store store in
+  check_and_fix_storage_consistency store validator_process
   >>=? fun () ->
-  may_update_checkpoint mainchain_state checkpoint history_mode
+  ( match checkpoint with
+  | None ->
+      return_unit
+  | Some checkpoint_header ->
+      let checkpoint_descr =
+        ( Block_header.hash checkpoint_header,
+          checkpoint_header.Block_header.shell.level )
+      in
+      Store.Chain.set_checkpoint main_chain_store checkpoint_descr )
   >>=? fun () ->
-  let distributed_db = Distributed_db.create state p2p in
-  store_known_protocols state
+  let distributed_db = Distributed_db.create store p2p in
+  store_known_protocols store
   >>= fun () ->
   Validator.create
-    state
+    store
     distributed_db
     peer_validator_limits
     block_validator_limits
@@ -442,7 +433,7 @@ let create ?(sandboxed = false) ?sandbox_parameters ~singleprocess
     validator
     ~start_prevalidator
     ~validator_process
-    mainchain_state
+    main_chain_store
   >>=? fun mainchain_validator ->
   let shutdown () =
     let open Local_logging in
@@ -467,11 +458,11 @@ let create ?(sandboxed = false) ?sandbox_parameters ~singleprocess
     >>= fun () ->
     lwt_log_info
       Tag.DSL.(fun f -> f "Closing down the state..." -% t event "shutdown")
-    >>= fun () -> State.close state
+    >>= fun () -> Store.close_store store
   in
   return
     {
-      state;
+      store;
       distributed_db;
       validator;
       mainchain_validator;
@@ -492,7 +483,7 @@ let build_rpc_directory node =
   merge
     (Protocol_directory.build_rpc_directory
        (Block_validator.running_worker ())
-       node.state) ;
+       node.store) ;
   merge
     (Monitor_directory.build_rpc_directory
        node.validator
@@ -505,7 +496,7 @@ let build_rpc_directory node =
          node.user_activated_protocol_overrides
        node.validator) ;
   merge (P2p_directory.build_rpc_directory node.p2p) ;
-  merge (Worker_directory.build_rpc_directory node.state) ;
+  merge (Worker_directory.build_rpc_directory node.store) ;
   merge (Stat_directory.rpc_directory ()) ;
   merge
     (Config_directory.build_rpc_directory

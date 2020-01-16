@@ -26,7 +26,7 @@
 type t
 
 val create :
-  ?notify_new_block:(State.Block.t -> unit) ->
+  ?notify_new_block:(Store.Block.t -> unit) ->
   block_header_timeout:Time.System.Span.t ->
   block_operations_timeout:Time.System.Span.t ->
   Block_validator.t ->

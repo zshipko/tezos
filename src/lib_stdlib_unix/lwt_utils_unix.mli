@@ -124,3 +124,10 @@ val retry :
   ?sleep:float ->
   (unit -> ('a, 'error) result Lwt.t) ->
   ('a, 'error) result Lwt.t
+
+val display_progress :
+  ?every:int ->
+  ?out:Lwt_unix.file_descr ->
+  pp_print_step:(Format.formatter -> int -> unit) ->
+  ((unit -> unit Lwt.t) -> 'a Lwt.t) ->
+  'a Lwt.t

@@ -56,6 +56,8 @@ let genesis_time = Time.Protocol.of_seconds 0L
 
 let chain_id = Chain_id.of_block_hash genesis_block
 
+let chain_name = Distributed_db_version.Name.of_string "dummy_chain"
+
 (** Context creation *)
 
 let commit = commit ~time:Time.Protocol.epoch ~message:""
@@ -120,7 +122,7 @@ type t = {
 let wrap_context_init f _ () =
   Lwt_utils_unix.with_tempdir "tezos_test_" (fun base_dir ->
       let root = base_dir // "context" in
-      Context.init ~mapsize:4_096_000L root
+      Context.init root
       >>= fun idx ->
       Context.commit_genesis
         idx
@@ -283,8 +285,8 @@ let test_dump {idx; block3b; _} =
   Lwt_utils_unix.with_tempdir "tezos_test_" (fun base_dir2 ->
       let dumpfile = base_dir2 // "dump" in
       let ctxt_hash = block3b in
-      let history_mode = Tezos_shell_services.History_mode.Full in
-      let empty_block_header context =
+      let history_mode = Tezos_shell_services.History_mode.default in
+      let mk_empty_block_header context =
         Block_header.
           {
             protocol_data = Bytes.empty;
@@ -301,41 +303,35 @@ let test_dump {idx; block3b; _} =
               };
           }
       in
-      let _empty_pruned_block =
-        ( {
-            block_header = empty_block_header Context_hash.zero;
-            operations = [];
-            operation_hashes = [];
-          }
-          : Context.Pruned_block.t )
-      in
-      let empty =
+      let empty_block_header = mk_empty_block_header ctxt_hash in
+      let bhs =
         {
-          Context.Block_data.block_header = empty_block_header Context_hash.zero;
-          operations = [[]];
+          Context.Block_data.block_header = empty_block_header;
+          predecessor_header = empty_block_header;
+          operations = [];
         }
       in
-      let bhs =
-        (fun context ->
-          ( empty_block_header context,
-            empty,
-            history_mode,
-            fun _ -> return (None, None) ))
-          ctxt_hash
+      let metadata =
+        ( {
+            snapshot_version = "tezos-snapshot-1.0.0";
+            chain_name;
+            history_mode;
+            block_hash = Block_header.hash empty_block_header;
+            level = empty_block_header.shell.level;
+            timestamp = empty_block_header.shell.timestamp;
+            context_elements = 0;
+          }
+          : Tezos_shell_services.Snapshot_version.metadata )
       in
-      Context.dump_contexts idx bhs ~filename:dumpfile
-      >>=? fun () ->
+      Context.dump_context idx bhs ~context_file_path:dumpfile
+      >>=? fun _ ->
       let root = base_dir2 // "context" in
       Context.init ?patch_context:None root
       >>= fun idx2 ->
-      Context.restore_contexts
-        idx2
-        ~filename:dumpfile
-        (fun _ -> return_unit)
-        (fun _ _ _ -> return_unit)
+      Context.restore_context idx2 ~context_file_path:dumpfile ~metadata
       >>=? fun imported ->
-      let (bh, _, _, _, _, _) = imported in
-      let expected_ctxt_hash = bh.Block_header.shell.context in
+      let {Block_data.block_header; _} = imported in
+      let expected_ctxt_hash = block_header.Block_header.shell.context in
       assert (Context_hash.equal ctxt_hash expected_ctxt_hash) ;
       return ())
   >>=! Lwt.return

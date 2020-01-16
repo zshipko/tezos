@@ -108,6 +108,3 @@ val index_of : ?compare:('a -> 'a -> int) -> 'a -> 'a list -> int option
     Present in OCaml 4.10: this function can be removed once we catch
     up. *)
 val find_map : ('a -> 'b option) -> 'a list -> 'b option
-
-(** Get the index of an element in a list. *)
-val index_of : ?compare:('a -> 'a -> int) -> 'a -> 'a list -> int option

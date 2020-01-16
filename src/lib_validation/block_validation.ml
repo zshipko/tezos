@@ -135,7 +135,7 @@ let may_patch_protocol ~user_activated_upgrades
     ~user_activated_protocol_overrides ~level
     (validation_result : Tezos_protocol_environment.validation_result) =
   let context = Shell_context.unwrap_disk_context validation_result.context in
-  Context.get_protocol context
+  Context.get_protocol_exn context
   >>= fun protocol ->
   match
     Block_header.get_voted_protocol_overrides
@@ -319,7 +319,7 @@ module Make (Proto : Registered_protocol.T) = struct
     let context =
       Shell_context.unwrap_disk_context validation_result.context
     in
-    Context.get_protocol context
+    Context.get_protocol_exn context
     >>= fun new_protocol ->
     let expected_proto_level =
       if Protocol_hash.equal new_protocol Proto.hash then
@@ -423,7 +423,7 @@ let apply chain_id ~user_activated_upgrades ~user_activated_protocol_overrides
     ~max_operations_ttl ~(predecessor_block_header : Block_header.t)
     ~predecessor_context ~(block_header : Block_header.t) operations =
   let block_hash = Block_header.hash block_header in
-  Context.get_protocol predecessor_context
+  Context.get_protocol_exn predecessor_context
   >>= fun pred_protocol_hash ->
   ( match Registered_protocol.get pred_protocol_hash with
   | None ->
