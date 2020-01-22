@@ -137,10 +137,20 @@ let create_file ?(perm = 0o644) name content =
   Lwt_unix.openfile name Unix.[O_TRUNC; O_CREAT; O_WRONLY] perm
   >>= fun fd ->
   Lwt.finalize
-    (fun () -> Lwt_unix.write_string fd content 0 (String.length content))
+    (fun () -> write_string fd ~pos:0 ~len:(String.length content) content)
     (fun () -> safe_close fd)
 
 let read_file fn = Lwt_io.with_file fn ~mode:Input (fun ch -> Lwt_io.read ch)
+
+let copy_file ~src ~dst =
+  Lwt_io.with_file src ~mode:Input (fun ch -> Lwt_io.read ch)
+  >>= fun src_io ->
+  Lwt_io.open_file ~mode:Output dst
+  >>= fun dst_io ->
+  Lwt_io.write dst_io src_io >>= fun () -> Lwt_io.close dst_io
+
+let safe_close fd =
+  Lwt.catch (fun () -> Lwt_unix.close fd) (fun _ -> Lwt.return_unit)
 
 let of_sockaddr = function
   | Unix.ADDR_UNIX _ ->
