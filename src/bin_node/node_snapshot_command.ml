@@ -24,7 +24,10 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-type error += Invalid_sandbox_file of string | Missing_file_to_import
+type error +=
+  | Invalid_sandbox_file of string
+  | Missing_file_to_import
+  | Data_dir_not_found of {path : string}
 
 let () =
   register_error_kind
@@ -46,7 +49,21 @@ let () =
       Format.fprintf ppf "Failed to import snapshot: missing file to import.")
     Data_encoding.(empty)
     (function Missing_file_to_import -> Some () | _ -> None)
-    (fun () -> Missing_file_to_import)
+    (fun () -> Missing_file_to_import) ;
+  register_error_kind
+    `Permanent
+    ~id:"main.snapshots.data_dir_not_found"
+    ~title:"Cannot find the data directory"
+    ~description:"Cannot find the data directory when exporting snapshot"
+    ~pp:(fun ppf path ->
+      Format.fprintf
+        ppf
+        "Cannot access the data directory when exporting the snapshot: cannot \
+         locate data directory '%s'."
+        path)
+    Data_encoding.(obj1 (req "path" string))
+    (function Data_dir_not_found {path} -> Some path | _ -> None)
+    (fun path -> Data_dir_not_found {path})
 
 (** Main *)
 
@@ -83,15 +100,20 @@ module Term = struct
     let run =
       Internal_event_unix.init ()
       >>= fun () ->
-      (* TODO FIXME *)
-      Node_shared_arg.read_and_patch_config_file args
-      >>=? fun node_config ->
-      let data_dir = node_config.data_dir in
-      let ({genesis; chain_name; _} : Node_config_file.blockchain_network) =
-        node_config.blockchain_network
-      in
       match subcommand with
       | Export ->
+          Node_shared_arg.read_data_dir args
+          >>=? fun data_dir ->
+          fail_unless
+            (Sys.file_exists data_dir)
+            (Data_dir_not_found {path = data_dir})
+          >>=? fun () ->
+          Node_shared_arg.read_and_patch_config_file args
+          >>=? fun node_config ->
+          let ({genesis; chain_name; _} : Node_config_file.blockchain_network)
+              =
+            node_config.blockchain_network
+          in
           Node_data_version.ensure_data_dir data_dir
           >>=? fun () ->
           let context_dir = Node_data_version.context_dir data_dir in
@@ -118,6 +140,12 @@ module Term = struct
             ~block
             genesis
       | Import ->
+          Node_shared_arg.read_and_patch_config_file args
+          >>=? fun node_config ->
+          let data_dir = node_config.data_dir in
+          let ({genesis; _} : Node_config_file.blockchain_network) =
+            node_config.blockchain_network
+          in
           ( match snapshot_path with
           | None ->
               fail Missing_file_to_import
