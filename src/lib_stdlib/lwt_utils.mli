@@ -54,3 +54,6 @@ val fold_left_s_n :
     This is meant as an alternative to [Lwt.async] which we make use of for
     [Lwt_exit] and that, as a result, we shouldn't use for other purpose. *)
 val dont_wait : (exn -> unit) -> (unit -> unit Lwt.t) -> unit
+
+(** Lwt version of [TzList.find_map] *)
+val find_map_s : ('a -> 'b option Lwt.t) -> 'a list -> 'b option Lwt.t
