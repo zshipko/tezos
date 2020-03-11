@@ -228,13 +228,23 @@ class Sandbox:
         self.clients[node_id] = client
         return client
 
-    def init_node(self, node, snapshot, reconstruct):
+    def init_node(self, node, snapshot, reconstruct, legacy):
         """Generate node id and import snapshot """
-        node.init_id()
-        node.init_config()
-        if snapshot is not None:
-            params = ['--reconstruct'] if reconstruct else []
-            node.snapshot_import(snapshot, params)
+        if snapshot is None:
+            node.init_id()
+            node.init_config()
+        else:
+            node.init_id()
+            node.init_config()
+            import_params = ['--network=sandbox']
+            if reconstruct:
+                import_params = import_params + ['--reconstruct']
+
+            assert os.path.isfile(snapshot)
+            if legacy:
+                node.snapshot_import(snapshot, import_params + ['--legacy'])
+            else:
+                node.snapshot_import(snapshot, import_params)
 
     def init_client(self,
                     client,
@@ -265,6 +275,7 @@ class Sandbox:
                  use_tls: Tuple[str, str] = None,
                  snapshot: str = None,
                  reconstruct: bool = False,
+                 legacy: bool = False,
                  branch: str = "",
                  client_factory: Callable = Client) -> None:
         """ Launches new node with given node_id and initializes client
@@ -303,7 +314,7 @@ class Sandbox:
         node = self.register_node(node_id, node_dir, peers, params,
                                   log_levels, private, use_tls, branch)
 
-        self.init_node(node, snapshot, reconstruct)
+        self.init_node(node, snapshot, reconstruct, legacy)
 
         node.run()
 
@@ -566,10 +577,11 @@ class SandboxMultiBranch(Sandbox):
                  use_tls: Tuple[str, str] = None,
                  snapshot: str = None,
                  reconstruct: bool = False,
+                 legacy: bool = False,
                  branch: str = "",
                  client_factory: Callable = Client) -> None:
         assert not branch
         branch = self._branch_map[node_id]
         super().add_node(node_id, node_dir, peers, params, log_levels, private,
-                         config_client, use_tls, snapshot, reconstruct,
+                         config_client, use_tls, snapshot, reconstruct, legacy,
                          branch, client_factory)
