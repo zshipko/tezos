@@ -2100,11 +2100,12 @@ let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
     Data_encoding.(tup2 Block_hash.encoding int32)
     new_head_descr
   >>= fun () ->
-  (* Savepoint is the new head *)
+  (* Savepoint is the head's predecessors *)
   Stored_data.write_file
     ~file:Naming.(chain_dir // Chain_data.savepoint)
     Data_encoding.(tup2 Block_hash.encoding int32)
-    new_head_descr
+    ( Block_repr.predecessor new_head_with_metadata,
+      Int32.pred (Block_repr.level new_head_with_metadata) )
   >>= fun () ->
   (* Depending on the history mode, set the caboose properly *)
   ( match history_mode with

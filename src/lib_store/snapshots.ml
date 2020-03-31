@@ -337,16 +337,13 @@ let copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir
       >>= fun () -> return_unit)
 
 let write_floating_block fd (block : Block_repr.t) =
-  let bytes =
-    Data_encoding.Binary.to_bytes_exn
-      Block_repr.encoding
-      {block with metadata = None}
-  in
+  let bytes = Data_encoding.Binary.to_bytes_exn Block_repr.encoding block in
   let len = Bytes.length bytes in
   Lwt_utils_unix.write_bytes ~pos:0 ~len fd bytes
 
 let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
   let (limit_hash, limit_level) = Store.Block.descriptor export_block in
+  let export_predecessor = Store.Block.predecessor export_block in
   let (stream, bpush) = Lwt_stream.create_bounded 1000 in
   (* Retrieve first floating block *)
   Block_repr.read_next_block_opt floating_ro_fd
@@ -375,7 +372,14 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
       if Compare.Int32.(Block_repr.level block >= limit_level) then
         if Block_hash.equal limit_hash (Block_repr.hash block) then raise Done
         else Lwt.return_unit
-      else bpush#push block
+      else
+        let block =
+          (* Prune everything below the export's block predecessor *)
+          if Block_hash.equal (Block_repr.hash block) export_predecessor then
+            block
+          else {block with metadata = None}
+        in
+        bpush#push block
     in
     Lwt.finalize
       (fun () ->
@@ -751,7 +755,7 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block genesis =
     (* Read the store to gather only the necessary blocks *)
     Store.Block.read_block_by_level chain_store lowest_block_level_needed
     >>=? fun minimum_block ->
-    Store.Chain_traversal.path chain_store minimum_block export_block
+    Store.Chain_traversal.path chain_store minimum_block pred_block
     >>= (function
           | None ->
               failwith
@@ -762,8 +766,14 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block genesis =
                   not include the lower-bound block *)
               return (minimum_block :: blocks))
     >>=? fun floating_blocks ->
+    (* Prune all blocks except for the export_block's predecessor *)
     let floating_block_stream =
-      Lwt_stream.of_list (List.map Store.Block.repr floating_blocks)
+      Lwt_stream.of_list
+        (List.filter_map
+           (fun b ->
+             if Store.Block.equal pred_block b then Some (Store.Block.repr b)
+             else Some {(Store.Block.repr b) with metadata = None})
+           floating_blocks)
     in
     (* We need to dump the context while locking the store, the contexts might get pruned *)
     dump_context context_index ~snapshot_dir ~pred_block ~export_block
