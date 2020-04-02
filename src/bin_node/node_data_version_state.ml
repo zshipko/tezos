@@ -43,7 +43,7 @@ let status_pp ppf = function
   | Upgrade_success success_message ->
       Format.fprintf
         ppf
-        "The node data dir is now up-to-date! %s"
+        "@[The node data dir is now up-to-date!@ %s@]"
         success_message
   | Aborting_upgrade errs ->
       Format.fprintf
