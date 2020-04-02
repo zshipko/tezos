@@ -24,18 +24,19 @@
 (*****************************************************************************)
 
 module Hardcoded : sig
-  type network = {name : string; cycle_length : int}
+  type network = {name : Distributed_db_version.Name.t; cycle_length : int}
 
   val supported_networks : network list
 
-  val cycle_length : chain_name:string -> int
+  val cycle_length : chain_name:Distributed_db_version.Name.t -> int
 
-  val check_network : chain_name:string -> unit tzresult Lwt.t
+  val check_network :
+    chain_name:Distributed_db_version.Name.t -> unit tzresult Lwt.t
 end
 
 val upgrade_0_0_4 :
   data_dir:string ->
   Genesis.t ->
   (Context.t -> Context.t tzresult Lwt.t) option ->
-  chain_name:string ->
+  chain_name:Distributed_db_version.Name.t ->
   string tzresult Lwt.t

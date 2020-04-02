@@ -447,17 +447,18 @@ end
 
 (* Hardcoded networks data*)
 module Hardcoded = struct
-  type network = {name : string; cycle_length : int}
+  type network = {name : Distributed_db_version.Name.t; cycle_length : int}
 
   let proj (name, cycle_length) = {name; cycle_length}
 
   (* Hardcoded cycle length *)
   let supported_networks =
+    let open Distributed_db_version.Name in
     List.map
       proj
-      [ ("TEZOS_MAINNET", 4096);
-        ("TEZOS_ALPHANET_CARTHAGE_2019-11-28T13:02:13Z", 2048);
-        ("TEZOS", 8) ]
+      [ (of_string "TEZOS_MAINNET", 4096);
+        (of_string "TEZOS_ALPHANET_CARTHAGE_2019-11-28T13:02:13Z", 2048);
+        (of_string "TEZOS", 8) ]
 
   let cycle_length ~chain_name =
     List.find_map
@@ -471,11 +472,13 @@ module Hardcoded = struct
       not (List.exists (fun {name; _} -> chain_name = name) supported_networks)
     then
       failwith
-        "Cannot perform operation for chain_name %s. Only %a are supported."
+        "Cannot perform operation for chain_name %a. Only %a are supported."
+        Distributed_db_version.Name.pp
         chain_name
         (Format.pp_print_list
            ~pp_sep:(fun ppf () -> Format.fprintf ppf ", ")
-           (fun ppf {name; _} -> Format.fprintf ppf "%s" name))
+           (fun ppf {name; _} ->
+             Format.fprintf ppf "%a" Distributed_db_version.Name.pp name))
         supported_networks
     else return_unit
 
@@ -905,7 +908,8 @@ let upgrade_cleaner data_dir =
   Unix.rename lmdb_backup new_store ;
   Lwt.return_unit
 
-let upgrade_0_0_4 ~data_dir genesis patch_context ~chain_name =
+let upgrade_0_0_4 ~data_dir genesis patch_context
+    ~(chain_name : Distributed_db_version.Name.t) =
   Hardcoded.check_network ~chain_name
   >>=? fun () ->
   let ( // ) = Filename.concat in

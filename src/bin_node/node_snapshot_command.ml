@@ -129,11 +129,7 @@ module Term = struct
                   ?block
                   ~dst_store_dir:store_root
                   ~dst_context_dir:context_root
-                  ~chain_name:
-                    (Format.asprintf
-                       "%a"
-                       Distributed_db_version.Name.pp
-                       node_config.blockchain_network.chain_name)
+                  ~chain_name:node_config.blockchain_network.chain_name
                   ~user_activated_upgrades:
                     node_config.blockchain_network.user_activated_upgrades
                   ~user_activated_protocol_overrides:

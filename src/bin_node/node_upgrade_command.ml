@@ -51,12 +51,6 @@ module Term = struct
           >>=? fun node_config ->
           let data_dir = node_config.data_dir in
           let genesis = node_config.blockchain_network.genesis in
-          let chain_name =
-            Format.asprintf
-              "%a"
-              Distributed_db_version.Name.pp
-              node_config.blockchain_network.chain_name
-          in
           if status then Node_data_version.upgrade_status data_dir
           else
             trace
@@ -66,7 +60,10 @@ module Term = struct
                  ~unlink_on_exit:true
                  (Node_data_version.lock_file data_dir)
             >>=? fun () ->
-            Node_data_version.upgrade_data_dir ~data_dir genesis ~chain_name
+            Node_data_version.upgrade_data_dir
+              ~data_dir
+              genesis
+              ~chain_name:node_config.blockchain_network.chain_name
     in
     match Lwt_main.run run with
     | Ok () ->
