@@ -24,92 +24,60 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-type status =
-  | Reconstruct_start_default
-  | Reconstruct_end_default of Block_hash.t
-  | Reconstruct_enum
-  | Reconstruct_success
+type failure_kind =
+  | Nothing_to_reconstruct
+  | Context_hash_mismatch of Block_header.t * Context_hash.t * Context_hash.t
+  | Missing_block of Block_hash.t
 
-let status_pp ppf = function
-  | Reconstruct_start_default ->
-      Format.fprintf ppf "Starting reconstruct from genesis"
-  | Reconstruct_end_default h ->
+let failure_kind_encoding =
+  let open Data_encoding in
+  union
+    [ case
+        (Tag 0)
+        ~title:"nothing_to_reconstruct"
+        empty
+        (function Nothing_to_reconstruct -> Some () | _ -> None)
+        (fun () -> Nothing_to_reconstruct);
+      case
+        (Tag 1)
+        ~title:"context_hash_mismatch"
+        (obj3
+           (req "block_header" Block_header.encoding)
+           (req "expected" Context_hash.encoding)
+           (req "got" Context_hash.encoding))
+        (function
+          | Context_hash_mismatch (h, e, g) -> Some (h, e, g) | _ -> None)
+        (fun (h, e, g) -> Context_hash_mismatch (h, e, g));
+      case
+        (Tag 2)
+        ~title:"missing_block"
+        Block_hash.encoding
+        (function Missing_block h -> Some h | _ -> None)
+        (fun h -> Missing_block h) ]
+
+let failure_kind_pp ppf = function
+  | Nothing_to_reconstruct ->
+      Format.fprintf ppf "nothing to reconstruct"
+  | Context_hash_mismatch (h, e, g) ->
       Format.fprintf
         ppf
-        "Starting reconstruct toward the predecessor of the current head (%a)"
+        "resulting context hash for block %a (level %ld) does not match. \
+         Context hash expected %a, got %a"
+        Block_hash.pp
+        (Block_header.hash h)
+        h.shell.level
+        Context_hash.pp
+        e
+        Context_hash.pp
+        g
+  | Missing_block h ->
+      Format.fprintf
+        ppf
+        "Unexpected missing block in store: %a"
         Block_hash.pp
         h
-  | Reconstruct_enum ->
-      Format.fprintf ppf "Enumerating all blocks to reconstruct"
-  | Reconstruct_success ->
-      Format.fprintf ppf "The storage was successfully reconstructed."
 
-module Definition = struct
-  let name = "reconstruction"
-
-  type t = status Time.System.stamped
-
-  let encoding =
-    let open Data_encoding in
-    Time.System.stamped_encoding
-    @@ union
-         [ case
-             (Tag 0)
-             ~title:"Reconstruct_start_default"
-             empty
-             (function Reconstruct_start_default -> Some () | _ -> None)
-             (fun () -> Reconstruct_start_default);
-           case
-             (Tag 1)
-             ~title:"Reconstruct_end_default"
-             Block_hash.encoding
-             (function Reconstruct_end_default h -> Some h | _ -> None)
-             (fun h -> Reconstruct_end_default h);
-           case
-             (Tag 2)
-             ~title:"Reconstruct_enum"
-             empty
-             (function Reconstruct_enum -> Some () | _ -> None)
-             (fun () -> Reconstruct_enum);
-           case
-             (Tag 3)
-             ~title:"Reconstruct_success"
-             empty
-             (function Reconstruct_success -> Some () | _ -> None)
-             (fun () -> Reconstruct_success) ]
-
-  let pp ~short:_ ppf (status : t) =
-    Format.fprintf ppf "%a" status_pp status.data
-
-  let doc = "Reconstruction status."
-
-  let level (status : t) =
-    match status.data with
-    | Reconstruct_start_default
-    | Reconstruct_end_default _
-    | Reconstruct_enum
-    | Reconstruct_success ->
-        Internal_event.Notice
-end
-
-module Event_reconstruction = Internal_event.Make (Definition)
-
-let lwt_emit (status : status) =
-  let time = Systime_os.now () in
-  Event_reconstruction.emit
-    ~section:(Internal_event.Section.make_sanitized [Definition.name])
-    (fun () -> Time.System.stamp ~time status)
-  >>= function
-  | Ok () ->
-      Lwt.return_unit
-  | Error el ->
-      Format.kasprintf
-        Lwt.fail_with
-        "Reconstruction_event.emit: %a"
-        pp_print_error
-        el
-
-type error += Reconstruction_failure of string
+type error += Reconstruction_failure of failure_kind
 
 type error += Cannot_reconstruct of History_mode.t
 
@@ -120,15 +88,16 @@ let () =
     ~id:"ReconstructionFailure"
     ~title:"Reconstruction failure"
     ~description:"Error while performing storage reconstruction."
-    ~pp:(fun ppf msg ->
+    ~pp:(fun ppf reason ->
       Format.fprintf
         ppf
         "The data contained in the storage is not valid. The reconstruction \
-         procedure failed: %s."
-        msg)
-    (obj1 (req "message" string))
-    (function Reconstruction_failure str -> Some str | _ -> None)
-    (fun str -> Reconstruction_failure str) ;
+         procedure failed: %a."
+        failure_kind_pp
+        reason)
+    (obj1 (req "reason" failure_kind_encoding))
+    (function Reconstruction_failure r -> Some r | _ -> None)
+    (fun r -> Reconstruction_failure r) ;
   register_error_kind
     `Permanent
     ~id:"CannotReconstruct"
