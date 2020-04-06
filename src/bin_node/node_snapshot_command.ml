@@ -54,18 +54,20 @@ end
 module Term = struct
   type subcommand = Export | Import | Info
 
-  let dir_cleaner data_dir =
+  (* FIXME *)
+  let _dir_cleaner data_dir =
     Event.(emit cleaning_up_after_failure) data_dir
     >>= fun () ->
     Lwt_utils_unix.remove_dir @@ Node_data_version.store_dir data_dir
     >>= fun () ->
     Lwt_utils_unix.remove_dir @@ Node_data_version.context_dir data_dir
 
-  let process subcommand args snapshot_dir block rolling reconstruct
+  let process subcommand args snapshot_path block rolling reconstruct
       sandbox_file import_legacy =
     let run =
       Internal_event_unix.init ()
       >>= fun () ->
+      (* TODO FIXME *)
       Node_shared_arg.read_and_patch_config_file args
       >>=? fun node_config ->
       let data_dir = node_config.data_dir in
@@ -84,7 +86,7 @@ module Term = struct
             ~context_dir
             ~chain_name
             ~block
-            ~snapshot_dir
+            ~snapshot_dir:snapshot_path
             genesis
       | Import ->
           Node_data_version.ensure_data_dir ~bare:true data_dir
@@ -113,32 +115,31 @@ module Term = struct
           let patch_context =
             Patch_context.patch_context genesis sandbox_parameters
           in
-          ( if import_legacy then (
-            Format.printf "Importing a legacy snapshot@." ;
+          ( if import_legacy then
+            (* FIXME: what to do with dir_cleaner *)
             Snapshots.import_legacy
               ~patch_context
-              ~store_root
-              ~context_root
-              ~data_dir
+              ?block
+              ~dst_store_dir:store_root
+              ~dst_context_dir:context_root
               ~chain_name:
                 (Format.asprintf
                    "%a"
                    Distributed_db_version.Name.pp
                    node_config.blockchain_network.chain_name)
-              ~dir_cleaner
-              ~genesis
               ~user_activated_upgrades:
                 node_config.blockchain_network.user_activated_upgrades
               ~user_activated_protocol_overrides:
                 node_config.blockchain_network
                   .user_activated_protocol_overrides
-              snapshot_dir
-              block )
+              ~snapshot_file:snapshot_path
+              genesis
           else
             (* FIXME: what to do with dir_cleaner *)
             Snapshots.import
               ~patch_context
-              ~snapshot_dir
+              ?block
+              ~snapshot_dir:snapshot_path
               ~dst_store_dir:store_root
               ~dst_context_dir:context_root
               ~user_activated_upgrades:
@@ -146,7 +147,6 @@ module Term = struct
               ~user_activated_protocol_overrides:
                 node_config.blockchain_network
                   .user_activated_protocol_overrides
-              ~block
               genesis )
           >>=? fun () ->
           if reconstruct then
@@ -162,7 +162,8 @@ module Term = struct
                   .user_activated_protocol_overrides
           else return_unit
       | Info ->
-          Snapshots.snapshot_info ~snapshot_dir >>= fun () -> return_unit
+          Snapshots.snapshot_info ~snapshot_dir:snapshot_path
+          >>= fun () -> return_unit
     in
     match Lwt_main.run run with
     | Ok () ->

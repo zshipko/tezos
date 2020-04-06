@@ -38,6 +38,52 @@ let invalid_block_encoding =
     (fun (level, errors) -> {level; errors})
     (obj2 (req "level" int32) (req "errors" (list Error_monad.error_encoding)))
 
+type commit_info = {
+  author : string;
+  message : string;
+  timestamp : Time.Protocol.t;
+  test_chain_status : Test_chain_status.t;
+  data_merkle_root : Context_hash.t;
+  parents_contexts : Context_hash.t list;
+}
+
+let commit_info_encoding =
+  let open Data_encoding in
+  conv
+    (fun { author;
+           message;
+           timestamp;
+           test_chain_status;
+           data_merkle_root;
+           parents_contexts } ->
+      ( author,
+        message,
+        timestamp,
+        test_chain_status,
+        data_merkle_root,
+        parents_contexts ))
+    (fun ( author,
+           message,
+           timestamp,
+           test_chain_status,
+           data_merkle_root,
+           parents_contexts ) ->
+      {
+        author;
+        message;
+        timestamp;
+        test_chain_status;
+        data_merkle_root;
+        parents_contexts;
+      })
+    (obj6
+       (req "author" string)
+       (req "message" string)
+       (req "timestamp" Time.Protocol.encoding)
+       (req "test_chain_status" Test_chain_status.encoding)
+       (req "data_merkle_root" Context_hash.encoding)
+       (req "parents_contexts" (list Context_hash.encoding)))
+
 module Protocol_levels = struct
   include Map.Make (struct
     type t = int
@@ -45,7 +91,9 @@ module Protocol_levels = struct
     let compare = Compare.Int.compare
   end)
 
-  let encoding : ((Block_hash.t * int32) * Protocol_hash.t) t Data_encoding.t =
+  let encoding :
+      ((Block_hash.t * int32) * Protocol_hash.t * commit_info) t
+      Data_encoding.t =
     Data_encoding.conv
       (fun map -> bindings map)
       (fun bindings ->
@@ -54,5 +102,8 @@ module Protocol_levels = struct
         list
           (tup2
              int31
-             (tup2 (tup2 Block_hash.encoding int32) Protocol_hash.encoding)))
+             (tup3
+                (tup2 Block_hash.encoding int32)
+                Protocol_hash.encoding
+                commit_info_encoding)))
 end

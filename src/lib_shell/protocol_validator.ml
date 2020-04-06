@@ -137,7 +137,6 @@ let fetch_and_compile_protocol pv ?peer ?timeout hash =
 let fetch_and_compile_protocols pv ?peer ?timeout (block : Store.Block.t) =
   let protocol_level = Store.Block.proto_level block in
   let hash = Store.Block.hash block in
-  let level = Store.Block.level block in
   let state = Distributed_db.store pv.db in
   Store.all_chain_stores state
   >>= fun chain_stores ->
@@ -162,8 +161,7 @@ let fetch_and_compile_protocols pv ?peer ?timeout (block : Store.Block.t) =
         Store.Chain.may_update_protocol_level
           chain_store
           protocol_level
-          ((hash, level), protocol_hash)
-        >>= fun () -> return_unit
+          (block, protocol_hash)
       and test_protocol =
         Context.get_test_chain context
         >>= function
@@ -183,8 +181,8 @@ let fetch_and_compile_protocols pv ?peer ?timeout (block : Store.Block.t) =
                 Store.Chain.may_update_protocol_level
                   test_chain_store
                   protocol_level
-                  ((hash, level), protocol)
-                >>= fun () -> return_unit )
+                  (block, protocol)
+                >>=? fun () -> return_unit )
       in
       protocol >>=? fun () -> test_protocol
 

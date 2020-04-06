@@ -140,7 +140,7 @@ module type Dump_interface = sig
     parents:Commit_hash.t list ->
     context ->
     Block_header.t ->
-    Block_header.t option Lwt.t
+    bool Lwt.t
 
   (* for dumping *)
   val context_tree : context -> tree
@@ -210,32 +210,17 @@ module type S_legacy = sig
 
   type protocol_data
 
-  val dump_context_fd :
-    index ->
-    block_header
-    * block_data
-    * History_mode.t
-    * (block_header ->
-      (pruned_block option * protocol_data option) tzresult Lwt.t) ->
-    fd:Lwt_unix.file_descr ->
-    unit tzresult Lwt.t
-
   val restore_context_fd :
     index ->
     fd:Lwt_unix.file_descr ->
-    ((Block_hash.t * pruned_block) list -> unit tzresult Lwt.t) ->
-    (block_header option ->
-    Block_hash.t ->
-    pruned_block ->
-    unit tzresult Lwt.t) ->
-    ( block_header
-    * block_data
-    * History_mode.t
-    * Block_header.t option
-    * Block_hash.t list
-    * protocol_data list )
-    tzresult
-    Lwt.t
+    ?expected_block:string ->
+    handle_block:(Block_hash.t * pruned_block -> unit tzresult Lwt.t) ->
+    handle_protocol_data:(protocol_data -> unit tzresult Lwt.t) ->
+    block_validation:(block_header option ->
+                     Block_hash.t ->
+                     pruned_block ->
+                     unit tzresult Lwt.t) ->
+    (block_header * block_data * Block_header.t option) tzresult Lwt.t
 end
 
 module Make_legacy (I : Dump_interface) :

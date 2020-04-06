@@ -119,6 +119,9 @@ module Block : sig
   (** Unsafe *)
   val repr : t -> Block_repr.t
 
+  (** Unsafe *)
+  val of_repr : Block_repr.t -> t
+
   val equal : block -> block -> bool
 
   val is_known_valid : chain_store -> Block_hash.t -> bool Lwt.t
@@ -370,17 +373,20 @@ module Chain : sig
 
   val shutdown_testchain : chain_store -> unit tzresult Lwt.t
 
-  val find_protocol_level :
-    chain_store -> int -> (block_descriptor * Protocol_hash.t) option Lwt.t
-
   val set_protocol_level :
-    chain_store -> int -> block_descriptor * Protocol_hash.t -> unit Lwt.t
+    chain_store -> int -> Block.block * Protocol_hash.t -> unit tzresult Lwt.t
 
   val may_update_protocol_level :
-    chain_store -> int -> block_descriptor * Protocol_hash.t -> unit Lwt.t
+    chain_store -> int -> Block.block * Protocol_hash.t -> unit tzresult Lwt.t
+
+  val find_protocol_level :
+    chain_store ->
+    int ->
+    (block_descriptor * Protocol_hash.t * commit_info) option Lwt.t
 
   val all_protocol_levels :
-    chain_store -> (block_descriptor * Protocol_hash.t) Protocol_levels.t Lwt.t
+    chain_store ->
+    (block_descriptor * Protocol_hash.t * commit_info) Protocol_levels.t Lwt.t
 
   val watcher : chain_store -> Block.t Lwt_stream.t * Lwt_watcher.stopper
 
@@ -468,11 +474,25 @@ val open_for_snapshot_export :
 val restore_from_snapshot :
   ?notify:(unit -> unit Lwt.t) ->
   store_dir:string ->
+  context_index:Context.index ->
   genesis:Genesis.t ->
   genesis_context_hash:Context_hash.t ->
   floating_blocks_stream:Block_repr.block Lwt_stream.t ->
   new_head_with_metadata:Block_repr.block ->
-  protocol_levels:(block_descriptor * Protocol_hash.t) Protocol_levels.t ->
+  protocol_levels:(block_descriptor * Protocol_hash.t * commit_info)
+                  Protocol_levels.t ->
+  history_mode:History_mode.t ->
+  unit tzresult Lwt.t
+
+val restore_from_legacy_snapshot :
+  ?notify:(unit -> unit Lwt.t) ->
+  store_dir:string ->
+  context_index:Context.index ->
+  genesis:Genesis.t ->
+  genesis_context_hash:Context_hash.t ->
+  floating_blocks_stream:Block_repr.block Lwt_stream.t ->
+  new_head_with_metadata:Block_repr.block ->
+  partial_protocol_levels:(int32 * Protocol_hash.t * commit_info) list ->
   history_mode:History_mode.t ->
   unit tzresult Lwt.t
 

@@ -216,17 +216,6 @@ module Block_data_legacy : sig
   val encoding : t Data_encoding.t
 end
 
-val get_context_protocol_data_from_header :
-  index ->
-  Block_header.t ->
-  ( Context_hash.t list
-  * Protocol_hash.t
-  * Test_chain_status.t
-  * Context_hash.t
-  * Protocol_data.info )
-  tzresult
-  Lwt.t
-
 val dump_context :
   index -> Block_data.t -> context_file_path:string -> int tzresult Lwt.t
 
@@ -238,30 +227,38 @@ val restore_context :
   Block_data.t tzresult Lwt.t
 
 val restore_context_legacy :
+  ?expected_block:string ->
   index ->
-  filename:string ->
-  ((Block_hash.t * Pruned_block.t) list -> unit tzresult Lwt.t) ->
-  (Block_header.t option ->
-  Block_hash.t ->
-  Pruned_block.t ->
-  unit tzresult Lwt.t) ->
-  ( Block_header.t
-  * Block_data_legacy.t
-  * History_mode.t
-  * Block_header.t option
-  * Block_hash.t list
-  * Protocol_data_legacy.t list )
+  snapshot_file:string ->
+  handle_block:(Block_hash.t * Pruned_block.t -> unit tzresult Lwt.t) ->
+  handle_protocol_data:(Protocol_data_legacy.t -> unit tzresult Lwt.t) ->
+  block_validation:(Block_header.t option ->
+                   Block_hash.t ->
+                   Pruned_block.t ->
+                   unit tzresult Lwt.t) ->
+  (Block_header.t * Block_data_legacy.t * Block_header.t option) tzresult Lwt.t
+
+val retrieve_commit_info :
+  index ->
+  Block_header.t ->
+  ( Protocol_hash.t
+  * string
+  * string
+  * Time.Protocol.t
+  * Test_chain_status.t
+  * Context_hash.t
+  * Context_hash.t list )
   tzresult
   Lwt.t
 
-val validate_context_hash_consistency_and_commit :
-  data_hash:Context_hash.t ->
+val check_protocol_commit_consistency :
+  index ->
   expected_context_hash:Context_hash.t ->
-  timestamp:Time.Protocol.t ->
-  test_chain:Test_chain_status.t ->
-  protocol_hash:Protocol_hash.t ->
-  message:string ->
+  given_protocol_hash:Protocol_hash.t ->
   author:string ->
-  parents:Context_hash.t list ->
-  index:index ->
+  message:string ->
+  timestamp:Time.Protocol.t ->
+  test_chain_status:Test_chain_status.t ->
+  data_merkle_root:Context_hash.t ->
+  parents_contexts:Context_hash.t list ->
   bool Lwt.t

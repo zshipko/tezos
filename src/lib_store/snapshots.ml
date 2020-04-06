@@ -429,7 +429,9 @@ let export_protocols protocol_levels ~src_dir ~dst_dir =
   >>= fun dir_handle ->
   (* Only export the protocols relative to the targeted network *)
   let proto_to_export =
-    List.map (fun (_, (_, h)) -> h) (Protocol_levels.bindings protocol_levels)
+    List.map
+      (fun (_, (_, h, _)) -> h)
+      (Protocol_levels.bindings protocol_levels)
   in
   let nb_proto_to_export = List.length proto_to_export in
   Lwt_utils_unix.display_progress
@@ -1060,7 +1062,14 @@ let copy_protocols ~snapshot_protocol_dir ~dst_protocol_dir =
             >>= fun () ->
             fail_unless
               (Protocol_hash.equal expected_hash hash)
-              (Exn (Failure "Protocol sources are corrupted or something"))
+              (Exn
+                 (Failure
+                    (Format.asprintf
+                       "Inconsistent protocol hash: got %a expected %a"
+                       Protocol_hash.pp
+                       hash
+                       Protocol_hash.pp
+                       expected_hash)))
       in
       iter_s validate_and_copy protocols)
   >>=? fun () -> return protocol_levels
@@ -1082,12 +1091,10 @@ let check_context_hash_consistency validation_store block_header =
        block_header.Block_header.shell.context)
     (Snapshot_import_failure "resulting context hash does not match")
 
-let restore_and_apply_context ?expected_block ?patch_context ~snapshot_dir
-    ~dst_context_dir ~user_activated_upgrades
-    ~user_activated_protocol_overrides snapshot_metadata genesis chain_id =
+let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
+    ~user_activated_upgrades ~user_activated_protocol_overrides
+    snapshot_metadata genesis chain_id =
   (* Restore context *)
-  Context.init ~readonly:false ?patch_context dst_context_dir
-  >>= fun context_index ->
   (* Start by commiting genesis *)
   Context.commit_genesis
     context_index
@@ -1129,24 +1136,23 @@ let restore_and_apply_context ?expected_block ?patch_context ~snapshot_dir
   check_context_hash_consistency
     block_validation_result.validation_store
     block_header
-  >>=? fun () ->
-  Context.close context_index
-  >>= fun () -> return (block_data, genesis_ctxt_hash, block_validation_result)
+  >>=? fun () -> return (block_data, genesis_ctxt_hash, block_validation_result)
 
-let import ?patch_context ~snapshot_dir ~dst_store_dir ~dst_context_dir
-    ~user_activated_upgrades ~user_activated_protocol_overrides
-    ~block:expected_block (genesis : Genesis.t) =
+let import ?patch_context ?block:expected_block ~snapshot_dir ~dst_store_dir
+    ~dst_context_dir ~user_activated_upgrades
+    ~user_activated_protocol_overrides (genesis : Genesis.t) =
   import_log_notice snapshot_dir expected_block
   >>= fun () ->
   let chain_id = Chain_id.of_block_hash genesis.block in
   read_snapshot_metadata (Naming.Snapshot.metadata snapshot_dir)
   >>= fun snapshot_metadata ->
+  Context.init ~readonly:false ?patch_context dst_context_dir
+  >>= fun context_index ->
   (* Restore context *)
   restore_and_apply_context
     ?expected_block
-    ?patch_context
+    ~context_index
     ~snapshot_dir
-    ~dst_context_dir
     ~user_activated_upgrades
     ~user_activated_protocol_overrides
     snapshot_metadata
@@ -1220,6 +1226,7 @@ let import ?patch_context ~snapshot_dir ~dst_store_dir ~dst_context_dir
       Store.restore_from_snapshot
         ~notify
         ~store_dir:dst_store_dir
+        ~context_index
         ~genesis
         ~genesis_context_hash
         ~floating_blocks_stream
@@ -1229,6 +1236,8 @@ let import ?patch_context ~snapshot_dir ~dst_store_dir ~dst_context_dir
   >>=? fun () ->
   reading_thread
   >>=? fun () ->
+  Context.close context_index
+  >>= fun () ->
   lwt_emit (Import_success snapshot_dir) >>= fun () -> return_unit
 
 let snapshot_info ~snapshot_dir =
@@ -1237,7 +1246,8 @@ let snapshot_info ~snapshot_dir =
   Format.printf "%a@." Snapshot_version.metadata_pp metadata ;
   Lwt.return_unit
 
-(* LEGACY IMPORT *)
+(* Legacy import *)
+
 let legacy_verify_predecessors header_opt pred_hash =
   match header_opt with
   | None ->
@@ -1287,182 +1297,216 @@ let legacy_block_validation succ_header_opt header_hash
   legacy_check_operations_consistency block_header operations operation_hashes
   >>=? fun () -> return_unit
 
-let legacy_check_context_hash_consistency block_validation_result block_header
-    =
-  fail_unless
-    (Context_hash.equal
-       block_validation_result.Tezos_validation.Block_validation.context_hash
-       block_header.Block_header.shell.context)
-    (Snapshot_import_failure "resulting context hash does not match")
-
-let legacy_verify_oldest_header oldest_header genesis_hash =
-  let oldest_level = oldest_header.Block_header.shell.level in
-  fail_unless
-    ( oldest_level >= 1l
-    || Compare.Int32.(oldest_level = 1l)
-       && Block_hash.equal
-            oldest_header.Block_header.shell.predecessor
-            genesis_hash )
-    (Snapshot_import_failure "oldest level inconsistency")
-
-let import_legacy ?patch_context:_ ~store_root ~context_root ~data_dir
-    ~chain_name ~user_activated_upgrades ~user_activated_protocol_overrides
-    ~dir_cleaner ~(genesis : Genesis.t) filename expected_block =
-  let _chain_id = Chain_id.of_block_hash genesis.block in
+let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
+    ~dst_context_dir ~chain_name ~user_activated_upgrades
+    ~user_activated_protocol_overrides ~snapshot_file genesis =
   (* First: check that the imported snapshot is compatible with the
      hardcoded networks *)
   Legacy.Hardcoded.check_network ~chain_name
   >>=? fun () ->
-  import_log_notice filename expected_block
+  import_log_notice snapshot_file expected_block
   >>= fun () ->
-  Store.init
-    ~store_dir:store_root
-    ~context_dir:context_root
-    ~history_mode:History_mode.default
-    ~allow_testchains:false
-    genesis
-  >>=? fun store ->
-  let context_index = Store.context_index store in
-  let chain_store = Store.main_chain_store store in
-  let cycle_size = Legacy.Hardcoded.cycle_size ~chain_name in
-  Lwt.try_bind
-    (fun () ->
-      let k_store_pruned_blocks data =
-        let rec aux acc = function
-          | [] ->
-              return acc
-          | (pruned_header_hash, pruned_block) :: tl -> (
-              let header = pruned_block.Context.Pruned_block.block_header in
-              let operations = List.map snd pruned_block.operations in
-              let contents = ({header; operations} : Block_repr.contents) in
-              let block =
-                ( {hash = pruned_header_hash; contents; metadata = None}
-                  : Block_repr.block )
-              in
-              (* TODO : si le proto_level change, mettre à jour la table des proto tables (voir avec paul)*)
-              match header.shell.level with
-              | 1l ->
-                  Store.cement_blocks_chunk
-                    ~write_metadata:false
-                    chain_store
-                    [block]
-                  >>= fun () -> aux [] tl
-              | level ->
-                  let new_acc = block :: acc in
-                  if Int32.(to_int (sub level 1l)) mod cycle_size = 0 then
-                    Store.cement_blocks_chunk
-                      ~write_metadata:false
-                      chain_store
-                      (List.rev new_acc)
-                    >>= fun () -> aux [] tl
-                  else aux new_acc tl )
-        in
-        aux [] data
-        >>=? fun floating_to_store ->
-        let block_store = Store.unsafe_get_block_store chain_store in
-        Lwt_list.iter_s
-          (Block_store.store_block block_store)
-          (List.rev floating_to_store)
-        >>= fun () -> return_unit
-      in
-      (* Restore context and fetch data *)
-      Context.restore_context_legacy
-        context_index
-        ~filename
-        k_store_pruned_blocks
-        legacy_block_validation
-      >>=? fun ( predecessor_block_header,
-                 meta,
-                 _history_mode,
-                 oldest_header_opt,
-                 _rev_block_hashes,
-                 _protocol_data ) ->
-      let chain_id = Chain_id.of_block_hash genesis.block in
-      let pred_context_hash = predecessor_block_header.shell.context in
-      Context.checkout_exn context_index pred_context_hash
-      >>= fun predecessor_context ->
-      let {Context.Block_data_legacy.block_header; operations} = meta in
-      Tezos_validation.Block_validation.apply
-        chain_id
-        ~user_activated_upgrades
-        ~user_activated_protocol_overrides
-        ~max_operations_ttl:(Int32.to_int predecessor_block_header.shell.level)
-        ~predecessor_block_header
-        ~predecessor_context
-        ~block_header
-        operations
-      >>=? fun block_validation_result ->
-      legacy_check_context_hash_consistency
-        block_validation_result.validation_store
-        block_header
-      >>=? fun () ->
-      let oldest_header = Option.unopt_assert ~loc:__POS__ oldest_header_opt in
-      legacy_verify_oldest_header oldest_header genesis.block
-      >>=? fun () ->
-      (*We now store the new head*)
-      let ({validation_store; block_metadata; ops_metadata; _}
-            : Tezos_validation.Block_validation.result) =
-        block_validation_result
-      in
-      let contents =
-        ({header = block_header; operations} : Block_repr.contents)
-      in
-      let ({message; max_operations_ttl; last_allowed_fork_level; _}
-            : Block_validation.validation_store) =
-        validation_store
-      in
-      let metadata =
-        Some
-          ( {
-              message;
-              max_operations_ttl;
-              last_allowed_fork_level;
-              block_metadata;
-              operations_metadata = ops_metadata;
-            }
-            : Block_repr.metadata )
-      in
-      let new_head =
-        ( {hash = Block_header.hash block_header; contents; metadata}
-          : Block_repr.block )
-      in
-      Store.Block.store_block
-        chain_store
-        ~block_header
-        ~block_header_metadata:block_metadata
-        ~operations
-        ~operations_metadata:ops_metadata
-        ~context_hash:validation_store.context_hash
-        ~message
-        ~max_operations_ttl
-        ~last_allowed_fork_level
-      >>= fun _block ->
-      let rec check hash level =
-        if level = 0l then return_unit
-        else
-          Store.Block.read_block chain_store hash
-          >>=? fun b ->
-          Format.printf "Read %ld ok@." level ;
-          check (Store.Block.predecessor b) (Int32.sub level 1l)
-      in
-      check (Block_repr.hash new_head) (Block_repr.level new_head)
-      >>=? fun () ->
-      Store.Chain.checkpoint chain_store
-      >>= fun checkpoint ->
-      Store.Chain.savepoint chain_store
-      >>= fun savepoint ->
-      Store.Chain.caboose chain_store
-      >>= fun caboose ->
-      Format.printf
-        "Checkpoint %ld@.Savepoint %ld@.Caboose %ld@."
-        (snd checkpoint)
-        (snd savepoint)
-        (snd caboose) ;
-      return_unit)
-    (function
-      | Ok () ->
-          lwt_emit (Import_success filename) >>= fun () -> return_unit
-      | Error errors ->
-          dir_cleaner data_dir >>= fun () -> Lwt.return (Error errors))
-    (fun exn -> dir_cleaner data_dir >>= fun () -> Lwt.fail exn)
-  >>=? fun () -> return_unit
+  let chain_id = Chain_id.of_block_hash genesis.Genesis.block in
+  let dst_protocol_dir = Naming.(dst_store_dir // protocol_store_directory) in
+  let dst_chain_store_dir = Naming.(dst_store_dir // chain_store chain_id) in
+  let dst_cemented_dir =
+    Naming.(dst_chain_store_dir // cemented_blocks_directory)
+  in
+  Lwt_list.iter_s
+    (Lwt_utils_unix.create_dir ~perm:0o755)
+    [dst_store_dir; dst_protocol_dir; dst_chain_store_dir; dst_cemented_dir]
+  >>= fun () ->
+  (* let chain_store = Store.main_chain_store store in *)
+  let cycle_length = Legacy.Hardcoded.cycle_length ~chain_name in
+  Cemented_block_store.create ~cemented_blocks_dir:dst_cemented_dir
+  >>= fun cemented_store ->
+  let floating_blocks = ref [] in
+  let current_blocks = ref [] in
+  let has_reached_cemented = ref false in
+  let handle_block ((hash : Block_hash.t), (block : Context.Pruned_block.t)) =
+    (* We are given blocks in a reverse order ! *)
+    (let proj (hash, (block : Context.Pruned_block.t)) =
+       let contents =
+         {
+           Block_repr.header = block.block_header;
+           operations = List.map (fun (_, l) -> l) block.operations;
+         }
+       in
+       {Block_repr.hash; contents; metadata = None}
+     in
+     let block = proj (hash, block) in
+     match Block_repr.level block with
+     (* Hardcoded special treatement for first two blocks *)
+     | 0l ->
+         Cemented_block_store.cement_blocks
+           cemented_store
+           ~ensure_level:false
+           ~write_metadata:false
+           (block :: !current_blocks)
+     | 1l ->
+         assert (!current_blocks = []) ;
+         current_blocks := [block] ;
+         Lwt.return_unit
+     | level ->
+         (* 4 cases :
+             - in future floating blocks => after the cementing part
+             - at the end of a cycle
+             - in the midle of a cycle
+             - at the dawn of a cycle
+            *)
+         let is_end_of_a_cycle =
+           Compare.Int32.equal 1l Int32.(rem level (of_int cycle_length))
+         in
+         if is_end_of_a_cycle then (
+           if not !has_reached_cemented then (
+             has_reached_cemented := true ;
+             (* All current blocks should be written in floating *)
+             (* We will write them later on *)
+             floating_blocks := !current_blocks ) ;
+           (* Start building up the cycle to cement *)
+           current_blocks := [block] ;
+           Lwt.return_unit )
+         else
+           let is_dawn_of_a_cycle =
+             Compare.Int32.equal 2l Int32.(rem level (of_int cycle_length))
+           in
+           if is_dawn_of_a_cycle then
+             if !has_reached_cemented then (
+               (* Cycle is complete, cement it *)
+               Cemented_block_store.cement_blocks
+                 cemented_store
+                 ~ensure_level:false
+                 ~write_metadata:false
+                 (block :: !current_blocks)
+               >>= fun () ->
+               current_blocks := [] ;
+               Lwt.return_unit )
+             else (* nothing to do *)
+               Lwt.return_unit
+           else (
+             current_blocks := block :: !current_blocks ;
+             Lwt.return_unit ))
+    >>= fun () -> return_unit
+  in
+  let partial_protocol_levels :
+      (int32 * Protocol_hash.t * commit_info) list ref =
+    ref []
+  in
+  let handle_protocol_data (transition_level, protocol) =
+    let open Context.Protocol_data_legacy in
+    let { info = {author; message; timestamp};
+          protocol_hash;
+          test_chain_status;
+          data_key;
+          parents } =
+      protocol
+    in
+    let commit_info =
+      {
+        author;
+        message;
+        timestamp;
+        test_chain_status;
+        data_merkle_root = data_key;
+        parents_contexts = parents;
+      }
+    in
+    partial_protocol_levels :=
+      (transition_level, protocol_hash, commit_info)
+      :: !partial_protocol_levels ;
+    return_unit
+  in
+  Context.init ~readonly:false ?patch_context dst_context_dir
+  >>= fun context_index ->
+  (* Start by commiting genesis in the context *)
+  Context.commit_genesis
+    context_index
+    ~chain_id
+    ~time:genesis.Genesis.time
+    ~protocol:genesis.protocol
+  >>=? fun genesis_context_hash ->
+  (* Restore context and fetch data *)
+  Context.restore_context_legacy
+    ?expected_block
+    context_index
+    ~snapshot_file
+    ~handle_block
+    ~handle_protocol_data
+    ~block_validation:legacy_block_validation
+  >>=? fun (pred_block_header, block_data, oldest_header_opt) ->
+  let history_mode =
+    match oldest_header_opt with
+    | None ->
+        History_mode.default
+    | Some header when Compare.Int32.(header.Block_header.shell.level <= 1l) ->
+        History_mode.default
+    | Some _ ->
+        History_mode.(Rolling {offset = default_offset})
+  in
+  (* Floating blocks should be initialized now *)
+  let floating_blocks =
+    if not !has_reached_cemented then !current_blocks else !floating_blocks
+  in
+  (* Apply pred block *)
+  let pred_context_hash = pred_block_header.shell.context in
+  Context.checkout_exn context_index pred_context_hash
+  >>= fun predecessor_context ->
+  let {Context.Block_data_legacy.block_header; operations} = block_data in
+  Tezos_validation.Block_validation.apply
+    chain_id
+    ~user_activated_upgrades
+    ~user_activated_protocol_overrides
+    ~max_operations_ttl:
+      (Int32.to_int pred_block_header.shell.level) (* Allows old operations *)
+    ~predecessor_block_header:pred_block_header
+    ~predecessor_context
+    ~block_header
+    operations
+  >>=? fun block_validation_result ->
+  fail_unless
+    (Context_hash.equal
+       block_validation_result.validation_store.Block_validation.context_hash
+       block_header.Block_header.shell.context)
+    (Snapshot_import_failure "Resulting context hash does not match")
+  >>=? fun () ->
+  let {Block_validation.validation_store; block_metadata; ops_metadata; _} =
+    block_validation_result
+  in
+  let contents = {Block_repr.header = block_header; operations} in
+  let {Block_validation.message; max_operations_ttl; last_allowed_fork_level; _}
+      =
+    validation_store
+  in
+  let metadata =
+    Some
+      {
+        Block_repr.message;
+        max_operations_ttl;
+        last_allowed_fork_level;
+        block_metadata;
+        operations_metadata = ops_metadata;
+      }
+  in
+  let new_head_with_metadata =
+    ( {hash = Block_header.hash block_header; contents; metadata}
+      : Block_repr.block )
+  in
+  (* Append the new head with the floating blocks *)
+  Lwt_utils_unix.display_progress
+    ~every:100
+    ~pp_print_step:(fun fmt i ->
+      Format.fprintf fmt "Storing floating blocks: %d blocks wrote..." i)
+    (fun notify ->
+      Store.restore_from_legacy_snapshot
+        ~notify
+        ~store_dir:dst_store_dir
+        ~context_index
+        ~genesis
+        ~genesis_context_hash
+        ~floating_blocks_stream:(Lwt_stream.of_list floating_blocks)
+        ~new_head_with_metadata
+        ~partial_protocol_levels:!partial_protocol_levels
+        ~history_mode)
+  >>=? fun () ->
+  (* Protocol will be stored next time the store is loaded *)
+  lwt_emit (Import_success snapshot_file) >>= fun () -> return_unit

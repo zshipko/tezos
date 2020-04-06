@@ -463,30 +463,40 @@ end
 
 (* Hardcoded networks data*)
 module Hardcoded = struct
-  (*Sweet hardcoded values *)
-  let supported_networks =
-    [ ("TEZOS_MAINNET", 4096);
-      ("TEZOS_ALPHANET_CARTHAGE_2019-11-28T13:02:13Z", 2048);
-      ("TEZOS", 8) ]
+  type network = {name : string; cycle_length : int}
 
-  let cycle_size ~chain_name =
-    (fun (_, cycle_size) -> cycle_size)
-      (List.find (fun (cn, _) -> chain_name = cn) supported_networks)
+  let proj (name, cycle_length) = {name; cycle_length}
+
+  (* Hardcoded cycle length *)
+  let supported_networks =
+    List.map
+      proj
+      [ ("TEZOS_MAINNET", 4096);
+        ("TEZOS_ALPHANET_CARTHAGE_2019-11-28T13:02:13Z", 2048);
+        ("TEZOS", 8) ]
+
+  let cycle_length ~chain_name =
+    List.find_map
+      (fun {name; cycle_length} ->
+        if chain_name = name then Some cycle_length else None)
+      supported_networks
+    |> Option.unopt_assert ~loc:__POS__
 
   let check_network ~chain_name =
-    if not (List.exists (fun (cn, _) -> chain_name = cn) supported_networks)
+    if
+      not (List.exists (fun {name; _} -> chain_name = name) supported_networks)
     then
       failwith
         "Cannot perform operation for chain_name %s. Only %a are supported."
         chain_name
         (Format.pp_print_list
            ~pp_sep:(fun ppf () -> Format.fprintf ppf ", ")
-           (fun ppf (name, _) -> Format.fprintf ppf "%s" name))
+           (fun ppf {name; _} -> Format.fprintf ppf "%s" name))
         supported_networks
     else return_unit
 
   (* Aims to tell if the checkpoint set and a cimentage is needed*)
-  let may_update_checkpoint ~cycle_size nb_blocks = nb_blocks = cycle_size
+  let may_update_checkpoint ~cycle_length nb_blocks = nb_blocks = cycle_length
 end
 
 (* Legacy store convertion*)
@@ -575,19 +585,18 @@ let may_update_protocol_table lmdb_block_store chain_store block
   then
     Chain.Protocol_info.bindings lmdb_block_store
     >>= fun protocol_table ->
-    let (proto_hash, transition_level) : Chain.Protocol_info.value =
+    let (proto_hash, _transition_level) : Chain.Protocol_info.value =
       List.assoc (Block_repr.proto_level block) protocol_table
     in
-    let hash = Block_repr.hash block in
     Store.Chain.set_protocol_level
       chain_store
       prev_proto_level
-      ((hash, transition_level), proto_hash)
-  else Lwt.return_unit
+      (Store.Block.of_repr block, proto_hash)
+  else return_unit
 
 let import_floating lmdb_block_store chain_store ?(with_metadata = true)
     block_hash limit =
-  (* TODO: Make it tail rec ? if yes, we must be able to store a block
+  (* TODO: Make it tail rec ? If so, we must be able to store a block
    without searching for its predecessors*)
   let block_store = Store.unsafe_get_block_store chain_store in
   let rec aux hash =
@@ -600,7 +609,7 @@ let import_floating lmdb_block_store chain_store ?(with_metadata = true)
       chain_store
       block_repr
       prev_proto_level
-    >>= fun () ->
+    >>=? fun () ->
     if Block_repr.level block_repr = limit then
       Block_store.store_block block_store block_repr >>= fun () -> return_unit
     else
@@ -611,11 +620,11 @@ let import_floating lmdb_block_store chain_store ?(with_metadata = true)
   in
   aux block_hash
 
-let new_import_cemented lmdb_chain_store chain_store cycle_size ~with_metadata
-    ~start_block =
+let new_import_cemented lmdb_chain_store chain_store cycle_length
+    ~with_metadata ~start_block =
   (* We assume that the limits are "on cycles" *)
   assert (
-    Int32.(to_int (sub (Block_repr.level start_block) 1l)) mod cycle_size = 0
+    Int32.(to_int (sub (Block_repr.level start_block) 1l)) mod cycle_length = 0
   ) ;
   let rec aux (last_checkpoint : Block_header.t) acc hash =
     make_block_repr ~with_metadata lmdb_chain_store hash
@@ -627,7 +636,7 @@ let new_import_cemented lmdb_chain_store chain_store cycle_size ~with_metadata
       chain_store
       block_repr
       prev_proto_level
-    >>= fun () ->
+    >>=? fun () ->
     let new_acc = block_repr :: acc in
     if Block_repr.level block_repr = 1l then
       (* Special case to cement [genesis;1] *)
@@ -642,7 +651,7 @@ let new_import_cemented lmdb_chain_store chain_store cycle_size ~with_metadata
         [genesis; block_repr]
         ~write_metadata:with_metadata
       >>= fun () -> return_unit
-    else if Hardcoded.may_update_checkpoint ~cycle_size (List.length new_acc)
+    else if Hardcoded.may_update_checkpoint ~cycle_length (List.length new_acc)
     then
       Store.cement_blocks_chunk
         chain_store
@@ -679,7 +688,7 @@ let dirty_read_i lmdb_chain_store hash target_level =
   in
   aux hash
 
-let archive_import lmdb_chain_store chain_store cycle_size checkpoint
+let archive_import lmdb_chain_store chain_store cycle_length checkpoint
     current_head_hash =
   let checkpoint_hash = Block_header.hash checkpoint in
   make_block_repr ~with_metadata:true lmdb_chain_store checkpoint_hash
@@ -687,7 +696,7 @@ let archive_import lmdb_chain_store chain_store cycle_size checkpoint
   new_import_cemented
     lmdb_chain_store
     chain_store
-    cycle_size
+    cycle_length
     ~with_metadata:true
     ~start_block
   >>=? fun () ->
@@ -703,7 +712,7 @@ let archive_import lmdb_chain_store chain_store cycle_size checkpoint
   let sp = cb in
   return (cp, sp, cb)
 
-let full_import lmdb_chain_store chain_store cycle_size checkpoint
+let full_import lmdb_chain_store chain_store cycle_length checkpoint
     current_head_hash =
   let checkpoint_hash = Block_header.hash checkpoint in
   make_block_repr ~with_metadata:true lmdb_chain_store checkpoint_hash
@@ -711,7 +720,7 @@ let full_import lmdb_chain_store chain_store cycle_size checkpoint
   new_import_cemented
     lmdb_chain_store
     chain_store
-    cycle_size
+    cycle_length
     ~with_metadata:false
     ~start_block
   >>=? fun () ->
@@ -733,7 +742,7 @@ let full_import lmdb_chain_store chain_store cycle_size checkpoint
   let sp = (Block_header.hash sp_header, sp_header.shell.level) in
   return (cp, sp, cb)
 
-let rolling_import lmdb_chain_store chain_store cycle_size checkpoint
+let rolling_import lmdb_chain_store chain_store cycle_length checkpoint
     current_head_hash =
   let lmdb_chain_data = Chain_data.get lmdb_chain_store in
   (*TODO: in rolling, everything is in floating. Check that the
@@ -746,7 +755,7 @@ let rolling_import lmdb_chain_store chain_store cycle_size checkpoint
     Int32.(
       sub
         (add checkpoint.Block_header.shell.level 1l)
-        (of_int (History_mode.default_offset * cycle_size)))
+        (of_int (History_mode.default_offset * cycle_length)))
   in
   dirty_read_i lmdb_chain_store current_head_hash caboose_level
   >>=? fun caboose_header ->
@@ -754,7 +763,7 @@ let rolling_import lmdb_chain_store chain_store cycle_size checkpoint
   make_block_repr ~with_metadata:true lmdb_chain_store savepoint_hash
   >>=? fun savepoint ->
   (* Importing [caboose-(max_op_ttl(caboose));savepoint[ in floating *)
-  (* We take (caboose - lmdb_caboose) blocks for the max_op_ttl are it is the 
+  (* We take (caboose - lmdb_caboose) blocks for the max_op_ttl are it is the
    only data available … *)
   Chain_data.Caboose.read lmdb_chain_data
   >>=? fun (lmdb_caboose_level, _) ->
@@ -789,13 +798,13 @@ let rolling_import lmdb_chain_store chain_store cycle_size checkpoint
   let cp = (Block_header.hash checkpoint, checkpoint_level) in
   return (cp, sp, cb)
 
-let infer_checkpoint lmdb_chain_data cycle_size =
+let infer_checkpoint lmdb_chain_data cycle_length =
   (* When upgrading from a full or rolling node, the checkpoint may not be set
    on a "real checkpoint".*)
   Chain_data.Checkpoint.read lmdb_chain_data
   >>=? fun checkpoint ->
   let checkpoint_level = Int32.to_int checkpoint.shell.level in
-  let modulo = (checkpoint_level - 1) mod cycle_size in
+  let modulo = (checkpoint_level - 1) mod cycle_length in
   if modulo = 0 then return checkpoint
   else
     failwith
@@ -805,7 +814,7 @@ let infer_checkpoint lmdb_chain_data cycle_size =
       (Block_header.hash checkpoint)
       checkpoint_level
 
-let import_blocks lmdb_chain_store chain_store cycle_size checkpoint
+let import_blocks lmdb_chain_store chain_store cycle_length checkpoint
     history_mode =
   (* TODO: add progression or something*)
   let lmdb_chain_data = Chain_data.get lmdb_chain_store in
@@ -816,28 +825,28 @@ let import_blocks lmdb_chain_store chain_store cycle_size checkpoint
       archive_import
         lmdb_chain_store
         chain_store
-        cycle_size
+        cycle_length
         checkpoint
         current_head_hash
   | Full _ ->
       full_import
         lmdb_chain_store
         chain_store
-        cycle_size
+        cycle_length
         checkpoint
         current_head_hash
   | Rolling _ ->
       rolling_import
         lmdb_chain_store
         chain_store
-        cycle_size
+        cycle_length
         checkpoint
         current_head_hash )
   >>=? fun (new_checkpoint, new_savepoint, new_caboose) ->
   return (new_checkpoint, new_savepoint, new_caboose)
 
 let import_protocols history_mode lmdb_store lmdb_chain_store store checkpoint
-    cycle_size =
+    cycle_length =
   let lmdb_chain_data = Chain_data.get lmdb_chain_store in
   match (history_mode : History_mode.t) with
   | Archive | Full _ ->
@@ -864,7 +873,7 @@ let import_protocols history_mode lmdb_store lmdb_chain_store store checkpoint
         Int32.(
           sub
             (add checkpoint.Block_header.shell.level 1l)
-            (of_int (History_mode.default_offset * cycle_size)))
+            (of_int (History_mode.default_offset * cycle_length)))
       in
       dirty_read_i lmdb_chain_store current_head_hash caboose_level
       >>=? fun caboose_header ->
@@ -873,18 +882,17 @@ let import_protocols history_mode lmdb_store lmdb_chain_store store checkpoint
         (lmdb_chain_store, caboose_header.shell.predecessor)
       >>=? fun {header = transition_header; _} ->
       let protocol_level = current_head.header.shell.proto_level in
-      let transition_info =
-        (Block_header.hash transition_header, transition_header.shell.level)
-      in
       Chain.Protocol_info.read lmdb_chain_store protocol_level
       >>=? fun protocol_info ->
       let protocol_hash = fst protocol_info in
       let chain_store = Store.main_chain_store store in
+      let transition_hash = Block_header.hash transition_header in
+      make_block_repr ~with_metadata:false lmdb_chain_store transition_hash
+      >>=? fun transition_block ->
       Store.Chain.set_protocol_level
         chain_store
         protocol_level
-        (transition_info, protocol_hash)
-      >>= fun () -> return_unit
+        (Store.Block.of_repr transition_block, protocol_hash)
 
 let update_stored_data lmdb_chain_data chain_store ~new_checkpoint
     ~new_savepoint ~new_caboose =
@@ -940,8 +948,8 @@ let upgrade_0_0_4 ~data_dir genesis patch_context ~chain_name =
         ~allow_testchains:true
         genesis
       >>=? fun store ->
-      let cycle_size = Hardcoded.cycle_size ~chain_name in
-      infer_checkpoint lmdb_chain_data cycle_size
+      let cycle_length = Hardcoded.cycle_length ~chain_name in
+      infer_checkpoint lmdb_chain_data cycle_length
       >>=? fun checkpoint ->
       let chain_store = Store.main_chain_store store in
       import_protocols
@@ -950,12 +958,12 @@ let upgrade_0_0_4 ~data_dir genesis patch_context ~chain_name =
         lmdb_chain_store
         store
         checkpoint
-        cycle_size
+        cycle_length
       >>=? fun () ->
       import_blocks
         lmdb_chain_store
         chain_store
-        cycle_size
+        cycle_length
         checkpoint
         history_mode
       >>=? fun (new_checkpoint, new_savepoint, new_caboose) ->

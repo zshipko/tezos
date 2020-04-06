@@ -88,7 +88,7 @@ let build_raw_header_rpc_directory (module Proto : Block_services.PROTO) =
   register0 S.protocols (fun (chain_store, _hash, header) () () ->
       Store.Chain.find_protocol_level chain_store header.shell.proto_level
       >>= fun next_proto ->
-      let (_, next_protocol_hash) = Option.unopt_exn Not_found next_proto in
+      let (_, next_protocol_hash, _) = Option.unopt_exn Not_found next_proto in
       Store.Block.read_block_opt chain_store header.shell.predecessor
       >>= function
       | None ->
@@ -104,7 +104,7 @@ let build_raw_header_rpc_directory (module Proto : Block_services.PROTO) =
             chain_store
             pred_header.shell.proto_level
           >>= fun current_protocol ->
-          let (_, protocol_hash) =
+          let (_, protocol_hash, _) =
             Option.unopt_exn Not_found current_protocol
           in
           return
@@ -418,7 +418,7 @@ let get_directory ~user_activated_upgrades ~user_activated_protocol_overrides
                       chain_store
                       (Store.Block.proto_level pred)
                     >>= fun predecessor_protocol ->
-                    let (_, protocol_hash) =
+                    let (_, protocol_hash, _) =
                       Option.unopt_exn Not_found predecessor_protocol
                     in
                     Lwt.return protocol_hash

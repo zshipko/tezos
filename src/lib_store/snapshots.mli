@@ -35,12 +35,12 @@ val export :
 
 val import :
   ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->
+  ?block:string ->
   snapshot_dir:string ->
   dst_store_dir:string ->
   dst_context_dir:string ->
   user_activated_upgrades:User_activated.upgrades ->
   user_activated_protocol_overrides:User_activated.protocol_overrides ->
-  block:string option ->
   Genesis.t ->
   unit tzresult Lwt.t
 
@@ -48,14 +48,12 @@ val snapshot_info : snapshot_dir:string -> unit Lwt.t
 
 val import_legacy :
   ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->
-  store_root:string ->
-  context_root:string ->
-  data_dir:string ->
+  ?block:string ->
+  dst_store_dir:string ->
+  dst_context_dir:string ->
   chain_name:string ->
   user_activated_upgrades:User_activated.upgrades ->
   user_activated_protocol_overrides:User_activated.protocol_overrides ->
-  dir_cleaner:(string -> unit Lwt.t) ->
-  genesis:Genesis.t ->
-  string ->
-  string option ->
+  snapshot_file:string ->
+  Genesis.t ->
   unit tzresult Lwt.t

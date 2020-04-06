@@ -24,9 +24,11 @@
 (*****************************************************************************)
 
 module Hardcoded : sig
-  val supported_networks : (string * int) list
+  type network = {name : string; cycle_length : int}
 
-  val cycle_size : chain_name:string -> int
+  val supported_networks : network list
+
+  val cycle_length : chain_name:string -> int
 
   val check_network : chain_name:string -> unit tzresult Lwt.t
 end

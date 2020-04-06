@@ -840,10 +840,10 @@ module Dumpable_context = struct
     Store.Commit.v ctxt.index.repo ~info ~parents ctxt.tree
     >>= fun c ->
     let h = Store.Commit.hash c in
-    if
+    let are_context_equal =
       Context_hash.equal bh.Block_header.shell.context (Hash.to_context_hash h)
-    then Lwt.return_some bh
-    else Lwt.return_none
+    in
+    Lwt.return are_context_equal
 
   let context_tree ctxt = ctxt.tree
 
@@ -909,11 +909,12 @@ module Dumpable_context = struct
         (* Save the node in the store ... *)
         Store.save_tree ~clear:true repo x y tree >|= fun _ -> Some tree
 
+  (* TO REMOVE *)
   module Commit_hash = Context_hash
   module Block_header = Block_header
   module Block_data = Block_data
   module Pruned_block = Pruned_block
-  module Protocol_data = Protocol_data
+  module Protocol_data = Protocol_data_legacy
 end
 
 module Dumpable_context_legacy = struct
@@ -988,10 +989,10 @@ module Dumpable_context_legacy = struct
     Store.Commit.v ctxt.index.repo ~info ~parents ctxt.tree
     >>= fun c ->
     let h = Store.Commit.hash c in
-    if
+    let are_context_equal =
       Context_hash.equal bh.Block_header.shell.context (Hash.to_context_hash h)
-    then Lwt.return_some bh
-    else Lwt.return_none
+    in
+    Lwt.return are_context_equal
 
   let context_tree ctxt = ctxt.tree
 
@@ -1066,47 +1067,57 @@ end
 
 (* Protocol data *)
 
-let data_node_hash context =
+let data_merkle_root_hash context =
   Store.Tree.get_tree context.tree current_data_key
   >|= fun tree -> Hash.to_context_hash (Store.Tree.hash tree)
 
-let get_context_protocol_data_from_header index block_header =
+let retrieve_commit_info index block_header =
   checkout_exn index block_header.Block_header.shell.context
   >>= fun context ->
   let irmin_info = Dumpable_context.context_info context in
-  let date = Irmin.Info.date irmin_info in
   let author = Irmin.Info.author irmin_info in
   let message = Irmin.Info.message irmin_info in
-  let info =
-    {Protocol_data.timestamp = Time.Protocol.of_seconds date; author; message}
-  in
-  let parents = Dumpable_context.context_parents context in
+  let timestamp = Time.Protocol.of_seconds (Irmin.Info.date irmin_info) in
   get_protocol context
   >>=? fun protocol_hash ->
   get_test_chain context
   >>= fun test_chain_status ->
-  data_node_hash context
-  >>= fun data_key ->
-  return (parents, protocol_hash, test_chain_status, data_key, info)
+  data_merkle_root_hash context
+  >>= fun data_merkle_root ->
+  let parents_contexts = Dumpable_context.context_parents context in
+  return
+    ( protocol_hash,
+      author,
+      message,
+      timestamp,
+      test_chain_status,
+      data_merkle_root,
+      parents_contexts )
 
-let validate_context_hash_consistency_and_commit ~data_hash
-    ~expected_context_hash ~timestamp ~test_chain ~protocol_hash ~message
-    ~author ~parents ~index =
-  let data_hash = Hash.of_context_hash data_hash in
-  let parents = List.map Hash.of_context_hash parents in
-  let protocol_value = Protocol_hash.to_bytes protocol_hash in
-  let test_chain_value =
-    Data_encoding.Binary.to_bytes_exn Test_chain_status.encoding test_chain
-  in
+let check_protocol_commit_consistency index ~expected_context_hash
+    ~given_protocol_hash ~author ~message ~timestamp ~test_chain_status
+    ~data_merkle_root ~parents_contexts =
+  let data_merkle_root = Hash.of_context_hash data_merkle_root in
+  let parents = List.map Hash.of_context_hash parents_contexts in
+  let protocol_hash_bytes = Protocol_hash.to_bytes given_protocol_hash in
   let tree = Store.Tree.empty in
-  Store.Tree.add tree current_protocol_key (Bytes.to_string protocol_value)
+  Store.Tree.add
+    tree
+    current_protocol_key
+    (Bytes.unsafe_to_string protocol_hash_bytes)
   >>= fun tree ->
-  Store.Tree.add tree current_test_chain_key (Bytes.to_string test_chain_value)
+  let test_chain_status_bytes =
+    Bytes.unsafe_to_string
+      (Data_encoding.Binary.to_bytes_exn
+         Test_chain_status.encoding
+         test_chain_status)
+  in
+  Store.Tree.add tree current_test_chain_key test_chain_status_bytes
   >>= fun tree ->
   let info =
     Irmin.Info.v ~date:(Time.Protocol.to_seconds timestamp) ~author message
   in
-  let data_tree = Store.Tree.shallow index.repo data_hash in
+  let data_tree = Store.Tree.shallow index.repo data_merkle_root in
   Store.Tree.add_tree tree ["data"] data_tree
   >>= fun node ->
   let node = Store.Tree.hash node in
@@ -1119,11 +1130,11 @@ let validate_context_hash_consistency_and_commit ~data_hash
       let parent = Store.of_private_commit index.repo commit in
       {index; tree = Store.Tree.empty; parents = [parent]}
     in
-    set_test_chain ctxt test_chain
+    set_test_chain ctxt test_chain_status
     >>= fun ctxt ->
-    set_protocol ctxt protocol_hash
+    set_protocol ctxt given_protocol_hash
     >>= fun ctxt ->
-    let data_t = Store.Tree.shallow index.repo data_hash in
+    let data_t = Store.Tree.shallow index.repo data_merkle_root in
     Store.Tree.add_tree ctxt.tree current_data_key data_t
     >>= fun new_tree ->
     Store.Commit.v ctxt.index.repo ~info ~parents new_tree
@@ -1140,15 +1151,17 @@ module Context_dumper_legacy =
 
 (* provides functions dump_context and restore_context *)
 let dump_context idx data ~context_file_path =
-  (*TODO better naming*)
-  let file_init filename () =
-    Lwt_unix.openfile filename Lwt_unix.[O_WRONLY; O_CREAT; O_TRUNC] 0o666
-    >>= return
-  in
-  (* TODO : add file name to namming *)
-  Lwt.catch (file_init context_file_path) (function
+  (* TODO better naming *)
+  Lwt.catch
+    (fun () ->
+      Lwt_unix.openfile
+        context_file_path
+        Lwt_unix.[O_WRONLY; O_CREAT; O_TRUNC]
+        0o644
+      >>= return)
+    (function
       | Unix.Unix_error (e, _, _) ->
-          fail @@ Cannot_create_file (Unix.error_message e)
+          fail (Cannot_create_file (Unix.error_message e))
       | exc ->
           let msg =
             Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
@@ -1157,12 +1170,12 @@ let dump_context idx data ~context_file_path =
   >>=? fun context_fd -> Context_dumper.dump_context_fd idx data ~context_fd
 
 let restore_context ?expected_block idx ~context_file_path ~metadata =
-  let file_init () =
-    Lwt_unix.openfile context_file_path Lwt_unix.[O_RDONLY] 0o600 >>= return
-  in
-  Lwt.catch file_init (function
+  Lwt.catch
+    (fun () ->
+      Lwt_unix.openfile context_file_path Lwt_unix.[O_RDONLY] 0o444 >>= return)
+    (function
       | Unix.Unix_error (e, _, _) ->
-          fail @@ Cannot_open_file (Unix.error_message e)
+          fail (Cannot_open_file (Unix.error_message e))
       | exc ->
           let msg =
             Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
@@ -1179,17 +1192,17 @@ let restore_context ?expected_block idx ~context_file_path ~metadata =
       >>= fun stats ->
       let total = stats.Lwt_unix.st_size in
       if current = total then return result
-      else fail @@ Suspicious_file (total - current))
+      else fail (Suspicious_file (total - current)))
     (fun () -> Lwt_unix.close fd)
 
-let restore_context_legacy idx ~filename k_store_pruned_block
-    pipeline_validation =
-  let file_init () =
-    Lwt_unix.openfile filename Lwt_unix.[O_RDONLY] 0o600 >>= return
-  in
-  Lwt.catch file_init (function
+let restore_context_legacy ?expected_block idx ~snapshot_file ~handle_block
+    ~handle_protocol_data ~block_validation =
+  Lwt.catch
+    (fun () ->
+      Lwt_unix.openfile snapshot_file [Unix.O_RDONLY] 0o600 >>= return)
+    (function
       | Unix.Unix_error (e, _, _) ->
-          fail @@ Cannot_open_file (Unix.error_message e)
+          fail (Cannot_open_file (Unix.error_message e))
       | exc ->
           let msg =
             Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
@@ -1201,8 +1214,10 @@ let restore_context_legacy idx ~filename k_store_pruned_block
       Context_dumper_legacy.restore_context_fd
         idx
         ~fd
-        k_store_pruned_block
-        pipeline_validation
+        ?expected_block
+        ~handle_block
+        ~handle_protocol_data
+        ~block_validation
       >>=? fun result ->
       Lwt_unix.lseek fd 0 Lwt_unix.SEEK_CUR
       >>= fun current ->
@@ -1210,5 +1225,5 @@ let restore_context_legacy idx ~filename k_store_pruned_block
       >>= fun stats ->
       let total = stats.Lwt_unix.st_size in
       if current = total then return result
-      else fail @@ Suspicious_file (total - current))
+      else fail (Suspicious_file (total - current)))
     (fun () -> Lwt_unix.close fd)
