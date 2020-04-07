@@ -343,7 +343,9 @@ module type S_legacy = sig
                      Block_hash.t ->
                      pruned_block ->
                      unit tzresult Lwt.t) ->
-    (block_header * block_data * Block_header.t option) tzresult Lwt.t
+    (block_header * block_data * Block_header.t option * History_mode.Legacy.t)
+    tzresult
+    Lwt.t
 end
 
 module Make (I : Dump_interface) = struct
@@ -812,19 +814,14 @@ module Make_legacy (I : Dump_interface) = struct
 
   (* Snapshot metadata *)
 
-  type snapshot_metadata = {
-    version : string;
-    mode : Tezos_shell_services.History_mode.t;
-  }
+  type snapshot_metadata = {version : string; mode : History_mode.Legacy.t}
 
   let snapshot_metadata_encoding =
     let open Data_encoding in
     conv
       (fun {version; mode} -> (version, mode))
       (fun (version, mode) -> {version; mode})
-      (obj2
-         (req "version" string)
-         (req "mode" Tezos_shell_services.History_mode.encoding))
+      (obj2 (req "version" string) (req "mode" History_mode.Legacy.encoding))
 
   let read_snapshot_metadata rbuf =
     get_mbytes rbuf
@@ -850,13 +847,22 @@ module Make_legacy (I : Dump_interface) = struct
       | None -> fail Restore_context_failure | Some tree -> return tree
     in
     let restore () =
-      let rec first_pass ctxt notify batch =
+      let rec first_pass ctxt batch notify =
         notify ()
         >>= fun () ->
         get_command rbuf
         >>=? function
-        | Root {block_header; info; parents; block_data} -> (
-            (* Checks that the block hash imported by the snapshot is the expected one *)
+        | Node contents ->
+            add_dir batch contents
+            >>=? fun tree ->
+            first_pass (I.update_context ctxt tree) batch notify
+        | Blob data ->
+            add_blob batch data
+            >>=? fun tree ->
+            first_pass (I.update_context ctxt tree) batch notify
+        | Root {block_header; info; parents; block_data} ->
+            (* Checks that the block hash imported by the snapshot is
+               the expected one *)
             let imported_block_header = I.Block_data.header block_data in
             let imported_block_hash =
               Block_header.hash imported_block_header
@@ -871,19 +877,9 @@ module Make_legacy (I : Dump_interface) = struct
                 return_unit )
             >>=? fun () ->
             I.set_context ~info ~parents ctxt block_header
-            >>= function
-            | false ->
-                fail Inconsistent_snapshot_data
-            | true ->
-                return (block_header, block_data) )
-        | Node contents ->
-            add_dir batch contents
-            >>=? fun tree ->
-            first_pass (I.update_context ctxt tree) notify batch
-        | Blob data ->
-            add_blob batch data
-            >>=? fun tree ->
-            first_pass (I.update_context ctxt tree) notify batch
+            >>= fun is_correct ->
+            fail_unless is_correct Inconsistent_snapshot_data
+            >>=? fun () -> return (block_header, block_data)
         | _ ->
             fail Inconsistent_snapshot_data
       in
@@ -919,7 +915,8 @@ module Make_legacy (I : Dump_interface) = struct
               Format.asprintf "%dMiB" (!read / 1_048_576)
             else Format.asprintf "%dKiB" (!read / 1_024) ))
         (fun notify ->
-          I.batch index (first_pass (I.make_context index) notify))
+          I.batch index (fun batch ->
+              first_pass (I.make_context index) batch notify))
       >>=? fun (pred_block_header, export_block_data) ->
       Lwt_utils_unix.display_progress
         ~every:1000
@@ -933,7 +930,16 @@ module Make_legacy (I : Dump_interface) = struct
       (fun () ->
         (* Check snapshot version *)
         read_snapshot_metadata rbuf
-        >>=? fun version -> check_version version >>=? fun () -> restore ())
+        >>=? fun version ->
+        check_version version
+        >>=? fun () ->
+        restore ()
+        >>=? fun (pred_block_header, export_block_data, oldest_header_opt) ->
+        return
+          ( pred_block_header,
+            export_block_data,
+            oldest_header_opt,
+            version.mode ))
       (function
         | Unix.Unix_error (e, _, _) ->
             fail (System_read_error (Unix.error_message e))

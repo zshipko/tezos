@@ -23,22 +23,6 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-module Legacy_history_mode = struct
-  type t = Archive | Full | Rolling
-
-  let encoding =
-    Data_encoding.string_enum
-      [("archive", Archive); ("full", Full); ("rolling", Rolling)]
-
-  let update = function
-    | Rolling ->
-        History_mode.(Rolling {offset = default_offset})
-    | Full ->
-        History_mode.default
-    | Archive ->
-        History_mode.Archive
-end
-
 module Legacy_store = struct
   (* type t = Raw_store.t *)
 
@@ -55,7 +39,7 @@ module Legacy_store = struct
         (struct
           let name = ["history_mode"]
         end)
-        (Store_helpers.Make_value (Legacy_history_mode))
+        (Store_helpers.Make_value (History_mode.Legacy))
   end
 
   (**************************************************************************
@@ -939,7 +923,7 @@ let upgrade_0_0_4 ~data_dir genesis patch_context ~chain_name =
       let context_root = data_dir // "context" in
       Configuration.History_mode.read lmdb_store
       >>=? fun legacy_history_mode ->
-      let history_mode = Legacy_history_mode.update legacy_history_mode in
+      let history_mode = History_mode.convert legacy_history_mode in
       Store.init
         ?patch_context
         ~store_dir:store_root

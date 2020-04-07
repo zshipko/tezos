@@ -2323,6 +2323,16 @@ let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
   >>= fun () ->
   notify ()
   >>= fun () ->
+  (* We also need to store the genesis' protocol transition *)
+  Chain.get_commit_info context_index (Block.header genesis_block)
+  >>=? fun genesis_commit_info ->
+  let initial_protocol_levels =
+    Protocol_levels.(
+      add
+        (Block.proto_level genesis_block)
+        (Block.descriptor genesis_block, genesis.protocol, genesis_commit_info)
+        empty)
+  in
   (* Compute correct protocol levels and check their correctness *)
   fold_left_s
     (fun proto_levels (transition_level, protocol_hash, commit_info) ->
@@ -2368,7 +2378,7 @@ let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
               (Block.hash block)
               Protocol_hash.pp
               protocol_hash)
-    Protocol_levels.empty
+    initial_protocol_levels
     partial_protocol_levels
   >>=? fun protocol_levels ->
   Stored_data.write_file

@@ -411,7 +411,12 @@ let display_progress ?(every = 1) ?(out = Lwt_unix.stdout) ~pp_print_step f =
     let fmt = Format.formatter_of_out_channel oc in
     let cpt = ref 0 in
     let pp () =
-      clear_line fmt ; pp_print_step fmt !cpt ; Format.fprintf fmt "%!"
+      clear_line fmt ;
+      Format.fprintf fmt "☐ %a%!" pp_print_step !cpt
+    in
+    let pp_done () =
+      clear_line fmt ;
+      Format.fprintf fmt "☑ %a Done@\n%!" pp_print_step !cpt
     in
     pp () ;
     incr cpt ;
@@ -424,10 +429,4 @@ let display_progress ?(every = 1) ?(out = Lwt_unix.stdout) ~pp_print_step f =
         stream
     in
     thread
-    >>= fun e ->
-    printer
-    >>= fun () ->
-    decr cpt ;
-    pp () ;
-    Format.fprintf fmt " Done@\n%!" ;
-    Lwt.return e
+    >>= fun e -> printer >>= fun () -> decr cpt ; pp_done () ; Lwt.return e

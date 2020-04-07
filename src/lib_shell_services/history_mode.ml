@@ -31,6 +31,22 @@ let default_offset = 5
 
 let default = Full {offset = default_offset}
 
+module Legacy = struct
+  type t = Archive | Full | Rolling
+
+  let encoding =
+    Data_encoding.string_enum
+      [("archive", Archive); ("full", Full); ("rolling", Rolling)]
+end
+
+let convert = function
+  | Legacy.Rolling ->
+      Rolling {offset = default_offset}
+  | Legacy.Full ->
+      default
+  | Legacy.Archive ->
+      Archive
+
 let encoding =
   let open Data_encoding in
   let additional_cycles_encoding =

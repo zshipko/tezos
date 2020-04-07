@@ -236,7 +236,12 @@ val restore_context_legacy :
                    Block_hash.t ->
                    Pruned_block.t ->
                    unit tzresult Lwt.t) ->
-  (Block_header.t * Block_data_legacy.t * Block_header.t option) tzresult Lwt.t
+  ( Block_header.t
+  * Block_data_legacy.t
+  * Block_header.t option
+  * History_mode.Legacy.t )
+  tzresult
+  Lwt.t
 
 val retrieve_commit_info :
   index ->

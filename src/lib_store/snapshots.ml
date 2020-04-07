@@ -381,32 +381,34 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
         in
         bpush#push block
     in
-    Lwt.finalize
-      (fun () ->
-        Lwt.catch
-          (fun () ->
-            Lwt_unix.lseek floating_ro_fd 0 Unix.SEEK_SET
-            >>= fun _ ->
-            Floating_block_store.iter_raw f floating_ro_fd
-            >>= fun () ->
-            Lwt_unix.lseek floating_rw_fd 0 Unix.SEEK_SET
-            >>= fun _ ->
-            Floating_block_store.iter_raw f floating_rw_fd
-            >>= fun () ->
-            failwith "floating_export: could not retrieve the target block")
-          (function
-            | Done ->
-                return_unit
-            | exn ->
-                failwith
-                  "floating_export: error while reading the floating stores \
-                   floating: %s"
-                  (Printexc.to_string exn)))
-      (fun () ->
-        bpush#close ;
-        Lwt_unix.close floating_ro_fd
-        >>= fun () -> Lwt_unix.close floating_rw_fd)
-    >>=? fun () -> return stream
+    let reading_thread =
+      Lwt.finalize
+        (fun () ->
+          Lwt.catch
+            (fun () ->
+              Lwt_unix.lseek floating_ro_fd 0 Unix.SEEK_SET
+              >>= fun _ ->
+              Floating_block_store.iter_raw f floating_ro_fd
+              >>= fun () ->
+              Lwt_unix.lseek floating_rw_fd 0 Unix.SEEK_SET
+              >>= fun _ ->
+              Floating_block_store.iter_raw f floating_rw_fd
+              >>= fun () ->
+              failwith "floating_export: could not retrieve the target block")
+            (function
+              | Done ->
+                  return_unit
+              | exn ->
+                  failwith
+                    "floating_export: error while reading the floating stores \
+                     floating: %s"
+                    (Printexc.to_string exn)))
+        (fun () ->
+          bpush#close ;
+          Lwt_unix.close floating_ro_fd
+          >>= fun () -> Lwt_unix.close floating_rw_fd)
+    in
+    return (reading_thread, stream)
 
 (* Export the protocol table (info regarding the protocol transitions) as well as
   all the stored protocols*)
@@ -436,7 +438,7 @@ let export_protocols protocol_levels ~src_dir ~dst_dir =
   let nb_proto_to_export = List.length proto_to_export in
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Copying protocols: %d/%d" i nb_proto_to_export)
+      Format.fprintf fmt "Copying protocols: %d/%d..." i nb_proto_to_export)
     (fun notify ->
       let rec copy_protocols () =
         Lwt.catch
@@ -489,12 +491,6 @@ let create_snapshot_dir ~snapshot_dir =
    - Full n | Rolling n when n > 0 => checkpoint (if not in the future)
    else
      savepoint + 1 + max_op_ttl blocks prunés dispo (en relation avec caboose)
-
-   T'as le droit d'exporter à un block H ssi:
-   - H > savepoint
-   - pour un snapshot rolling, on a besoin de max_op_ttl blocks
-
-
 *)
 
 (* To be a valid export block, the block b and it's pred bp must:
@@ -764,8 +760,9 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block genesis =
                 "export_rolling: unable to retrieve the necessary blocks to \
                  create the snapshot"
           | Some blocks ->
-              (* Don't forget to add the first block as [Chain_traversal.path] does
-                  not include the lower-bound block *)
+              (* Don't forget to add the first block as
+                 [Chain_traversal.path] does not include the lower-bound
+                 block *)
               return (minimum_block :: blocks))
     >>=? fun floating_blocks ->
     (* Prune all blocks except for the export_block's predecessor *)
@@ -777,11 +774,12 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block genesis =
              else Some {(Store.Block.repr b) with metadata = None})
            floating_blocks)
     in
-    (* We need to dump the context while locking the store, the contexts might get pruned *)
+    (* We need to dump the context while locking the store, the
+       contexts might get pruned *)
     dump_context context_index ~snapshot_dir ~pred_block ~export_block
     >>=? fun written_context_elements ->
-    (* export all the protocols: maybe only export the needed one
-       (genesis & > export_block_proto_level) ? *)
+    (* Export all the protocols: maybe only export the needed one
+       s.t. forall proto_level. proto_level >= caboose.proto_level ? *)
     Store.Chain.all_protocol_levels chain_store
     >>= fun protocol_levels ->
     return
@@ -789,7 +787,7 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block genesis =
         export_block,
         protocol_levels,
         written_context_elements,
-        floating_block_stream )
+        (return_unit, floating_block_stream) )
   in
   Store.open_for_snapshot_export
     ~store_dir
@@ -855,18 +853,20 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
   >>=? fun () ->
   ( match extra_floating_blocks with
   | Some floating_blocks ->
-      return (Lwt_stream.of_list (List.map Store.Block.repr floating_blocks))
+      return
+        ( return_unit,
+          Lwt_stream.of_list (List.map Store.Block.repr floating_blocks) )
   | None ->
       (* The export block is in the floating stores, copy all the
          floating stores until the block is reached *)
       export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block )
-  >>=? fun floating_block_stream ->
+  >>=? fun (reading_thread, floating_block_stream) ->
   return
     ( export_mode,
       export_block,
       protocol_levels,
       written_context_elements,
-      floating_block_stream )
+      (reading_thread, floating_block_stream) )
 
 let export ?(rolling = false) ~store_dir ~context_dir ~chain_name ~block
     ~snapshot_dir genesis =
@@ -886,8 +886,10 @@ let export ?(rolling = false) ~store_dir ~context_dir ~chain_name ~block
              export_block,
              protocol_levels,
              written_context_elements,
-             floating_block_stream ) ->
+             (reading_thread, floating_block_stream) ) ->
   export_floating_block_stream ~snapshot_dir floating_block_stream
+  >>=? fun () ->
+  reading_thread
   >>=? fun () ->
   export_protocols
     protocol_levels
@@ -1270,7 +1272,7 @@ let legacy_check_operations_consistency block_header operations
         oph)
     operations
     operation_hashes ;
-  (* Check header hashes based on merkel tree *)
+  (* Check header hashes based on merkle tree *)
   let hashes =
     List.map
       (fun (_, opl) -> List.map Operation.hash opl)
@@ -1316,13 +1318,24 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
     (Lwt_utils_unix.create_dir ~perm:0o755)
     [dst_store_dir; dst_protocol_dir; dst_chain_store_dir; dst_cemented_dir]
   >>= fun () ->
-  (* let chain_store = Store.main_chain_store store in *)
+  Context.init ~readonly:false ?patch_context dst_context_dir
+  >>= fun context_index ->
+  (* Start by commiting genesis in the context *)
+  Context.commit_genesis
+    context_index
+    ~chain_id
+    ~time:genesis.Genesis.time
+    ~protocol:genesis.protocol
+  >>=? fun genesis_context_hash ->
   let cycle_length = Legacy.Hardcoded.cycle_length ~chain_name in
   Cemented_block_store.create ~cemented_blocks_dir:dst_cemented_dir
   >>= fun cemented_store ->
   let floating_blocks = ref [] in
   let current_blocks = ref [] in
   let has_reached_cemented = ref false in
+  let genesis_block =
+    Store.Chain.create_genesis_block ~genesis genesis_context_hash
+  in
   let handle_block ((hash : Block_hash.t), (block : Context.Pruned_block.t)) =
     (* We are given blocks in a reverse order ! *)
     (let proj (hash, (block : Context.Pruned_block.t)) =
@@ -1338,15 +1351,18 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
      match Block_repr.level block with
      (* Hardcoded special treatement for first two blocks *)
      | 0l ->
+         (* No genesis in previous format *)
+         assert false
+     | 1l ->
+         (* Cement from genesis to this block *)
+         if !current_blocks <> [] then (
+           assert (!floating_blocks = []) ;
+           current_blocks := !floating_blocks ) ;
          Cemented_block_store.cement_blocks
            cemented_store
            ~ensure_level:false
            ~write_metadata:false
-           (block :: !current_blocks)
-     | 1l ->
-         assert (!current_blocks = []) ;
-         current_blocks := [block] ;
-         Lwt.return_unit
+           [Store.Block.repr genesis_block; block]
      | level ->
          (* 4 cases :
              - in future floating blocks => after the cementing part
@@ -1370,19 +1386,16 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
            let is_dawn_of_a_cycle =
              Compare.Int32.equal 2l Int32.(rem level (of_int cycle_length))
            in
-           if is_dawn_of_a_cycle then
-             if !has_reached_cemented then (
-               (* Cycle is complete, cement it *)
-               Cemented_block_store.cement_blocks
-                 cemented_store
-                 ~ensure_level:false
-                 ~write_metadata:false
-                 (block :: !current_blocks)
-               >>= fun () ->
-               current_blocks := [] ;
-               Lwt.return_unit )
-             else (* nothing to do *)
-               Lwt.return_unit
+           if is_dawn_of_a_cycle && !has_reached_cemented then (
+             (* Cycle is complete, cement it *)
+             Cemented_block_store.cement_blocks
+               cemented_store
+               ~ensure_level:false
+               ~write_metadata:false
+               (block :: !current_blocks)
+             >>= fun () ->
+             current_blocks := [] ;
+             Lwt.return_unit )
            else (
              current_blocks := block :: !current_blocks ;
              Lwt.return_unit ))
@@ -1416,15 +1429,6 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
       :: !partial_protocol_levels ;
     return_unit
   in
-  Context.init ~readonly:false ?patch_context dst_context_dir
-  >>= fun context_index ->
-  (* Start by commiting genesis in the context *)
-  Context.commit_genesis
-    context_index
-    ~chain_id
-    ~time:genesis.Genesis.time
-    ~protocol:genesis.protocol
-  >>=? fun genesis_context_hash ->
   (* Restore context and fetch data *)
   Context.restore_context_legacy
     ?expected_block
@@ -1433,16 +1437,11 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
     ~handle_block
     ~handle_protocol_data
     ~block_validation:legacy_block_validation
-  >>=? fun (pred_block_header, block_data, oldest_header_opt) ->
-  let history_mode =
-    match oldest_header_opt with
-    | None ->
-        History_mode.default
-    | Some header when Compare.Int32.(header.Block_header.shell.level <= 1l) ->
-        History_mode.default
-    | Some _ ->
-        History_mode.(Rolling {offset = default_offset})
-  in
+  >>=? fun ( pred_block_header,
+             block_data,
+             _oldest_header_opt,
+             legacy_history_mode ) ->
+  let history_mode = History_mode.convert legacy_history_mode in
   (* Floating blocks should be initialized now *)
   let floating_blocks =
     if not !has_reached_cemented then !current_blocks else !floating_blocks

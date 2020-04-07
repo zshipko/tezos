@@ -220,7 +220,9 @@ module type S_legacy = sig
                      Block_hash.t ->
                      pruned_block ->
                      unit tzresult Lwt.t) ->
-    (block_header * block_data * Block_header.t option) tzresult Lwt.t
+    (block_header * block_data * Block_header.t option * History_mode.Legacy.t)
+    tzresult
+    Lwt.t
 end
 
 module Make_legacy (I : Dump_interface) :

@@ -23,15 +23,23 @@
 (*                                                                           *)
 (*****************************************************************************)
 
+module Legacy : sig
+  type t = Archive | Full | Rolling
+
+  val encoding : t Data_encoding.t
+end
+
 type additional_cycles = {offset : int}
 
 type t = Archive | Full of additional_cycles | Rolling of additional_cycles
+
+val convert : Legacy.t -> t
 
 val default_offset : int
 
 val default : t
 
-val encoding : t RPC_encoding.t
+val encoding : t Data_encoding.t
 
 val equal : t -> t -> bool
 

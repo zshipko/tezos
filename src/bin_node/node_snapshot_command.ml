@@ -54,8 +54,7 @@ end
 module Term = struct
   type subcommand = Export | Import | Info
 
-  (* FIXME *)
-  let _dir_cleaner data_dir =
+  let dir_cleaner data_dir =
     Event.(emit cleaning_up_after_failure) data_dir
     >>= fun () ->
     Lwt_utils_unix.remove_dir @@ Node_data_version.store_dir data_dir
@@ -64,6 +63,7 @@ module Term = struct
 
   let process subcommand args snapshot_path block rolling reconstruct
       sandbox_file import_legacy =
+    (* FIXME check snapshot format *)
     let run =
       Internal_event_unix.init ()
       >>= fun () ->
@@ -71,99 +71,105 @@ module Term = struct
       Node_shared_arg.read_and_patch_config_file args
       >>=? fun node_config ->
       let data_dir = node_config.data_dir in
-      let ({genesis; chain_name; _} : Node_config_file.blockchain_network) =
-        node_config.blockchain_network
-      in
-      match subcommand with
-      | Export ->
-          Node_data_version.ensure_data_dir data_dir
-          >>=? fun () ->
-          let context_dir = Node_data_version.context_dir data_dir in
-          let store_dir = Node_data_version.store_dir data_dir in
-          Snapshots.export
-            ~rolling
-            ~store_dir
-            ~context_dir
-            ~chain_name
-            ~block
-            ~snapshot_dir:snapshot_path
-            genesis
-      | Import ->
-          Node_data_version.ensure_data_dir ~bare:true data_dir
-          >>=? fun () ->
-          Lwt_lock_file.create
-            ~unlink_on_exit:true
-            (Node_data_version.lock_file data_dir)
-          >>=? fun () ->
-          ( match
-              (node_config.blockchain_network.genesis_parameters, sandbox_file)
-            with
-          | (None, None) ->
-              return_none
-          | (Some parameters, None) ->
-              return_some (parameters.context_key, parameters.values)
-          | (_, Some filename) -> (
-              Lwt_utils_unix.Json.read_file filename
-              >>= function
-              | Error _err ->
-                  fail (Invalid_sandbox_file filename)
-              | Ok json ->
-                  return_some ("sandbox_parameter", json) ) )
-          >>=? fun sandbox_parameters ->
-          let context_root = Node_data_version.context_dir data_dir in
-          let store_root = Node_data_version.store_dir data_dir in
-          let patch_context =
-            Patch_context.patch_context genesis sandbox_parameters
+      protect
+        ~on_error:(fun err ->
+          dir_cleaner data_dir >>= fun () -> Lwt.return (Error err))
+        (fun () ->
+          let ({genesis; chain_name; _} : Node_config_file.blockchain_network)
+              =
+            node_config.blockchain_network
           in
-          ( if import_legacy then
-            (* FIXME: what to do with dir_cleaner *)
-            Snapshots.import_legacy
-              ~patch_context
-              ?block
-              ~dst_store_dir:store_root
-              ~dst_context_dir:context_root
-              ~chain_name:
-                (Format.asprintf
-                   "%a"
-                   Distributed_db_version.Name.pp
-                   node_config.blockchain_network.chain_name)
-              ~user_activated_upgrades:
-                node_config.blockchain_network.user_activated_upgrades
-              ~user_activated_protocol_overrides:
-                node_config.blockchain_network
-                  .user_activated_protocol_overrides
-              ~snapshot_file:snapshot_path
-              genesis
-          else
-            (* FIXME: what to do with dir_cleaner *)
-            Snapshots.import
-              ~patch_context
-              ?block
-              ~snapshot_dir:snapshot_path
-              ~dst_store_dir:store_root
-              ~dst_context_dir:context_root
-              ~user_activated_upgrades:
-                node_config.blockchain_network.user_activated_upgrades
-              ~user_activated_protocol_overrides:
-                node_config.blockchain_network
-                  .user_activated_protocol_overrides
-              genesis )
-          >>=? fun () ->
-          if reconstruct then
-            Reconstruction.reconstruct
-              ~patch_context
-              ~store_root
-              ~context_root
-              ~genesis
-              ~user_activated_upgrades:
-                node_config.blockchain_network.user_activated_upgrades
-              ~user_activated_protocol_overrides:
-                node_config.blockchain_network
-                  .user_activated_protocol_overrides
-          else return_unit
-      | Info ->
-          Snapshots.snapshot_info ~snapshot_dir:snapshot_path
-          >>= fun () -> return_unit
+          match subcommand with
+          | Export ->
+              Node_data_version.ensure_data_dir data_dir
+              >>=? fun () ->
+              let context_dir = Node_data_version.context_dir data_dir in
+              let store_dir = Node_data_version.store_dir data_dir in
+              Snapshots.export
+                ~rolling
+                ~store_dir
+                ~context_dir
+                ~chain_name
+                ~block
+                ~snapshot_dir:snapshot_path
+                genesis
+          | Import ->
+              Node_config_file.write_if_not_exists args.config_file node_config
+              >>=? fun () ->
+              Node_data_version.ensure_data_dir ~bare:true data_dir
+              >>=? fun () ->
+              Lwt_lock_file.create
+                ~unlink_on_exit:true
+                (Node_data_version.lock_file data_dir)
+              >>=? fun () ->
+              ( match
+                  ( node_config.blockchain_network.genesis_parameters,
+                    sandbox_file )
+                with
+              | (None, None) ->
+                  return_none
+              | (Some parameters, None) ->
+                  return_some (parameters.context_key, parameters.values)
+              | (_, Some filename) -> (
+                  Lwt_utils_unix.Json.read_file filename
+                  >>= function
+                  | Error _err ->
+                      fail (Invalid_sandbox_file filename)
+                  | Ok json ->
+                      return_some ("sandbox_parameter", json) ) )
+              >>=? fun sandbox_parameters ->
+              let context_root = Node_data_version.context_dir data_dir in
+              let store_root = Node_data_version.store_dir data_dir in
+              let patch_context =
+                Patch_context.patch_context genesis sandbox_parameters
+              in
+              ( if import_legacy then
+                Snapshots.import_legacy
+                  ~patch_context
+                  ?block
+                  ~dst_store_dir:store_root
+                  ~dst_context_dir:context_root
+                  ~chain_name:
+                    (Format.asprintf
+                       "%a"
+                       Distributed_db_version.Name.pp
+                       node_config.blockchain_network.chain_name)
+                  ~user_activated_upgrades:
+                    node_config.blockchain_network.user_activated_upgrades
+                  ~user_activated_protocol_overrides:
+                    node_config.blockchain_network
+                      .user_activated_protocol_overrides
+                  ~snapshot_file:snapshot_path
+                  genesis
+              else
+                Snapshots.import
+                  ~patch_context
+                  ?block
+                  ~snapshot_dir:snapshot_path
+                  ~dst_store_dir:store_root
+                  ~dst_context_dir:context_root
+                  ~user_activated_upgrades:
+                    node_config.blockchain_network.user_activated_upgrades
+                  ~user_activated_protocol_overrides:
+                    node_config.blockchain_network
+                      .user_activated_protocol_overrides
+                  genesis )
+              >>=? fun () ->
+              if reconstruct then
+                Reconstruction.reconstruct
+                  ~patch_context
+                  ~store_root
+                  ~context_root
+                  ~genesis
+                  ~user_activated_upgrades:
+                    node_config.blockchain_network.user_activated_upgrades
+                  ~user_activated_protocol_overrides:
+                    node_config.blockchain_network
+                      .user_activated_protocol_overrides
+              else return_unit
+          | Info ->
+              Snapshots.snapshot_info ~snapshot_dir:snapshot_path
+              >>= fun () -> return_unit)
     in
     match Lwt_main.run run with
     | Ok () ->

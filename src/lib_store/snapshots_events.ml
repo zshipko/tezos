@@ -170,18 +170,20 @@ module Definition = struct
     | Import_unspecified_hash
     | Import_loading
     | Set_head _
-    | Import_success _
-    | Validate_protocol_sources _ ->
+    | Import_success _ ->
         Internal_event.Notice
+    | Validate_protocol_sources _ ->
+        Internal_event.Info
 end
 
 module Event_snapshot = Internal_event.Make (Definition)
 
 let lwt_emit (status : status) =
-  let time = Systime_os.now () in
   Event_snapshot.emit
     ~section:(Internal_event.Section.make_sanitized [Definition.name])
-    (fun () -> Time.System.stamp ~time status)
+    (fun () ->
+      let time = Systime_os.now () in
+      Time.System.stamp ~time status)
   >>= function
   | Ok () ->
       Lwt.return_unit

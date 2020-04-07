@@ -291,6 +291,8 @@ module Chain : sig
 
   val genesis_block : chain_store -> Block.t Lwt.t
 
+  val create_genesis_block : genesis:Genesis.t -> Context_hash.t -> Block.t
+
   val expiration : chain_store -> Time.Protocol.t option
 
   val current_head : chain_store -> Block.t Lwt.t
@@ -378,6 +380,9 @@ module Chain : sig
 
   val may_update_protocol_level :
     chain_store -> int -> Block.block * Protocol_hash.t -> unit tzresult Lwt.t
+
+  val get_commit_info :
+    Context.index -> Block_header.t -> commit_info tzresult Lwt.t
 
   val find_protocol_level :
     chain_store ->
