@@ -29,7 +29,7 @@ open Store_types
 type error +=
   | Incompatible_history_mode of {
       requested : History_mode.t;
-      store : History_mode.t;
+      stored : History_mode.t;
     }
   | Invalid_export_block of {
       block : Block_hash.t option;
@@ -67,25 +67,25 @@ let () =
     ~title:"Incompatible snapshot export"
     ~description:
       "The requested history mode for the snapshot is not compatible with the \
-       given store."
-    ~pp:(fun ppf (requested, store) ->
+       given storage."
+    ~pp:(fun ppf (requested, stored) ->
       Format.fprintf
         ppf
-        "The requested history mode (%a) for the snapshot is not compatible \
-         with the given store's history mode (%a)."
+        "The requested history mode (%a) for the snapshot export is not \
+         compatible with the given storage, running with history mode (%a)."
         History_mode.pp_short
         requested
         History_mode.pp_short
-        store)
+        stored)
     (obj2
-       (req "store" History_mode.encoding)
+       (req "stored" History_mode.encoding)
        (req "requested" History_mode.encoding))
     (function
-      | Incompatible_history_mode {requested; store} ->
-          Some (requested, store)
+      | Incompatible_history_mode {requested; stored} ->
+          Some (requested, stored)
       | _ ->
           None)
-    (fun (requested, store) -> Incompatible_history_mode {requested; store}) ;
+    (fun (requested, stored) -> Incompatible_history_mode {requested; stored}) ;
   register_error_kind
     `Permanent
     ~id:"snapshots.invalid_export_block"
@@ -94,7 +94,7 @@ let () =
     ~pp:(fun ppf (hash, reason) ->
       Format.fprintf
         ppf
-        "The block selected %a is invalid: %s."
+        "The selected block %a is invalid: %s."
         (Option.pp ~default:"(n/a)" Block_hash.pp)
         hash
         ( match reason with
@@ -103,7 +103,7 @@ let () =
         | `Pruned_pred ->
             "its predecessor has been pruned"
         | `Unknown ->
-            "the block is not known"
+            "the block is unknown"
         | `Genesis ->
             "the genesis block is not a valid export point"
         | `Caboose ->
@@ -203,7 +203,7 @@ let () =
       Format.fprintf
         ppf
         "Cannot find protocol sources while exporting snapshot when looking \
-         for protocol hash %a"
+         for protocol hash %a."
         Protocol_hash.pp
         protocol_hash)
     (obj1 (req "protocol_hash" Protocol_hash.encoding))
@@ -224,7 +224,7 @@ let () =
       Format.fprintf
         ppf
         "The protocol hash provided in a snapshot protocol data does not \
-         match the provided sources: computed %a but found %a"
+         match the provided sources: computed %a but found %a."
         Protocol_hash.pp
         protocol_hash
         Protocol_hash.pp
@@ -259,7 +259,7 @@ let () =
          match the corresponding embedded sources in the node, according to \
          the provided protocol hash.@.@.Provided protocol hash: \
          %a@.@.Computed protocol hash from snapshot sources: %a@.@.Computed \
-         protocol hash from embedded sources: %a@]"
+         protocol hash from embedded sources: %a.@]"
         Protocol_hash.pp
         protocol_hash
         Protocol_hash.pp
@@ -313,18 +313,19 @@ let read_snapshot_metadata file =
       Lwt.return
         (Data_encoding.Json.destruct Snapshot_version.metadata_encoding json)
 
-(* TODO: handle rolling snapshots
-   cemented_export is currently used only when exporting a full snasphot:
-   that is to say we export [genesis;…;block_level]*)
 let copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir
     (files : Cemented_block_store.cemented_blocks_file list) =
   let open Cemented_block_store in
-  let len = List.length files in
+  let nb_cycles = List.length files in
   protect (fun () ->
       Lwt_utils_unix.display_progress
         ~every:1
         ~pp_print_step:(fun fmt i ->
-          Format.fprintf fmt "Copying cemented blocks: %d/%d cycles..." i len)
+          Format.fprintf
+            fmt
+            "Copying cemented blocks: %d/%d cycles..."
+            i
+            nb_cycles)
         (fun notify ->
           Lwt_list.iter_s
             (fun {filename; _} ->
@@ -410,8 +411,8 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
     in
     return (reading_thread, stream)
 
-(* Export the protocol table (info regarding the protocol transitions) as well as
-  all the stored protocols*)
+(* Export the protocol table (info regarding the protocol transitions) as well
+   as all the stored protocols *)
 let export_protocols protocol_levels ~src_dir ~dst_dir =
   let protocol_tbl_filename = Naming.Snapshot.protocols_table dst_dir in
   Lwt_unix.openfile
@@ -487,13 +488,13 @@ let create_snapshot_dir ~snapshot_dir =
 
 (*
    How to choose default block:
-   - Archive => checkpoint (if not in the future)
+   - Archive => checkpoint if not in the future
+                last_allow_fork_level(head) otherwise
    - Full n | Rolling n when n > 0 => checkpoint (if not in the future)
    else
      savepoint + 1 + max_op_ttl blocks prunés dispo (en relation avec caboose)
-*)
 
-(* To be a valid export block, the block b and it's pred bp must:
+ To be a valid export block, the block b and it's pred bp must:
     - not be genesis
     - be both known
     - not be pruned, having their context present
@@ -669,7 +670,7 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
     if is_last_cemented_block then return (table, Some [])
     else
       (* If the export block is cemented, cut the cycle containing the
-       export block in the middle and retrieve the extra blocks *)
+       export block accordingly and retrieve the extra blocks *)
       let (filtered_table, extra_cycles) =
         List.partition
           (fun {Cemented_block_store.end_level; _} ->
@@ -722,7 +723,7 @@ let check_history_mode ~store_history_mode ~rolling =
   | Rolling _ ->
       fail
         (Incompatible_history_mode
-           {store = store_history_mode; requested = Full {offset = 0}})
+           {stored = store_history_mode; requested = Full {offset = 0}})
 
 let export_floating_block_stream ~snapshot_dir floating_block_stream =
   Lwt_utils_unix.display_progress
@@ -778,7 +779,7 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block genesis =
        contexts might get pruned *)
     dump_context context_index ~snapshot_dir ~pred_block ~export_block
     >>=? fun written_context_elements ->
-    (* Export all the protocols: maybe only export the needed one
+    (* TODO: Export all the protocols: maybe only export the needed one
        s.t. forall proto_level. proto_level >= caboose.proto_level ? *)
     Store.Chain.all_protocol_levels chain_store
     >>= fun protocol_levels ->
@@ -1109,9 +1110,8 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
     ?expected_block
     ~context_file_path:Naming.Snapshot.(context snapshot_dir)
     ~metadata:snapshot_metadata
-  >>=? fun block_data ->
-  let predecessor_block_header = block_data.predecessor_header in
-  let pred_context_hash = predecessor_block_header.shell.context in
+  >>=? fun ({block_header; operations; predecessor_header} as block_data) ->
+  let pred_context_hash = predecessor_header.shell.context in
   Context.checkout context_index pred_context_hash
   >>= (function
         | Some ch ->
@@ -1123,14 +1123,12 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
               Context_hash.pp
               pred_context_hash)
   >>=? fun predecessor_context ->
-  let operations = block_data.operations in
-  let block_header = block_data.block_header in
   Tezos_validation.Block_validation.apply
     chain_id
     ~user_activated_upgrades
     ~user_activated_protocol_overrides
-    ~max_operations_ttl:(Int32.to_int predecessor_block_header.shell.level)
-    ~predecessor_block_header
+    ~max_operations_ttl:(Int32.to_int predecessor_header.shell.level)
+    ~predecessor_block_header:predecessor_header
     ~predecessor_context
     ~block_header
     operations
