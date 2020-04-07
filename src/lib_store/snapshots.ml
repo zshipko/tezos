@@ -319,7 +319,6 @@ let copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir
   let nb_cycles = List.length files in
   protect (fun () ->
       Lwt_utils_unix.display_progress
-        ~every:1
         ~pp_print_step:(fun fmt i ->
           Format.fprintf
             fmt
@@ -488,7 +487,7 @@ let create_snapshot_dir ~snapshot_dir =
 
 (*
    How to choose default block:
-   - Archive => checkpoint if not in the future
+   - Archive => checkpoint (if not in the future)
                 last_allow_fork_level(head) otherwise
    - Full n | Rolling n when n > 0 => checkpoint (if not in the future)
    else
