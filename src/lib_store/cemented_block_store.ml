@@ -116,7 +116,7 @@ let load_table ~cemented_blocks_dir =
             loop acc)
       (function End_of_file -> Lwt.return acc | _exn -> loop acc)
   in
-  loop []
+  Lwt.finalize (fun () -> loop []) (fun () -> Lwt_unix.closedir dir_handle)
   >>= fun cemented_files_list ->
   let cemented_files_array = Array.of_list cemented_files_list in
   Array.sort
@@ -630,8 +630,11 @@ let restore_indexes_consistency ?(post_step = fun () -> Lwt.return_unit)
             hash ;
           iter_blocks ~pred_block:block (succ n)
       in
-      protect (fun () ->
-          iter_blocks 0 >>=? fun () -> post_step () >>= fun () -> return_unit)
-      >>=? fun () -> return_unit)
+      Lwt.finalize
+        (fun () ->
+          protect (fun () ->
+              iter_blocks 0
+              >>=? fun () -> post_step () >>= fun () -> return_unit))
+        (fun () -> Lwt_unix.close fd))
     table_list
   >>=? fun () -> return_unit

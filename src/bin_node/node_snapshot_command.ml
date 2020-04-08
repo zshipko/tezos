@@ -90,7 +90,7 @@ module Term = struct
                 ~store_dir
                 ~context_dir
                 ~chain_name
-                ~block
+                ?block
                 ~snapshot_dir:snapshot_path
                 genesis
           | Import ->

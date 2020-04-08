@@ -73,14 +73,9 @@ let check_invariants chain_store =
   | (Some _, Some _) ->
       Lwt.return_unit
   | (Some _, None) ->
-      Store.Chain.savepoint chain_store
-      >>= fun savepoint ->
-      Store.Chain.checkpoint chain_store
-      >>= fun checkpoint ->
-      Store.Chain.caboose chain_store
-      >>= fun caboose ->
       Format.printf
-        "savepoint %ld - checkpoint %ld - caboose %ld@."
+        "head %ld - savepoint %ld - checkpoint %ld - caboose %ld@."
+        (Store.Block.level current_head)
         (snd savepoint)
         (snd checkpoint)
         (snd caboose) ;
@@ -156,7 +151,10 @@ let wrap_store_init ?(patch_context = dummy_patch_context)
         ~allow_testchains
         genesis
       >>=? fun store ->
-      Error_monad.protect (fun () ->
+      protect
+        ~on_error:(fun err ->
+          Store.close_store store >>= fun () -> Lwt.return (Error err))
+        (fun () ->
           k (store_dir, context_dir) store
           >>=? fun () ->
           Format.printf "Invariants check before closing@." ;
@@ -170,10 +168,12 @@ let wrap_store_init ?(patch_context = dummy_patch_context)
             ~context_dir
             ~allow_testchains
             genesis
-          >>=? fun store ->
+          >>=? fun store' ->
           Format.printf "Invariants check after reloading@." ;
-          check_invariants (Store.main_chain_store store)
-          >>= fun () -> Store.close_store store >>= fun () -> return_unit))
+          Lwt.finalize
+            (fun () -> check_invariants (Store.main_chain_store store'))
+            (fun () -> Store.close_store store')
+          >>= fun () -> return_unit))
   >>= function
   | Error err ->
       Format.printf "@\nTest failed:@\n%a@." Error_monad.pp_print_error err ;
@@ -181,8 +181,11 @@ let wrap_store_init ?(patch_context = dummy_patch_context)
   | Ok () ->
       Lwt.return_unit
 
-let wrap_test ?patch_context ?keep_dir (name, f) =
-  test_case name `Quick (wrap_store_init ?patch_context ?keep_dir f)
+let wrap_test ?history_mode ?patch_context ?keep_dir (name, f) =
+  test_case
+    name
+    `Quick
+    (wrap_store_init ?patch_context ?history_mode ?keep_dir f)
 
 let make_raw_block ?(max_operations_ttl = default_max_operations_ttl)
     ?(constants = default_protocol_constants) ?(context = Context_hash.zero)
@@ -420,9 +423,25 @@ let assert_absence_in_store chain_store blocks =
       | None ->
           Lwt.return_unit
       | Some b' ->
-          if b <> b' then
+          Store.Chain.current_head chain_store
+          >>= fun current_head ->
+          Store.Chain.checkpoint chain_store
+          >>= fun checkpoint ->
+          Store.Chain.savepoint chain_store
+          >>= fun savepoint ->
+          Store.Chain.caboose chain_store
+          >>= fun caboose ->
+          Format.printf
+            "head %ld - savepoint %ld - checkpoint %ld - caboose %ld@."
+            (Store.Block.level current_head)
+            (snd savepoint)
+            (snd checkpoint)
+            (snd caboose) ;
+          if not (Store.Block.equal b b') then
             Alcotest.failf
-              "assert_absence_in_store: found a different block in store %a@."
+              "assert_absence_in_store: found %a and got a different block %a@."
+              pp_block
+              b
               pp_block
               b'
           else

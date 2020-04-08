@@ -149,9 +149,9 @@ let iter_raw f fd =
 let iter f floating_store =
   Lwt_idle_waiter.force_idle floating_store.scheduler (fun () ->
       (* We open a new fd *)
-      let (flags, perms) = ([Unix.O_CREAT; O_RDONLY], 0o444) in
+      let (flags, perms) = ([Unix.O_CREAT; O_RDONLY; O_CLOEXEC], 0o444) in
       Lwt_unix.openfile floating_store.filename flags perms
-      >>= fun fd -> iter_raw f fd)
+      >>= fun fd -> iter_raw f fd >>= fun () -> Lwt_unix.close fd)
 
 let fold f init floating_store =
   let set = ref Block_hash.Set.empty in
@@ -175,7 +175,7 @@ let init ~chain_dir ~readonly kind =
     if kind = Naming.RO then (Unix.O_RDONLY, 0o444) else (Unix.O_RDWR, 0o644)
   in
   let filename = Naming.(chain_dir // floating_blocks kind) in
-  Lwt_unix.openfile filename [flag; Unix.O_CREAT] perms
+  Lwt_unix.openfile filename [Unix.O_CREAT; O_CLOEXEC; flag] perms
   >>= fun fd ->
   let floating_block_index =
     Floating_block_index.v

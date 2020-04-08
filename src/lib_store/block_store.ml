@@ -284,103 +284,6 @@ let check_blocks_consistency blocks =
   in
   loop blocks
 
-(* TODO: remove that ? *)
-(* Copy the rw floating block files, remove blocks that are not
-   present in the index, then swap files. *)
-(* Hypothesis: every block in the index is also in stored in the file *)
-let restore_rw_blocks_consistency block_store =
-  let tmp_blocks_filename =
-    Format.asprintf
-      "%s.part.%d"
-      Naming.(Filename.get_temp_dir_name () // consistent_rw_blocks)
-      Random.(int (bits ()))
-  in
-  (* Create fresh file *)
-  Lwt_unix.openfile tmp_blocks_filename Unix.[O_CREAT; O_TRUNC; O_EXCL] 0o644
-  >>= fun dst_fd ->
-  let src_fd = block_store.rw_floating_block_store.Floating_block_store.fd in
-  Lwt_unix.lseek src_fd 0 Unix.SEEK_END
-  >>= fun total_length ->
-  Lwt_unix.lseek src_fd 0 Unix.SEEK_SET
-  >>= fun _ ->
-  let length_size = 4 in
-  let length_buffer = Bytes.create length_size in
-  let rec loop remaining_bytes =
-    Lwt.catch
-      (fun () ->
-        if remaining_bytes < length_size then
-          (* Not enough data left to read *)
-          Lwt.return_unit
-        else
-          Lwt_utils_unix.read_bytes
-            ~pos:0
-            ~len:length_size
-            src_fd
-            length_buffer
-          >>= fun () ->
-          let remaining_bytes = remaining_bytes - length_size in
-          let length =
-            Data_encoding.(Binary.of_bytes_exn int31 length_buffer)
-          in
-          if remaining_bytes < length then
-            (* Not enough data left to read *)
-            Lwt.return_unit
-          else
-            let block_buffer = Bytes.create length in
-            Lwt_utils_unix.read_bytes ~pos:0 ~len:length src_fd block_buffer
-            >>= fun () ->
-            let remaining_bytes = remaining_bytes - length in
-            match
-              Data_encoding.Binary.of_bytes_opt
-                Block_repr.encoding
-                block_buffer
-            with
-            | None ->
-                (* Bad block, discard *)
-                Lwt.return_unit
-            | Some block ->
-                (* If the block is not known in the index, discard it *)
-                if
-                  Floating_block_index.mem
-                    block_store.rw_floating_block_store.floating_block_index
-                    block.hash
-                then Lwt.return_unit
-                else
-                  (* The block is consistent, copy the length and the block in the new file *)
-                  Lwt_utils_unix.write_bytes
-                    ~pos:0
-                    ~len:length_size
-                    dst_fd
-                    length_buffer
-                  >>= fun () ->
-                  Lwt_utils_unix.write_bytes
-                    ~pos:0
-                    ~len:length
-                    dst_fd
-                    block_buffer
-                  >>= fun () -> loop remaining_bytes)
-      (fun _ -> Lwt.return_unit)
-  in
-  loop total_length
-  >>= fun () ->
-  (* Close all fds *)
-  Lwt_unix.close src_fd
-  >>= fun () ->
-  Lwt_unix.close dst_fd
-  >>= fun () ->
-  let rw_floating_blocks_name =
-    Naming.(block_store.chain_dir // floating_blocks RW)
-  in
-  (* Swap files *)
-  Lwt_unix.rename tmp_blocks_filename rw_floating_blocks_name
-  >>= fun () ->
-  (* Re-open the fd *)
-  Lwt_unix.openfile rw_floating_blocks_name Unix.[O_RDWR] 0o644
-  >>= fun new_fd ->
-  block_store.rw_floating_block_store <-
-    {block_store.rw_floating_block_store with fd = new_fd} ;
-  Lwt.return_unit
-
 (* Partition the blocks per cycle : each list in the  *)
 let split_cycles blocks =
   let rec partition_elements (l, acc) p = function
@@ -541,7 +444,7 @@ let swap_floating_stores block_store ~new_ro_store =
       chain_dir // floating_block_index new_kind
     in
     let dest_floating_blocks = chain_dir // floating_blocks new_kind in
-    (* Replaces index *)
+    (* Replace index *)
     ( if Sys.is_directory dest_floating_block_index then
       Lwt_utils_unix.remove_dir dest_floating_block_index
     else Lwt.return_unit )
@@ -552,7 +455,7 @@ let swap_floating_stores block_store ~new_ro_store =
     Lwt_unix.rename src_floating_blocks dest_floating_blocks
   in
   (* Prepare the swap: close all floating stores. *)
-  Lwt_list.iter_s
+  Lwt_list.iter_p
     Floating_block_store.close
     ( new_ro_store :: block_store.rw_floating_block_store
     :: block_store.ro_floating_block_stores )
@@ -563,7 +466,7 @@ let swap_floating_stores block_store ~new_ro_store =
   (* ...and [new_rw] to [rw]  *)
   swap block_store.rw_floating_block_store Naming.RW
   >>= fun () ->
-  (* load the swapped stores *)
+  (* Load the swapped stores *)
   Floating_block_store.init ~chain_dir ~readonly:false RO
   >>= fun ro ->
   block_store.ro_floating_block_stores <- [ro] ;
@@ -667,10 +570,20 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
           Lwt_mutex.unlock block_store.merge_mutex ;
           Lwt.return_unit
         in
-        Lwt.finalize
-          (fun () -> create_merging_thread () >>= fun () -> finalizer ())
-          (fun () -> cleanup ())
+        Lwt.catch
+          (fun () ->
+            Lwt.finalize
+              (fun () ->
+                create_merging_thread ()
+                >>= fun () -> finalizer () >>= fun () -> Lwt.return_unit)
+              (fun () -> cleanup ()))
+          (fun exn ->
+            Lwt.fail_with
+              (Format.asprintf
+                 "Error during merge: %s@."
+                 (Printexc.to_string exn)))
       in
+      Lwt.async (fun () -> merging_thread) ;
       block_store.merging_thread <- Some (final_level, merging_thread) ;
       (* Temporary stores in place and the merging thread was started:
          we can now release the hard-lock *)
@@ -747,8 +660,8 @@ let merging_state block_store =
       `Done
 
 let close block_store =
-  (* Wait a bit for the merging to end but cancel it if takes too
-     long. *)
+  (* Wait a bit for the merging to end but hard-stop it if it takes
+     too long. *)
   Lwt_unix.with_timeout 5. (fun () -> await_merging block_store)
   >>= fun () ->
   Cemented_block_store.close block_store.cemented_store ;

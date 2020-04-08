@@ -25,10 +25,10 @@
 
 val export :
   ?rolling:bool ->
+  ?block:string ->
   store_dir:string ->
   context_dir:string ->
   chain_name:Distributed_db_version.Name.t ->
-  block:string option ->
   snapshot_dir:string ->
   Genesis.t ->
   unit tzresult Lwt.t

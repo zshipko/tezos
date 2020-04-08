@@ -403,10 +403,7 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
                     "floating_export: error while reading the floating stores \
                      floating: %s"
                     (Printexc.to_string exn)))
-        (fun () ->
-          bpush#close ;
-          Lwt_unix.close floating_ro_fd
-          >>= fun () -> Lwt_unix.close floating_rw_fd)
+        (fun () -> bpush#close ; Lwt.return_unit)
     in
     return (reading_thread, stream)
 
@@ -462,7 +459,9 @@ let export_protocols protocol_levels ~src_dir ~dst_dir =
           (function
             | End_of_file -> return_unit | exn -> Lwt.return (error_exn exn))
       in
-      copy_protocols ())
+      Lwt.finalize
+        (fun () -> copy_protocols ())
+        (fun () -> Lwt_unix.closedir dir_handle))
 
 (* Creates the requested export folder and its hierarchy *)
 let create_snapshot_dir ~snapshot_dir =
@@ -553,9 +552,8 @@ let check_export_block_validity chain_store block =
   >>= fun genesis_block ->
   let genesis_level = Store.Block.level genesis_block in
   let minimum_level_needed =
-    (* No need to retrieve the genesis *)
-    Int32.(
-      max (succ genesis_level) (sub block_level (of_int block_max_op_ttl)))
+    Compare.Int32.(
+      max genesis_level Int32.(sub block_level (of_int block_max_op_ttl)))
   in
   fail_when
     Compare.Int32.(minimum_level_needed < caboose_level)
@@ -673,21 +671,30 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
       let (filtered_table, extra_cycles) =
         List.partition
           (fun {Cemented_block_store.end_level; _} ->
-            Compare.Int32.(export_block_level > end_level))
+            let b = Compare.Int32.(export_block_level > end_level) in
+            b)
           table
       in
       assert (extra_cycles <> []) ;
       let extra_cycle = List.hd extra_cycles in
       (* If the export block is the last block in cycle, append the cycle *)
       if Compare.Int32.(export_block_level = extra_cycle.end_level) then
-        return (table @ [extra_cycle], Some [])
+        return (filtered_table @ [extra_cycle], Some [])
       else
         Store.Block.read_block_by_level chain_store extra_cycle.start_level
-        >>=? fun first_block_in_cycle ->
-        Store.Chain_traversal.path
-          chain_store
-          first_block_in_cycle
-          export_block
+        >>=? (fun first_block_in_cycle ->
+               if
+                 Compare.Int32.(
+                   Store.Block.level first_block_in_cycle > export_block_level)
+               then
+                 (* When the cycles are short, we may keep more blocks in the
+                    floating store than in cemented *)
+                 Store.Chain.caboose chain_store
+                 >>= fun (_, caboose_level) ->
+                 Store.Block.read_block_by_level chain_store caboose_level
+               else return first_block_in_cycle)
+        >>=? fun first_block ->
+        Store.Chain_traversal.path chain_store first_block export_block
         >>= function
         | None ->
             failwith
@@ -695,8 +702,8 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
                beggining of cycle."
         | Some floating_blocks ->
             (* Don't forget to add the first block as [Chain_traversal.path] does
-             not include the lower-bound block *)
-            let floating_blocks = first_block_in_cycle :: floating_blocks in
+               not include the lower-bound block *)
+            let floating_blocks = first_block :: floating_blocks in
             return (filtered_table, Some floating_blocks)
 
 let dump_context context_index ~snapshot_dir ~pred_block ~export_block =
@@ -712,17 +719,15 @@ let dump_context context_index ~snapshot_dir ~pred_block ~export_block =
     block_data
     ~context_file_path:(Naming.Snapshot.context snapshot_dir)
 
-let check_history_mode ~store_history_mode ~rolling =
+let check_history_mode chain_store ~rolling =
   let open History_mode in
-  match store_history_mode with
+  match Store.Chain.history_mode chain_store with
   | Archive | Full _ ->
       return_unit
   | Rolling _ when rolling ->
       return_unit
-  | Rolling _ ->
-      fail
-        (Incompatible_history_mode
-           {stored = store_history_mode; requested = Full {offset = 0}})
+  | Rolling _ as stored ->
+      fail (Incompatible_history_mode {stored; requested = Full {offset = 0}})
 
 let export_floating_block_stream ~snapshot_dir floating_block_stream =
   Lwt_utils_unix.display_progress
@@ -740,10 +745,10 @@ let export_floating_block_stream ~snapshot_dir floating_block_stream =
         floating_block_stream
       >>= fun () -> Lwt_unix.close fd >>= fun () -> return_unit)
 
-let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block genesis =
+let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
+    genesis =
   let export_rolling_f (chain_store, context_index) =
-    let store_history_mode = Store.Chain.history_mode chain_store in
-    check_history_mode ~store_history_mode ~rolling:true
+    check_history_mode chain_store ~rolling
     >>=? fun () ->
     retrieve_export_block chain_store block
     >>=? fun (export_block, pred_block, lowest_block_level_needed) ->
@@ -796,10 +801,9 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block genesis =
     ~locked_f:export_rolling_f
 
 let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
-    genesis =
+    ~rolling genesis =
   let export_full_f (chain_store, context_index) =
-    let store_history_mode = Store.Chain.history_mode chain_store in
-    check_history_mode ~store_history_mode ~rolling:true
+    check_history_mode chain_store ~rolling
     >>=? fun () ->
     retrieve_export_block chain_store block
     >>=? fun (export_block, pred_block, _lowest_block_level_needed) ->
@@ -815,27 +819,34 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
     >>= fun ro_fd ->
     Lwt_unix.openfile rw_filename [Unix.O_RDONLY] 0o644
     >>= fun rw_fd ->
-    let src_cemented_dir = Naming.(chain_dir // cemented_blocks_directory) in
-    (* Compute the necessary cemented table *)
-    compute_cemented_table_and_extra_cycle
-      chain_store
-      ~src_cemented_dir
-      ~export_block
-    >>=? fun (cemented_table, extra_floating_blocks) ->
-    Store.Chain.all_protocol_levels chain_store
-    >>= fun protocol_levels ->
-    (* Dump the context while the store is locked to avoid reading on
-       pruning *)
-    dump_context context_index ~snapshot_dir ~pred_block ~export_block
-    >>=? fun written_context_elements ->
-    return
-      ( export_mode,
-        export_block,
-        protocol_levels,
-        written_context_elements,
-        (src_cemented_dir, cemented_table),
-        (ro_fd, rw_fd),
-        extra_floating_blocks )
+    Lwt.catch
+      (fun () ->
+        let src_cemented_dir =
+          Naming.(chain_dir // cemented_blocks_directory)
+        in
+        (* Compute the necessary cemented table *)
+        compute_cemented_table_and_extra_cycle
+          chain_store
+          ~src_cemented_dir
+          ~export_block
+        >>=? fun (cemented_table, extra_floating_blocks) ->
+        Store.Chain.all_protocol_levels chain_store
+        >>= fun protocol_levels ->
+        (* Dump the context while the store is locked to avoid reading on
+            pruning *)
+        dump_context context_index ~snapshot_dir ~pred_block ~export_block
+        >>=? fun written_context_elements ->
+        return
+          ( export_mode,
+            export_block,
+            protocol_levels,
+            written_context_elements,
+            (src_cemented_dir, cemented_table),
+            (ro_fd, rw_fd),
+            extra_floating_blocks ))
+      (fun exn ->
+        Lwt_unix.close ro_fd
+        >>= fun () -> Lwt_unix.close rw_fd >>= fun () -> Lwt.fail exn)
   in
   Store.open_for_snapshot_export
     ~store_dir
@@ -849,17 +860,25 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
              (src_cemented_dir, cemented_table),
              (floating_ro_fd, floating_rw_fd),
              extra_floating_blocks ) ->
+  let finalizer () =
+    Lwt_unix.close floating_ro_fd >>= fun () -> Lwt_unix.close floating_rw_fd
+  in
   copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir cemented_table
   >>=? fun () ->
   ( match extra_floating_blocks with
   | Some floating_blocks ->
+      finalizer ()
+      >>= fun () ->
       return
         ( return_unit,
           Lwt_stream.of_list (List.map Store.Block.repr floating_blocks) )
   | None ->
       (* The export block is in the floating stores, copy all the
-         floating stores until the block is reached *)
-      export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block )
+              floating stores until the block is reached *)
+      export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block
+      >>=? fun (reading_thread, floating_block_stream) ->
+      let reading_thread = Lwt.finalize (fun () -> reading_thread) finalizer in
+      return (reading_thread, floating_block_stream) )
   >>=? fun (reading_thread, floating_block_stream) ->
   return
     ( export_mode,
@@ -868,12 +887,18 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
       written_context_elements,
       (reading_thread, floating_block_stream) )
 
-let export ?(rolling = false) ~store_dir ~context_dir ~chain_name ~block
+let export ?(rolling = false) ?block ~store_dir ~context_dir ~chain_name
     ~snapshot_dir genesis =
   create_snapshot_dir ~snapshot_dir
   >>=? fun (dst_cemented_dir, dst_protocol_dir) ->
   ( if rolling then
-    export_rolling ~store_dir ~context_dir ~snapshot_dir ~block genesis
+    export_rolling
+      ~store_dir
+      ~context_dir
+      ~snapshot_dir
+      ~block
+      ~rolling
+      genesis
   else
     export_full
       ~store_dir
@@ -881,6 +906,7 @@ let export ?(rolling = false) ~store_dir ~context_dir ~chain_name ~block
       ~snapshot_dir
       ~dst_cemented_dir
       ~block
+      ~rolling
       genesis )
   >>=? fun ( export_mode,
              export_block,
@@ -996,7 +1022,7 @@ let read_floating_blocks ~genesis_hash ~floating_blocks_file =
   let reading_thread =
     Lwt.finalize
       (fun () -> loop eof_offset)
-      (fun () -> bounded_push#close ; Lwt.return_unit)
+      (fun () -> bounded_push#close ; Lwt_unix.close fd)
   in
   return (reading_thread, stream)
 
@@ -1242,7 +1268,7 @@ let import ?patch_context ?block:expected_block ~snapshot_dir ~dst_store_dir
 let snapshot_info ~snapshot_dir =
   read_snapshot_metadata (Naming.Snapshot.metadata snapshot_dir)
   >>= fun metadata ->
-  Format.printf "%a@." Snapshot_version.metadata_pp metadata ;
+  Format.printf "@[%a@]@." Snapshot_version.metadata_pp metadata ;
   Lwt.return_unit
 
 (* Legacy import *)

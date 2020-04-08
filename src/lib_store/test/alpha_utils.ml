@@ -43,7 +43,7 @@ module Proto_nonce = struct
   let generate () =
     match
       Alpha_context.Nonce.of_bytes
-      @@ Rand.generate Alpha_context.Constants.nonce_length
+      @@ Bytes.init Alpha_context.Constants.nonce_length (fun _ -> '\000')
     with
     | Ok nonce ->
         let hash = Alpha_context.Nonce.hash nonce in
@@ -367,7 +367,7 @@ let check_constants_consistency constants =
 
 let default_genesis_parameters =
   let open Tezos_protocol_alpha_parameters in
-  Default_parameters.(parameters_of_constants constants_test)
+  Default_parameters.(parameters_of_constants constants_sandbox)
 
 let patch_context ?(genesis_parameters = default_genesis_parameters) ctxt =
   let shell =

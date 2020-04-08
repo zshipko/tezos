@@ -1167,7 +1167,10 @@ let dump_context idx data ~context_file_path =
             Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
           in
           fail (Cannot_create_file msg))
-  >>=? fun context_fd -> Context_dumper.dump_context_fd idx data ~context_fd
+  >>=? fun context_fd ->
+  Lwt.finalize
+    (fun () -> Context_dumper.dump_context_fd idx data ~context_fd)
+    (fun () -> Lwt_unix.close context_fd)
 
 let restore_context ?expected_block idx ~context_file_path ~metadata =
   Lwt.catch

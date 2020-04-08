@@ -143,11 +143,17 @@ let create_file ?(perm = 0o644) name content =
 let read_file fn = Lwt_io.with_file fn ~mode:Input (fun ch -> Lwt_io.read ch)
 
 let copy_file ~src ~dst =
-  Lwt_io.with_file src ~mode:Input (fun ch -> Lwt_io.read ch)
-  >>= fun src_io ->
-  Lwt_io.open_file ~mode:Output dst
-  >>= fun dst_io ->
-  Lwt_io.write dst_io src_io >>= fun () -> Lwt_io.close dst_io
+  Lwt_io.with_file ~mode:Output dst (fun dst_ch ->
+      Lwt_io.with_file src ~mode:Input (fun src_ch ->
+          let rec loop () =
+            Lwt_io.read ~count:4096 src_ch
+            >>= function
+            | "" ->
+                Lwt.return_unit
+            | buf ->
+                Lwt_io.write dst_ch buf >>= fun () -> loop ()
+          in
+          loop ()))
 
 let safe_close fd =
   Lwt.catch (fun () -> Lwt_unix.close fd) (fun _ -> Lwt.return_unit)

@@ -155,7 +155,10 @@ let locked_is_acceptable_block chain_store chain_state (hash, level) =
           >>= fun head -> Lwt.return (Block_repr.level head < checkpoint_level)
 
 let create_lockfile ~chain_dir =
-  Lwt_unix.openfile Naming.(chain_dir // lockfile) [Unix.O_CREAT; O_RDWR] 0o644
+  Lwt_unix.openfile
+    Naming.(chain_dir // lockfile)
+    [Unix.O_CREAT; O_RDWR; O_CLOEXEC; O_SYNC]
+    0o644
 
 let lock_for_write lockfile = Lwt_unix.lockf lockfile Unix.F_LOCK 0
 
@@ -228,6 +231,7 @@ module Block = struct
       (Hash (hash, distance))
     >>= function
     | None ->
+        (* TODO lift the error to block_store *)
         fail (Store_errors.Block_not_found hash)
     | Some block ->
         return block
@@ -906,7 +910,9 @@ module Chain = struct
           | Some metadata ->
               let nb_blocks_to_preserve = Block.max_operations_ttl metadata in
               let min_level_to_preserve =
-                Int32.(sub (snd to_block) (of_int nb_blocks_to_preserve))
+                Compare.Int32.max
+                  (snd chain_state.caboose)
+                  Int32.(sub (snd to_block) (of_int nb_blocks_to_preserve))
               in
               (* + 1, to_block + max_op_ttl(checkpoint) *)
               Lwt.return (succ nb_blocks_to_preserve, min_level_to_preserve)
@@ -968,7 +974,9 @@ module Chain = struct
       Stored_data.write chain_state.savepoint_data savepoint
       >>= fun () ->
       Stored_data.write chain_state.caboose_data caboose
-      >>= fun () -> unlock chain_store.lockfile
+      >>= fun () ->
+      (* FIXME lockfile may already be closed *)
+      unlock chain_store.lockfile
     in
     Block_store.merge_stores
       chain_store.block_store
@@ -1044,7 +1052,7 @@ module Chain = struct
           return (None, prev_head)
         else
           (* First, check that we do not try to set a head below the
-               last allowed fork level *)
+                 last allowed fork level *)
           fail_unless
             Compare.Int32.(
               Block.level new_head
@@ -1065,7 +1073,7 @@ module Chain = struct
             Block.last_allowed_fork_level prev_head_metadata
           in
           (* Should we trigger a merge ? i.e. has the last allowed
-             fork level changed and do we have enough blocks ? *)
+               fork level changed and do we have enough blocks ? *)
           let has_lafl_changed =
             Compare.Int32.(
               new_head_last_allowed_fork_level
@@ -1075,8 +1083,8 @@ module Chain = struct
             Compare.Int32.(snd caboose <= prev_head_last_allowed_fork_level)
           in
           ( if has_lafl_changed && has_necessary_blocks then
-            (* We must be sure that the merge is done before requesting the
-                 highest cemented block *)
+            (* We must be sure that the previous merge is completed
+               before starting a new merge *)
             Block_store.await_merging chain_store.block_store
             >>= fun () ->
             let is_already_cemented =
@@ -1508,7 +1516,7 @@ module Chain = struct
     (* [set_head] also updates the chain state *)
     set_head chain_store genesis_block >>= fun _prev_head -> return chain_store
 
-  let load_chain_store ?with_lock global_store ~chain_dir ~chain_id ~readonly =
+  let load_chain_store global_store ~chain_dir ~chain_id ~readonly =
     Chain_config.load ~chain_dir
     >>= fun chain_config ->
     load_chain_state ~chain_dir
@@ -1520,10 +1528,7 @@ module Chain = struct
     let chain_state = Shared.create chain_state in
     let block_watcher = Lwt_watcher.create_input () in
     let block_rpc_directories = Protocol_hash.Table.create 7 in
-    Option.unopt_map
-      ~default:(create_lockfile ~chain_dir)
-      ~f:(fun lock -> Lwt.return lock)
-      with_lock
+    create_lockfile ~chain_dir
     >>= fun lockfile ->
     let chain_store =
       {
@@ -1556,19 +1561,24 @@ module Chain = struct
               ( Some {chain_state with live_blocks; live_operations},
                 chain_store ))
 
-  (* Recursively closes test chain store *)
+  (* Recursively closes all test chain stores *)
   let close_chain_store chain_store =
     Lwt_watcher.shutdown_input chain_store.block_watcher ;
     let rec loop = function
-      | {block_store; chain_state; _} ->
+      | {block_store; lockfile; chain_state; _} ->
           Shared.use chain_state (fun {active_testchain; _} ->
               Block_store.close block_store
               >>= fun () ->
-              match active_testchain with
+              ( match active_testchain with
               | Some {testchain_store; _} ->
                   loop testchain_store
               | None ->
-                  Lwt.return_unit)
+                  Lwt.return_unit )
+              >>= fun () ->
+              unlock chain_store.lockfile
+              >>= fun () ->
+              (* FIXME merge may still be going on ?? *)
+              Lwt_unix.close lockfile)
     in
     loop chain_store
 
@@ -2016,7 +2026,7 @@ let create_store ~store_dir ~context_index ~chain_id ~genesis ~genesis_context
   global_store.main_chain_store <- Some main_chain_store ;
   return global_store
 
-let load_store ?history_mode ?with_lock ~store_dir ~context_index ~chain_id
+let load_store ?history_mode ~store_dir ~context_index ~chain_id
     ~allow_testchains ~readonly () =
   (* TODO: check genesis coherence and fail if mismatch *)
   let chain_dir = Naming.(store_dir // chain_store chain_id) in
@@ -2035,7 +2045,7 @@ let load_store ?history_mode ?with_lock ~store_dir ~context_index ~chain_id
       global_block_watcher;
     }
   in
-  Chain.load_chain_store ?with_lock global_store ~chain_dir ~chain_id ~readonly
+  Chain.load_chain_store global_store ~chain_dir ~chain_id ~readonly
   >>=? fun main_chain_store ->
   ( match history_mode with
   | None ->
@@ -2097,32 +2107,35 @@ let init ?patch_context ?commit_genesis ?history_mode ?(readonly = false)
       ~allow_testchains
     >>=? fun store -> return store
 
+let close_store global_store =
+  Lwt_watcher.shutdown_input global_store.protocol_watcher ;
+  Lwt_watcher.shutdown_input global_store.global_block_watcher ;
+  let main_chain_store =
+    Option.unopt_assert ~loc:__POS__ global_store.main_chain_store
+  in
+  Chain.close_chain_store main_chain_store
+  >>= fun () -> Context.close global_store.context_index
+
 let open_for_snapshot_export ~store_dir ~context_dir genesis
     ~(locked_f : chain_store * Context.index -> 'a tzresult Lwt.t) =
   let chain_id = Chain_id.of_block_hash genesis.Genesis.block in
-  let chain_dir = Naming.(store_dir // chain_store chain_id) in
-  create_lockfile ~chain_dir
-  >>= fun lockfile ->
-  lock_for_read lockfile
+  Context.init ~readonly:true context_dir
+  >>= fun context_index ->
+  load_store
+    ~store_dir
+    ~context_index
+    ~chain_id
+    ~allow_testchains:false
+    ~readonly:true
+    ()
+  >>=? fun store ->
+  let chain_store = main_chain_store store in
+  lock_for_read chain_store.lockfile
   >>= fun () ->
-  let g () =
-    Context.init ~readonly:true context_dir
-    >>= fun context_index ->
-    load_store
-      ~store_dir
-      ~context_index
-      ~chain_id
-      ~allow_testchains:false
-      ~readonly:true
-      ()
-    >>=? fun store ->
-    let chain_store = main_chain_store store in
-    Lwt.finalize
-      (fun () ->
-        Error_monad.protect (fun () -> locked_f (chain_store, context_index)))
-      (fun _ -> Chain.close_chain_store chain_store)
-  in
-  Lwt.finalize (fun () -> g ()) (fun () -> unlock lockfile)
+  Lwt.finalize
+    (fun () ->
+      Error_monad.protect (fun () -> locked_f (chain_store, context_index)))
+    (fun _ -> close_store store)
 
 let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
     ~context_index ~genesis ~genesis_context_hash ~floating_blocks_stream
@@ -2458,17 +2471,6 @@ let allow_testchains {allow_testchains; _} = allow_testchains
 
 let global_block_watcher {global_block_watcher; _} =
   Lwt_watcher.create_stream global_block_watcher
-
-let close_store global_store =
-  Lwt_watcher.shutdown_input global_store.protocol_watcher ;
-  Lwt_watcher.shutdown_input global_store.global_block_watcher ;
-  let main_chain_store =
-    Option.unopt_assert ~loc:__POS__ global_store.main_chain_store
-  in
-  Chain.close_chain_store main_chain_store
-  >>= fun () ->
-  Context.close global_store.context_index
-  >>= fun () -> unlock main_chain_store.lockfile
 
 let cement_blocks_chunk chain_store blocks ~write_metadata =
   Block_store.cement_blocks
