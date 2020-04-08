@@ -122,6 +122,12 @@ module Block : sig
   (** Unsafe *)
   val of_repr : Block_repr.t -> t
 
+  (** Unsafe *)
+  val repr_metadata : metadata -> Block_repr.metadata
+
+  (** Unsafe *)
+  val of_repr_metadata : Block_repr.metadata -> metadata
+
   val equal : block -> block -> bool
 
   val is_known_valid : chain_store -> Block_hash.t -> bool Lwt.t
