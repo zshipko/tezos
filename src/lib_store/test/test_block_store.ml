@@ -70,7 +70,7 @@ let assert_absence_in_block_store block_store blocks =
       >>= function
       | true ->
           Alcotest.failf
-            "assert_absence_in_bock_store: found unexpected block %a"
+            "assert_absence_in_block_store: found unexpected block %a"
             pp_raw_block
             b
       | false ->
@@ -168,7 +168,8 @@ let test_merge_with_branches block_store =
   >>= fun (blocks, _head) ->
   Lwt_list.iter_s (Block_store.store_block block_store) blocks
   >>= fun () ->
-  let branches_fork_points_to_gc = [100; 200; 300; 400; 449] in
+  let branches_fork_points_to_gc = [100; 200; 300; 400; 448] in
+  (* 448 => we also keep the checkpoint *)
   map_s
     (fun level ->
       let fork_root = List.nth blocks (level - 1) in
@@ -299,8 +300,9 @@ let test_rolling_0_merge block_store =
   Block_store.await_merging block_store
   >>= fun () ->
   let (purged_blocks, preserved_blocks) =
-    List.split_n (nb_blocks - (nb_blocks / 8)) blocks
+    List.split_n (nb_blocks - (nb_blocks / 8) - 1) blocks
   in
+  (* -1 => because we keep the checkpoint in floating *)
   assert_presence_in_block_store
     ~with_metadata:true
     block_store

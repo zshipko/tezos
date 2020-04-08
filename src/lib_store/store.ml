@@ -794,17 +794,23 @@ module Chain = struct
             table_len <= offset
           then return chain_state.savepoint
           else
-            (* Else we shift the savepoint of one cycle  *)
-            let new_savepoint_level =
+            (* Else we shift the savepoint by one cycle *)
+            let shifted_savepoint_level =
               (* new lowest cemented block  *)
               Int32.succ
                 table.(table_len - offset).Cemented_block_store.end_level
             in
-            (* If the new savepoint is still higher than the min block
-               to preserve, we choose the min block to preserve. *)
+            (* If the savepoint is still higher than the shifted
+               savepoint, preserve the savepoint *)
             if
               Compare.Int32.(
-                new_savepoint_level >= Block.level min_block_to_preserve)
+                snd chain_state.savepoint >= shifted_savepoint_level)
+            then return chain_state.savepoint
+            else if
+              (* If the new savepoint is still higher than the min block
+                 to preserve, we choose the min block to preserve. *)
+              Compare.Int32.(
+                shifted_savepoint_level >= Block.level min_block_to_preserve)
             then return (Block.descriptor min_block_to_preserve)
             else
               (* Else the new savepoint is the one-cycle shifted
@@ -812,7 +818,7 @@ module Chain = struct
               Block.locked_read_block_by_level_opt
                 locked_chain_store
                 new_head
-                new_savepoint_level
+                shifted_savepoint_level
               >>= function
               | None ->
                   failwith
@@ -942,7 +948,11 @@ module Chain = struct
         else
           let table_len = Array.length table in
           if offset <= 0 then return (Block.descriptor min_block_to_preserve)
-          else if table_len <= offset then return chain_state.caboose
+          else if table_len <= offset then
+            (* When the first cycle is merged, we shift the genesis to
+               its lower bound *)
+            if table_len = 0 then return from_block
+            else return chain_state.caboose
           else (* new lowest cemented block  *)
             return savepoint )
     >>=? fun caboose ->
@@ -1424,23 +1434,29 @@ module Chain = struct
       }
 
   let get_commit_info index header =
-    Context.retrieve_commit_info index header
-    >>=? fun ( _protocol_hash,
-               author,
-               message,
-               timestamp,
-               test_chain_status,
-               data_merkle_root,
-               parents_contexts ) ->
-    return
-      {
-        author;
-        message;
-        timestamp;
-        test_chain_status;
-        data_merkle_root;
-        parents_contexts;
-      }
+    protect
+      ~on_error:(fun _ ->
+        failwith
+          "get_commit_info: could not retrieve the commit info. Is the \
+           context initialized?")
+      (fun () ->
+        Context.retrieve_commit_info index header
+        >>=? fun ( _protocol_hash,
+                   author,
+                   message,
+                   timestamp,
+                   test_chain_status,
+                   data_merkle_root,
+                   parents_contexts ) ->
+        return
+          {
+            author;
+            message;
+            timestamp;
+            test_chain_status;
+            data_merkle_root;
+            parents_contexts;
+          })
 
   let create_chain_store global_store ~chain_dir ~chain_id ?(expiration = None)
       ?genesis_block ~genesis ~genesis_context history_mode =
@@ -1637,10 +1653,6 @@ module Chain = struct
             else
               (* Inherit history mode *)
               let history_mode = history_mode chain_store in
-              let chain_dir = chain_store.chain_dir in
-              let testchain_dir =
-                Naming.(chain_dir // testchain_dir // chain_store testchain_id)
-              in
               (* Inherit history mode *)
               let genesis_block =
                 create_testchain_genesis_block ~genesis_hash ~genesis_header
@@ -2141,12 +2153,11 @@ let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
     Data_encoding.(tup2 Block_hash.encoding int32)
     new_head_descr
   >>= fun () ->
-  (* Savepoint is the head's predecessors *)
+  (* Savepoint is the head *)
   Stored_data.write_file
     ~file:Naming.(chain_dir // Chain_data.savepoint)
     Data_encoding.(tup2 Block_hash.encoding int32)
-    ( Block_repr.predecessor new_head_with_metadata,
-      Int32.pred (Block_repr.level new_head_with_metadata) )
+    new_head_descr
   >>= fun () ->
   (* Depending on the history mode, set the caboose properly *)
   ( match history_mode with
@@ -2267,12 +2278,11 @@ let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
     Data_encoding.(tup2 Block_hash.encoding int32)
     new_head_descr
   >>= fun () ->
-  (* Savepoint is the head's predecessors *)
+  (* Savepoint is the head *)
   Stored_data.write_file
     ~file:Naming.(chain_dir // Chain_data.savepoint)
     Data_encoding.(tup2 Block_hash.encoding int32)
-    ( Block_repr.predecessor new_head_with_metadata,
-      Int32.pred (Block_repr.level new_head_with_metadata) )
+    new_head_descr
   >>= fun () ->
   (* Depending on the history mode, set the caboose properly *)
   ( match history_mode with

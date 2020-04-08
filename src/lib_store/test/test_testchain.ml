@@ -31,15 +31,30 @@ let fork_testchain chain_store (blocks, forked_block) =
     Block_hash.hash_bytes [Block_hash.to_bytes forked_block_hash]
   in
   let testchain_id = Chain_id.of_block_hash genesis_hash in
+  let head_header = Store.Block.header forked_block in
+  let test_protocol = Tezos_protocol_alpha.Protocol.hash in
+  let expiration = Time.Protocol.epoch in
+  let global_store = Store.Chain.global_store chain_store in
+  let context_index = Store.context_index global_store in
+  let open Tezos_storage in
+  (* Call [Context.fork_test_chain] then commit so we are able to gather
+     commit info *)
+  Context.checkout_exn context_index head_header.shell.context
+  >>= fun context ->
+  Context.fork_test_chain context ~protocol:test_protocol ~expiration
+  >>= fun context ->
+  Context.commit ~time:head_header.shell.timestamp context
+  >>= fun context_hash ->
   let genesis_header =
-    let head_header = Store.Block.header forked_block in
     let shell =
-      {head_header.Block_header.shell with predecessor = genesis_hash}
+      {
+        head_header.Block_header.shell with
+        predecessor = genesis_hash;
+        context = context_hash;
+      }
     in
     {head_header with shell}
   in
-  let test_protocol = Tezos_protocol_alpha.Protocol.hash in
-  let expiration = Time.Protocol.epoch in
   Store.Chain.fork_testchain
     chain_store
     ~testchain_id
@@ -50,7 +65,12 @@ let fork_testchain chain_store (blocks, forked_block) =
     ~expiration
   >>=? fun testchain ->
   let testchain_store = Store.Chain.testchain_store testchain in
-  append_blocks ~should_set_head:true testchain_store ~kind:`Full 10
+  append_blocks
+    ~should_commit:true
+    ~should_set_head:true
+    testchain_store
+    ~kind:`Full
+    10
   >>=? fun (test_blocks, head) ->
   assert_absence_in_store testchain_store blocks
   >>=? fun () ->
@@ -61,18 +81,33 @@ let fork_testchain chain_store (blocks, forked_block) =
 
 let test_simple store =
   let chain_store = Store.main_chain_store store in
-  append_blocks ~should_set_head:true chain_store ~kind:`Full 10
+  append_blocks
+    ~should_commit:true
+    ~should_set_head:true
+    chain_store
+    ~kind:`Full
+    10
   >>=? fun (blocks, head) ->
   fork_testchain chain_store (blocks, head)
   >>=? fun (testchain, _, _) ->
-  append_blocks ~should_set_head:true chain_store ~kind:`Full 10
+  append_blocks
+    ~should_commit:true
+    ~should_set_head:true
+    chain_store
+    ~kind:`Full
+    10
   >>=? fun (blocks, _head) ->
   let testchain_store = Store.Chain.testchain_store testchain in
   assert_absence_in_store testchain_store blocks
 
 let test_inner store =
   let chain_store = Store.main_chain_store store in
-  append_blocks ~should_set_head:true chain_store ~kind:`Full 10
+  append_blocks
+    ~should_commit:true
+    ~should_set_head:true
+    chain_store
+    ~kind:`Full
+    10
   >>=? fun (blocks, head) ->
   fork_testchain chain_store (blocks, head)
   >>=? fun (testchain, blocks, head) ->
@@ -81,7 +116,12 @@ let test_inner store =
 
 let test_shutdown store =
   let chain_store = Store.main_chain_store store in
-  append_blocks ~should_set_head:true chain_store ~kind:`Full 10
+  append_blocks
+    ~should_commit:true
+    ~should_set_head:true
+    chain_store
+    ~kind:`Full
+    10
   >>=? fun (blocks, head) ->
   fork_testchain chain_store (blocks, head)
   >>=? fun (testchain, blocks, _head) ->

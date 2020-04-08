@@ -42,7 +42,7 @@ open Tezos_protocol_alpha.Protocol.Constants_repr
 
 let default_protocol_constants = Default_parameters.constants_test
 
-let default_max_operations_ttl = 8
+let default_max_operations_ttl = 1
 
 let check_invariants chain_store =
   let open Store in
@@ -73,6 +73,17 @@ let check_invariants chain_store =
   | (Some _, Some _) ->
       Lwt.return_unit
   | (Some _, None) ->
+      Store.Chain.savepoint chain_store
+      >>= fun savepoint ->
+      Store.Chain.checkpoint chain_store
+      >>= fun checkpoint ->
+      Store.Chain.caboose chain_store
+      >>= fun caboose ->
+      Format.printf
+        "savepoint %ld - checkpoint %ld - caboose %ld@."
+        (snd savepoint)
+        (snd checkpoint)
+        (snd caboose) ;
       Assert.fail_msg "check_invariant: could not find savepoint's metadata"
   | _ ->
       Assert.fail_msg "check_invariant: could not find savepoint block" )
@@ -86,10 +97,45 @@ let check_invariants chain_store =
   | (Some _, (Some _ | None)) ->
       Lwt.return_unit
   | (None, _) ->
+      Format.printf "caboose lvl : %ld@." (snd caboose) ;
       Assert.fail_msg "check_invariant: could not find the caboose block"
 
-let wrap_store_init ?patch_context ?(history_mode = History_mode.Archive)
-    ?(allow_testchains = true) ?(keep_dir = false) k _ () : unit Lwt.t =
+let dummy_patch_context ctxt =
+  let open Tezos_storage in
+  let open Tezos_protocol_alpha in
+  Context.set ctxt ["version"] (MBytes.of_string "genesis")
+  >>= fun ctxt ->
+  let open Tezos_protocol_alpha_parameters in
+  let proto_params =
+    let json =
+      Default_parameters.json_of_parameters
+        Default_parameters.(parameters_of_constants constants_test)
+    in
+    Data_encoding.Binary.to_bytes_exn Data_encoding.json json
+  in
+  Context.set ctxt ["protocol_parameters"] proto_params
+  >>= fun ctxt ->
+  let ctxt = Tezos_shell_context.Shell_context.wrap_disk_context ctxt in
+  Protocol.Main.init
+    ctxt
+    {
+      level = 0l;
+      proto_level = 0;
+      predecessor = genesis.block;
+      timestamp = genesis.time;
+      validation_passes = 0;
+      operations_hash = Operation_list_list_hash.empty;
+      fitness = [];
+      context = Context_hash.zero;
+    }
+  >>= fun res ->
+  Lwt.return (Protocol.Environment.wrap_error res)
+  >>=? fun {context; _} ->
+  return (Tezos_shell_context.Shell_context.unwrap_disk_context context)
+
+let wrap_store_init ?(patch_context = dummy_patch_context)
+    ?(history_mode = History_mode.Archive) ?(allow_testchains = true)
+    ?(keep_dir = false) k _ () : unit Lwt.t =
   let prefix_dir = "tezos_indexed_store_test_" in
   let run f =
     if not keep_dir then Lwt_utils_unix.with_tempdir prefix_dir f
@@ -103,7 +149,7 @@ let wrap_store_init ?patch_context ?(history_mode = History_mode.Archive)
       let store_dir = base_dir // "store" in
       let context_dir = base_dir // "context" in
       Store.init
-        ?patch_context
+        ~patch_context
         ~history_mode
         ~store_dir
         ~context_dir
