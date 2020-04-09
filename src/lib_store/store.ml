@@ -791,7 +791,7 @@ module Chain = struct
           else if
             (* If the number of cemented cycles is not yet the offset,
                then the savepoint is unchanged. *)
-            table_len <= offset
+            table_len < offset
           then return chain_state.savepoint
           else
             (* Else we shift the savepoint by one cycle *)
@@ -950,7 +950,8 @@ module Chain = struct
           if offset <= 0 then return (Block.descriptor min_block_to_preserve)
           else if table_len <= offset then
             (* When the first cycle is merged, we shift the genesis to
-               its lower bound *)
+               its lower bound : cannot be the savepoint because it
+               might not have metadata *)
             if table_len = 0 then return from_block
             else return chain_state.caboose
           else (* new lowest cemented block  *)
