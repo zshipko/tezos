@@ -2176,8 +2176,19 @@ let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
           failwith
             "Store.restore_from_snapshot: could not find the caboose for \
              rolling"
-      | Some caboose ->
-          return (Block_repr.hash caboose, Block_repr.level caboose) ) )
+      | Some caboose -> (
+        match Block_repr.metadata new_head_with_metadata with
+        | None ->
+            assert false
+        | Some metadata ->
+            if
+              Int32.sub
+                (Block_repr.level new_head_with_metadata)
+                (Int32.of_int metadata.max_operations_ttl)
+              <= 0l
+            then return (genesis.block, 0l)
+            else return (Block_repr.hash caboose, Block_repr.level caboose) ) )
+  )
   >>=? fun caboose_descr ->
   Stored_data.write_file
     ~file:Naming.(chain_dir // Chain_data.caboose)
