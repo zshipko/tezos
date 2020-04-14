@@ -36,7 +36,7 @@ type block_store = {
   merge_mutex : Lwt_mutex.t;
   merge_scheduler : Lwt_idle_waiter.t;
   (* Target level x Merging thread *)
-  mutable merging_thread : (int32 * unit Lwt.t) option;
+  mutable merging_thread : (int32 * unit tzresult Lwt.t) option;
 }
 
 type t = block_store
@@ -404,7 +404,7 @@ let update_floating_stores ~ro_store ~rw_store ~new_store ~from_block ~to_block
       (Block_hash.Set.singleton
          (Block_repr.predecessor first_block_to_preserve))
   in
-  Lwt_list.iter_s
+  iter_s
     (fun store ->
       Floating_block_store.iter
         (fun block ->
@@ -420,14 +420,15 @@ let update_floating_stores ~ro_store ~rw_store ~new_store ~from_block ~to_block
               ~should_flush:false
               new_store
               predecessors
-              block )
-          else Lwt.return_unit)
+              block
+            >>= return )
+          else return_unit)
         store)
     [ro_store; rw_store]
-  >>= fun () ->
+  >>=? fun () ->
   Floating_block_index.flush
     new_store.Floating_block_store.floating_block_index ;
-  Lwt.return blocks_to_cement
+  return blocks_to_cement
 
 let swap_floating_stores block_store ~new_ro_store =
   let chain_dir = block_store.chain_dir in
@@ -496,7 +497,7 @@ let try_remove_temporary_stores block_store =
 let await_merging block_store =
   match block_store.merging_thread with
   | None ->
-      Lwt.return_unit
+      return_unit
   | Some (_, th) ->
       th
 
@@ -523,7 +524,7 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
       >>= fun new_rw_store ->
       block_store.rw_floating_block_store <- new_rw_store ;
       (* Create the merging thread that we want to run in background *)
-      let create_merging_thread () : unit Lwt.t =
+      let create_merging_thread () : unit tzresult Lwt.t =
         Floating_block_store.init ~chain_dir ~readonly:false RO_TMP
         >>= fun new_ro_store ->
         update_floating_stores
@@ -533,11 +534,12 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
           ~from_block
           ~to_block
           ~nb_blocks_to_preserve
-        >>= fun blocks_to_cement ->
+        >>=? fun blocks_to_cement ->
         ( match history_mode with
         | History_mode.Archive ->
             (* In archive, we store the metadatas *)
             cement_blocks ~write_metadata:true block_store blocks_to_cement
+            >>= return
         | (Full {offset} | Rolling {offset}) when offset > 0 ->
             cement_blocks ~write_metadata:true block_store blocks_to_cement
             >>= fun () ->
@@ -545,21 +547,23 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
             Cemented_block_store.trigger_gc
               block_store.cemented_store
               history_mode
+            >>= return
         | Full {offset} ->
             assert (offset = 0) ;
             (* In full, we do not store the metadata *)
             cement_blocks ~write_metadata:false block_store blocks_to_cement
+            >>= return
         | Rolling {offset} ->
             assert (offset = 0) ;
             (* Drop the blocks *)
-            Lwt.return_unit )
-        >>= fun () ->
+            return_unit )
+        >>=? fun () ->
         (* Swapping stores: hard-lock *)
         Lwt_idle_waiter.force_idle block_store.merge_scheduler (fun () ->
             swap_floating_stores block_store ~new_ro_store
             >>= fun () ->
             block_store.merging_thread <- None ;
-            Lwt.return_unit)
+            return_unit)
       in
       (* Clean-up on cancel/exn *)
       let merging_thread =
@@ -575,7 +579,7 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
             Lwt.finalize
               (fun () ->
                 create_merging_thread ()
-                >>= fun () -> finalizer () >>= fun () -> Lwt.return_unit)
+                >>=? fun () -> finalizer () >>= fun () -> return_unit)
               (fun () -> cleanup ()))
           (fun exn ->
             Lwt.fail_with
@@ -650,7 +654,7 @@ let merging_state block_store =
   match block_store.merging_thread with
   | Some (lvl, th) -> (
     match Lwt.state th with
-    | Return () ->
+    | Return (Ok () | Error _) ->
         `Done
     | Sleep ->
         `Ongoing lvl
@@ -663,9 +667,10 @@ let close block_store =
   (* Wait a bit for the merging to end but hard-stop it if it takes
      too long. *)
   Lwt_unix.with_timeout 5. (fun () -> await_merging block_store)
-  >>= fun () ->
+  >>=? fun () ->
   Cemented_block_store.close block_store.cemented_store ;
   Lwt_list.iter_s
     Floating_block_store.close
     ( block_store.rw_floating_block_store
     :: block_store.ro_floating_block_stores )
+  >>= return

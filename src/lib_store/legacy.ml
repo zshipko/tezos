@@ -577,7 +577,7 @@ let make_block_repr ~read_metadata ~write_metadata lmdb_block_store hash =
       in
       return ({hash; contents; metadata = None} : Block_repr.t)
 
-(* Note that the blocks are processed from head to genesis. 
+(* Note that the blocks are processed from head to genesis.
    Thus, the proto levels are in an decreasing order *)
 let may_update_protocol_table lmdb_block_store chain_store prev_block
     proto_level =
@@ -776,7 +776,7 @@ let archive_import lmdb_chain_store chain_store cycle_length checkpoint
   let new_savepoint = new_caboose in
   return (new_checkpoint, new_savepoint, new_caboose)
 
-(* As the lmdb store is not compatible with a Full 5, it is upgraded as 
+(* As the lmdb store is not compatible with a Full 5, it is upgraded as
    a Full 0. It will converge to a Full 5 afterward.*)
 let full_import lmdb_chain_store chain_store cycle_length checkpoint
     current_head_hash =
@@ -849,7 +849,7 @@ let full_import lmdb_chain_store chain_store cycle_length checkpoint
   in
   return (new_checkpoint, new_savepoint, new_caboose)
 
-(* As the lmdb store is not compatible with a Rolling 5, it is upgraded as 
+(* As the lmdb store is not compatible with a Rolling 5, it is upgraded as
    a Rolling 0. It will converge to a Rolling 5 afterward.*)
 let rolling_import lmdb_chain_store chain_store checkpoint current_head_hash =
   let lmdb_chain_data = Chain_data.get lmdb_chain_store in
@@ -1073,7 +1073,7 @@ let upgrade_0_0_4 ~data_dir genesis patch_context
         ~new_caboose
       >>=? fun () ->
       close lmdb_store ;
-      Store.close_store store >>= fun () -> return_unit)
+      Store.close_store store >>=? fun () -> return_unit)
     (function
       | Ok () ->
           return

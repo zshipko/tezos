@@ -371,7 +371,7 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
       (* FIXME: we also write potential branches, it will eventually be GCed *)
       if Compare.Int32.(Block_repr.level block >= limit_level) then
         if Block_hash.equal limit_hash (Block_repr.hash block) then raise Done
-        else Lwt.return_unit
+        else return_unit
       else
         let block =
           (* Prune everything below the export's block predecessor *)
@@ -379,7 +379,7 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
             block
           else {block with metadata = None}
         in
-        bpush#push block
+        bpush#push block >>= return
     in
     let reading_thread =
       Lwt.finalize
@@ -389,11 +389,11 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
               Lwt_unix.lseek floating_ro_fd 0 Unix.SEEK_SET
               >>= fun _ ->
               Floating_block_store.iter_raw f floating_ro_fd
-              >>= fun () ->
+              >>=? fun () ->
               Lwt_unix.lseek floating_rw_fd 0 Unix.SEEK_SET
               >>= fun _ ->
               Floating_block_store.iter_raw f floating_rw_fd
-              >>= fun () ->
+              >>=? fun () ->
               failwith "floating_export: could not retrieve the target block")
             (function
               | Done ->

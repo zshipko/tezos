@@ -134,14 +134,14 @@ let iter_raw f fd =
   Lwt_unix.lseek fd 0 Unix.SEEK_SET
   >>= fun _ ->
   let rec loop nb_bytes_left =
-    if nb_bytes_left = 0 then Lwt.return_unit
+    if nb_bytes_left = 0 then return_unit
     else
       Block_repr.read_next_block_opt fd
       >>= function
       | None ->
-          Lwt.return_unit
+          return_unit
       | Some (block, length) ->
-          f block >>= fun () -> loop (nb_bytes_left - length)
+          f block >>=? fun () -> loop (nb_bytes_left - length)
   in
   loop eof_offset
 
@@ -151,7 +151,8 @@ let iter f floating_store =
       (* We open a new fd *)
       let (flags, perms) = ([Unix.O_CREAT; O_RDONLY; O_CLOEXEC], 0o444) in
       Lwt_unix.openfile floating_store.filename flags perms
-      >>= fun fd -> iter_raw f fd >>= fun () -> Lwt_unix.close fd)
+      >>= fun fd ->
+      iter_raw f fd >>=? fun () -> Lwt_unix.close fd >>= fun () -> return_unit)
 
 let fold f init floating_store =
   let set = ref Block_hash.Set.empty in

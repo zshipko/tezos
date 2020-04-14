@@ -434,7 +434,7 @@ let test_acceptable_block chain_store table =
   >>=? fun () ->
   let block_store = Store.unsafe_get_block_store chain_store in
   Block_store.await_merging block_store
-  >>= fun () ->
+  >>=? fun () ->
   (* it is accepted if the new head is greater than the checkpoint *)
   let block_1 = vblock table "A1" in
   Store.Chain.is_acceptable_block

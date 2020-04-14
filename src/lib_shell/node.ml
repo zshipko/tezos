@@ -458,7 +458,7 @@ let create ?(sandboxed = false) ?sandbox_parameters ~singleprocess
     >>= fun () ->
     lwt_log_info
       Tag.DSL.(fun f -> f "Closing down the state..." -% t event "shutdown")
-    >>= fun () -> Store.close_store store
+    >>= fun () -> Store.close_store store >>= fun _ -> Lwt.return_unit
   in
   return
     {

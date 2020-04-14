@@ -102,7 +102,7 @@ let export_import ~caller_loc (store_dir, context_dir) chain_store
      merging thread to finish *)
   let block_store = Store.unsafe_get_block_store chain_store in
   Block_store.await_merging block_store
-  >>= fun () ->
+  >>=? fun () ->
   let block = Option.map ~f:Block_hash.to_b58check exported_block_hash in
   Snapshots.export
     ~rolling
@@ -133,7 +133,7 @@ let export_import ~caller_loc (store_dir, context_dir) chain_store
   >>=? fun store' ->
   protect
     ~on_error:(fun err ->
-      Store.close_store store' >>= fun () -> Lwt.return (Error err))
+      Store.close_store store' >>=? fun () -> Lwt.return (Error err))
     (fun () ->
       let chain_store' = Store.main_chain_store store' in
       Store.Chain.current_head chain_store'
@@ -275,7 +275,7 @@ let test store_path store ~caller_loc ?exported_block_level
         (fun () ->
           (* only close store' - store will be closed by the test
              wrapper *)
-          Store.close_store store')
+          Store.close_store store' >>= fun _ -> Lwt.return_unit)
 
 let make_tests genesis_parameters =
   let open Tezos_protocol_alpha.Protocol in

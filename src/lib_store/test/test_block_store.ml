@@ -136,7 +136,7 @@ let test_consecutive_concurrent_merges block_store =
   Lwt.join threads
   >>= fun () ->
   Block_store.await_merging block_store
-  >>= fun () ->
+  >>=? fun () ->
   assert_presence_in_block_store ~with_metadata:false block_store blocks
   >>=? fun () -> return_unit
 
@@ -158,7 +158,7 @@ let test_big_merge block_store =
   >>= fun () ->
   assert_presence_in_block_store ~with_metadata:false block_store blocks
   >>=? fun () ->
-  Block_store.await_merging block_store >>= fun () -> return_unit
+  Block_store.await_merging block_store >>=? fun () -> return_unit
 
 (** Makes several branches at different level and make sure those
     created before the checkpoint are correctly GCed *)
@@ -201,7 +201,7 @@ let test_merge_with_branches block_store =
     ()
   >>= fun () ->
   Block_store.await_merging block_store
-  >>= fun () ->
+  >>=? fun () ->
   assert_presence_in_block_store
     block_store
     (blocks @ List.flatten blocks_to_keep)
@@ -235,7 +235,7 @@ let test_archive_merge block_store =
   >>= fun () ->
   assert_presence_in_block_store ~with_metadata:true block_store blocks
   >>=? fun () ->
-  Block_store.await_merging block_store >>= fun () -> return_unit
+  Block_store.await_merging block_store >>=? fun () -> return_unit
 
 let test_full_2_merge block_store =
   let nb_blocks = 400 in
@@ -263,7 +263,7 @@ let test_full_2_merge block_store =
   Lwt.join threads
   >>= fun () ->
   Block_store.await_merging block_store
-  >>= fun () ->
+  >>=? fun () ->
   assert_presence_in_block_store
     ~with_metadata:true
     block_store
@@ -298,7 +298,7 @@ let test_rolling_0_merge block_store =
   Lwt.join threads
   >>= fun () ->
   Block_store.await_merging block_store
-  >>= fun () ->
+  >>=? fun () ->
   let (purged_blocks, preserved_blocks) =
     List.split_n (nb_blocks - (nb_blocks / 8) - 1) blocks
   in
@@ -334,7 +334,7 @@ let test_rolling_2_merge block_store =
   Lwt.join threads
   >>= fun () ->
   Block_store.await_merging block_store
-  >>= fun () ->
+  >>=? fun () ->
   assert_presence_in_block_store
     ~with_metadata:true
     block_store

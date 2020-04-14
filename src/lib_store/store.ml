@@ -1086,7 +1086,7 @@ module Chain = struct
             (* We must be sure that the previous merge is completed
                before starting a new merge *)
             Block_store.await_merging chain_store.block_store
-            >>= fun () ->
+            >>=? fun () ->
             let is_already_cemented =
               Option.unopt_map
                 ~f:(fun highest_cemented_level ->
@@ -1568,17 +1568,17 @@ module Chain = struct
       | {block_store; lockfile; chain_state; _} ->
           Shared.use chain_state (fun {active_testchain; _} ->
               Block_store.close block_store
-              >>= fun () ->
+              >>=? fun () ->
               ( match active_testchain with
               | Some {testchain_store; _} ->
                   loop testchain_store
               | None ->
-                  Lwt.return_unit )
-              >>= fun () ->
+                  return_unit )
+              >>=? fun () ->
               unlock chain_store.lockfile
               >>= fun () ->
               (* FIXME merge may still be going on ?? *)
-              Lwt_unix.close lockfile)
+              Lwt_unix.close lockfile >>= return)
     in
     loop chain_store
 
@@ -1717,7 +1717,7 @@ module Chain = struct
         match active_testchain with
         | Some testchain ->
             close_chain_store testchain.testchain_store
-            >>= fun () ->
+            >>=? fun () ->
             return (Some {chain_state with active_testchain = None}, ())
         | None ->
             return (None, ()))
@@ -2114,7 +2114,7 @@ let close_store global_store =
     Option.unopt_assert ~loc:__POS__ global_store.main_chain_store
   in
   Chain.close_chain_store main_chain_store
-  >>= fun () -> Context.close global_store.context_index
+  >>=? fun () -> Context.close global_store.context_index >>= return
 
 let open_for_snapshot_export ~store_dir ~context_dir genesis
     ~(locked_f : chain_store * Context.index -> 'a tzresult Lwt.t) =
@@ -2132,10 +2132,12 @@ let open_for_snapshot_export ~store_dir ~context_dir genesis
   let chain_store = main_chain_store store in
   lock_for_read chain_store.lockfile
   >>= fun () ->
-  Lwt.finalize
+  Error_monad.protect
+    ~on_error:(fun err ->
+      close_store store >>=? fun () -> Lwt.return (Error err))
     (fun () ->
-      Error_monad.protect (fun () -> locked_f (chain_store, context_index)))
-    (fun _ -> close_store store)
+      locked_f (chain_store, context_index)
+      >>=? fun res -> close_store store >>=? fun () -> return res)
 
 let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
     ~context_index ~genesis ~genesis_context_hash ~floating_blocks_stream
@@ -2271,7 +2273,7 @@ let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
     (Protocol_levels.bindings protocol_levels)
   >>=? fun () ->
   Block_store.close block_store
-  >>= fun () ->
+  >>=? fun () ->
   let chain_config = {Chain_config.history_mode; genesis; expiration = None} in
   Chain_config.write ~chain_dir chain_config >>= fun () -> return_unit
 
@@ -2426,7 +2428,7 @@ let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
     protocol_levels
   >>= fun () ->
   Block_store.close block_store
-  >>= fun () ->
+  >>=? fun () ->
   let chain_config = {Chain_config.history_mode; genesis; expiration = None} in
   Chain_config.write ~chain_dir chain_config >>= fun () -> return_unit
 

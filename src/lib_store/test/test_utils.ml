@@ -153,7 +153,7 @@ let wrap_store_init ?(patch_context = dummy_patch_context)
       >>=? fun store ->
       protect
         ~on_error:(fun err ->
-          Store.close_store store >>= fun () -> Lwt.return (Error err))
+          Store.close_store store >>=? fun () -> Lwt.return (Error err))
         (fun () ->
           k (store_dir, context_dir) store
           >>=? fun () ->
@@ -161,7 +161,7 @@ let wrap_store_init ?(patch_context = dummy_patch_context)
           check_invariants (Store.main_chain_store store)
           >>= fun () ->
           Store.close_store store
-          >>= fun () ->
+          >>=? fun () ->
           Store.init
             ~history_mode
             ~store_dir
@@ -172,7 +172,7 @@ let wrap_store_init ?(patch_context = dummy_patch_context)
           Format.printf "Invariants check after reloading@." ;
           Lwt.finalize
             (fun () -> check_invariants (Store.main_chain_store store'))
-            (fun () -> Store.close_store store')
+            (fun () -> Store.close_store store' >>= fun _ -> Lwt.return_unit)
           >>= fun () -> return_unit))
   >>= function
   | Error err ->

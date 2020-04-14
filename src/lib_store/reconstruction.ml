@@ -284,7 +284,7 @@ let reconstruct_floating chain_store context_index ~user_activated_upgrades
                 }
               >>= fun () -> notify () >>= fun () -> return_unit)
             fs
-          >>= fun () -> return_unit)
+          >>=? fun () -> return_unit)
         floating_stores)
   >>=? fun () ->
   Floating_block_store.init ~chain_dir ~readonly:false RW_TMP
