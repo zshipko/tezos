@@ -41,8 +41,7 @@ type error +=
         | `Genesis
         | `Not_enough_pred ];
     }
-  | (* TODO *)
-      Snapshot_import_failure of string
+  | (* TODO *) Snapshot_import_failure of string
   | Wrong_protocol_hash of Protocol_hash.t
   | Inconsistent_operation_hashes of
       (Operation_list_list_hash.t * Operation_list_list_hash.t)
@@ -399,6 +398,7 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
 
 (* Export the protocol table (info regarding the protocol transitions) as well
    as all the stored protocols *)
+
 let export_protocols protocol_levels ~src_dir ~dst_dir =
   let protocol_tbl_filename = Naming.(dst_dir // Snapshot.protocols_table) in
   Lwt_unix.openfile
@@ -454,6 +454,7 @@ let export_protocols protocol_levels ~src_dir ~dst_dir =
         (fun () -> Lwt_unix.closedir dir_handle))
 
 (* Creates the requested export folder and its hierarchy *)
+
 let create_snapshot_dir ~snapshot_dir =
   Lwt_unix.file_exists snapshot_dir
   >>= fun exists ->
@@ -488,6 +489,7 @@ let create_snapshot_dir ~snapshot_dir =
     - not be pruned, having their context present
     - have at least max_op_ttl(b) blocks (pruned or not) available
 *)
+
 let check_export_block_validity chain_store block =
   let (block_hash, block_level) = Store.Block.descriptor block in
   Store.Block.is_known_valid chain_store block_hash
@@ -658,7 +660,7 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
     if is_last_cemented_block then return (table, Some [])
     else
       (* If the export block is cemented, cut the cycle containing the
-       export block accordingly and retrieve the extra blocks *)
+         export block accordingly and retrieve the extra blocks *)
       let (filtered_table, extra_cycles) =
         List.partition
           (fun {Cemented_block_store.end_level; _} ->
@@ -689,8 +691,8 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
         >>= function
         | None ->
             failwith
-              "compute_cemented_table_and_extra_cycle: cannot retrieve the \
-               beggining of cycle."
+              "compute_cemented_table_and_extra_cycle: cannot retrieve \
+               the                 beggining of cycle."
         | Some floating_blocks ->
             (* Don't forget to add the first block as [Chain_traversal.path] does
                not include the lower-bound block *)
@@ -727,7 +729,7 @@ let export_floating_block_stream ~snapshot_dir floating_block_stream =
       Format.fprintf fmt "Copying floating blocks: %d blocks copied" i)
     (fun notify ->
       (* The target block is in the middle of a cemented cycle, the
-          cycle prefix becomes the floating store. *)
+         cycle prefix becomes the floating store. *)
       let floating_file = Naming.(snapshot_dir // Snapshot.floating_blocks) in
       Lwt_unix.openfile floating_file Unix.[O_CREAT; O_TRUNC; O_WRONLY] 0o444
       >>= fun fd ->
@@ -824,7 +826,7 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
         Store.Chain.all_protocol_levels chain_store
         >>= fun protocol_levels ->
         (* Dump the context while the store is locked to avoid reading on
-            pruning *)
+           pruning *)
         dump_context context_index ~snapshot_dir ~pred_block ~export_block
         >>=? fun written_context_elements ->
         return
@@ -867,7 +869,7 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
           Lwt_stream.of_list (List.map Store.Block.repr floating_blocks) )
   | None ->
       (* The export block is in the floating stores, copy all the
-              floating stores until the block is reached *)
+         floating stores until the block is reached *)
       export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block
       >>=? fun (reading_thread, floating_block_stream) ->
       let reading_thread = Lwt.finalize (fun () -> reading_thread) finalizer in
@@ -1371,8 +1373,7 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
      match Block_repr.level block with
      (* Hardcoded special treatement for first two blocks *)
      | 0l ->
-         (* No genesis in previous format *)
-         assert false
+         (* No genesis in previous format *) assert false
      | 1l ->
          (* Cement from genesis to this block *)
          if !current_blocks <> [] then (

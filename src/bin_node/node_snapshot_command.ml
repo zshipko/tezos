@@ -47,19 +47,13 @@ module Event = struct
     Internal_event.Simple.declare_1
       ~section:["node"; "main"]
       ~name:"cleaning_up_after_failure"
-      ~msg:"cleaning up after failure"
+      ~msg:"cleaning up directory \"{directory}\" after failure."
+      ~level:Internal_event.Notice
       ("directory", Data_encoding.string)
 end
 
 module Term = struct
   type subcommand = Export | Import | Info
-
-  let dir_cleaner data_dir =
-    Event.(emit cleaning_up_after_failure) data_dir
-    >>= fun () ->
-    Lwt_utils_unix.remove_dir @@ Node_data_version.store_dir data_dir
-    >>= fun () ->
-    Lwt_utils_unix.remove_dir @@ Node_data_version.context_dir data_dir
 
   let process subcommand args snapshot_path block rolling reconstruct
       sandbox_file import_legacy =
@@ -71,20 +65,23 @@ module Term = struct
       Node_shared_arg.read_and_patch_config_file args
       >>=? fun node_config ->
       let data_dir = node_config.data_dir in
-      protect
-        ~on_error:(fun err ->
-          dir_cleaner data_dir >>= fun () -> Lwt.return (Error err))
-        (fun () ->
-          let ({genesis; chain_name; _} : Node_config_file.blockchain_network)
-              =
-            node_config.blockchain_network
+      let ({genesis; chain_name; _} : Node_config_file.blockchain_network) =
+        node_config.blockchain_network
+      in
+      match subcommand with
+      | Export ->
+          let dir_cleaner () =
+            Event.(emit cleaning_up_after_failure) snapshot_path
+            >>= fun () -> Lwt_utils_unix.remove_dir snapshot_path
           in
-          match subcommand with
-          | Export ->
-              Node_data_version.ensure_data_dir data_dir
-              >>=? fun () ->
-              let context_dir = Node_data_version.context_dir data_dir in
-              let store_dir = Node_data_version.store_dir data_dir in
+          Node_data_version.ensure_data_dir data_dir
+          >>=? fun () ->
+          let context_dir = Node_data_version.context_dir data_dir in
+          let store_dir = Node_data_version.store_dir data_dir in
+          protect
+            ~on_error:(fun err ->
+              dir_cleaner () >>= fun () -> Lwt.return (Error err))
+            (fun () ->
               Snapshots.export
                 ~rolling
                 ~store_dir
@@ -92,38 +89,48 @@ module Term = struct
                 ~chain_name
                 ?block
                 ~snapshot_dir:snapshot_path
-                genesis
-          | Import ->
-              Node_config_file.write_if_not_exists args.config_file node_config
-              >>=? fun () ->
-              Node_data_version.ensure_data_dir ~bare:true data_dir
-              >>=? fun () ->
-              Lwt_lock_file.create
-                ~unlink_on_exit:true
-                (Node_data_version.lock_file data_dir)
-              >>=? fun () ->
-              ( match
-                  ( node_config.blockchain_network.genesis_parameters,
-                    sandbox_file )
-                with
-              | (None, None) ->
-                  return_none
-              | (Some parameters, None) ->
-                  return_some (parameters.context_key, parameters.values)
-              | (_, Some filename) -> (
-                  Lwt_utils_unix.Json.read_file filename
-                  >>= function
-                  | Error _err ->
-                      fail (Invalid_sandbox_file filename)
-                  | Ok json ->
-                      return_some ("sandbox_parameter", json) ) )
-              >>=? fun sandbox_parameters ->
-              let context_root = Node_data_version.context_dir data_dir in
-              let store_root = Node_data_version.store_dir data_dir in
-              let patch_context =
-                Patch_context.patch_context genesis sandbox_parameters
-              in
-              ( if import_legacy then
+                genesis)
+      | Import ->
+          let dir_cleaner () =
+            Event.(emit cleaning_up_after_failure) data_dir
+            >>= fun () ->
+            Lwt_utils_unix.remove_dir (Node_data_version.store_dir data_dir)
+            >>= fun () ->
+            Lwt_utils_unix.remove_dir (Node_data_version.context_dir data_dir)
+          in
+          Node_config_file.write_if_not_exists args.config_file node_config
+          >>=? fun () ->
+          Node_data_version.ensure_data_dir ~bare:true data_dir
+          >>=? fun () ->
+          Lwt_lock_file.create
+            ~unlink_on_exit:true
+            (Node_data_version.lock_file data_dir)
+          >>=? fun () ->
+          ( match
+              (node_config.blockchain_network.genesis_parameters, sandbox_file)
+            with
+          | (None, None) ->
+              return_none
+          | (Some parameters, None) ->
+              return_some (parameters.context_key, parameters.values)
+          | (_, Some filename) -> (
+              Lwt_utils_unix.Json.read_file filename
+              >>= function
+              | Error _err ->
+                  fail (Invalid_sandbox_file filename)
+              | Ok json ->
+                  return_some ("sandbox_parameter", json) ) )
+          >>=? fun sandbox_parameters ->
+          let context_root = Node_data_version.context_dir data_dir in
+          let store_root = Node_data_version.store_dir data_dir in
+          let patch_context =
+            Patch_context.patch_context genesis sandbox_parameters
+          in
+          protect
+            ~on_error:(fun err ->
+              dir_cleaner () >>= fun () -> Lwt.return (Error err))
+            (fun () ->
+              if import_legacy then
                 Snapshots.import_legacy
                   ~patch_context
                   ?block
@@ -149,23 +156,23 @@ module Term = struct
                   ~user_activated_protocol_overrides:
                     node_config.blockchain_network
                       .user_activated_protocol_overrides
-                  genesis )
-              >>=? fun () ->
-              if reconstruct then
-                Reconstruction.reconstruct
-                  ~patch_context
-                  ~store_root
-                  ~context_root
-                  ~genesis
-                  ~user_activated_upgrades:
-                    node_config.blockchain_network.user_activated_upgrades
-                  ~user_activated_protocol_overrides:
-                    node_config.blockchain_network
-                      .user_activated_protocol_overrides
-              else return_unit
-          | Info ->
-              Snapshots.snapshot_info ~snapshot_dir:snapshot_path
-              >>= fun () -> return_unit)
+                  genesis)
+          >>=? fun () ->
+          if reconstruct then
+            Reconstruction.reconstruct
+              ~patch_context
+              ~store_root
+              ~context_root
+              ~genesis
+              ~user_activated_upgrades:
+                node_config.blockchain_network.user_activated_upgrades
+              ~user_activated_protocol_overrides:
+                node_config.blockchain_network
+                  .user_activated_protocol_overrides
+          else return_unit
+      | Info ->
+          Snapshots.snapshot_info ~snapshot_dir:snapshot_path
+          >>= fun () -> return_unit
     in
     match Lwt_main.run run with
     | Ok () ->
