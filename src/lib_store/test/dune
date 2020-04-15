@@ -20,7 +20,15 @@
 
 (alias
  (name runtest)
- (action (chdir %{workspace_root} (run %{exe:test.exe}))))
+ (action
+  (setenv SLOW_TEST false
+   (chdir %{workspace_root} (run %{exe:test.exe})))))
+
+(alias
+ (name runtest-slow)
+ (action
+  (setenv SLOW_TEST true
+   (chdir %{workspace_root} (run %{exe:test.exe})))))
 
 (alias
  (name runtest_lint)

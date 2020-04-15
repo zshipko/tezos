@@ -73,7 +73,7 @@ let check_invariants chain_store =
   | (Some _, Some _) ->
       Lwt.return_unit
   | (Some _, None) ->
-      Format.printf
+      Format.eprintf
         "head %ld - savepoint %ld - checkpoint %ld - caboose %ld@."
         (Store.Block.level current_head)
         (snd savepoint)
@@ -92,7 +92,7 @@ let check_invariants chain_store =
   | (Some _, (Some _ | None)) ->
       Lwt.return_unit
   | (None, _) ->
-      Format.printf "caboose lvl : %ld@." (snd caboose) ;
+      Format.eprintf "caboose lvl : %ld@." (snd caboose) ;
       Assert.fail_msg "check_invariant: could not find the caboose block"
 
 let dummy_patch_context ctxt =
@@ -181,10 +181,11 @@ let wrap_store_init ?(patch_context = dummy_patch_context)
   | Ok () ->
       Lwt.return_unit
 
-let wrap_test ?history_mode ?patch_context ?keep_dir (name, f) =
+let wrap_test ?history_mode ?(speed = `Quick) ?patch_context ?keep_dir (name, f)
+    =
   test_case
     name
-    `Quick
+    speed
     (wrap_store_init ?patch_context ?history_mode ?keep_dir f)
 
 let make_raw_block ?(max_operations_ttl = default_max_operations_ttl)

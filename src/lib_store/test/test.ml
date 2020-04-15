@@ -24,6 +24,16 @@
 (*****************************************************************************)
 
 let () =
+  let speed =
+    try
+      let s = Sys.getenv "SLOW_TEST" in
+      match String.(trim (uncapitalize_ascii s)) with
+      | "true" | "1" | "yes" ->
+          `Slow
+      | _ ->
+          `Quick
+    with Not_found -> `Quick
+  in
   Lwt_main.run
     (Alcotest_lwt.run
        "tezos-store"
@@ -32,4 +42,4 @@ let () =
          Test_store.tests;
          Test_protocol_store.tests;
          Test_testchain.tests;
-         Test_snapshots.tests ])
+         Test_snapshots.tests speed ])

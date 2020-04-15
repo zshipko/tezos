@@ -587,7 +587,7 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
                  "Error during merge: %s@."
                  (Printexc.to_string exn)))
       in
-      Lwt.async (fun () -> merging_thread) ;
+      Lwt.async (fun () -> merging_thread >>= fun _ -> Lwt.return_unit) ;
       block_store.merging_thread <- Some (final_level, merging_thread) ;
       (* Temporary stores in place and the merging thread was started:
          we can now release the hard-lock *)
