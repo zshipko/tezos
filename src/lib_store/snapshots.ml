@@ -512,6 +512,10 @@ let check_export_block_validity chain_store block =
   >>=? fun () ->
   Store.Chain.savepoint chain_store
   >>= fun (_, savepoint_level) ->
+  fail_when
+    Compare.Int32.(savepoint_level > block_level)
+    (Invalid_export_block {block = Some block_hash; reason = `Pruned})
+  >>=? fun () ->
   (* We also need the predecessor not to be pruned *)
   fail_when
     Compare.Int32.(savepoint_level > Int32.pred block_level)

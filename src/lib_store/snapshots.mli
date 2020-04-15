@@ -23,6 +23,39 @@
 (*                                                                           *)
 (*****************************************************************************)
 
+type error +=
+  | Incompatible_history_mode of {
+      requested : History_mode.t;
+      stored : History_mode.t;
+    }
+  | Invalid_export_block of {
+      block : Block_hash.t option;
+      reason :
+        [ `Pruned
+        | `Pruned_pred
+        | `Unknown
+        | `Caboose
+        | `Genesis
+        | `Not_enough_pred
+        | `Missing_context ];
+    }
+  | (* TODO *)
+      Snapshot_import_failure of string
+  | Wrong_protocol_hash of Protocol_hash.t
+  | Inconsistent_operation_hashes of
+      (Operation_list_list_hash.t * Operation_list_list_hash.t)
+  | Invalid_block_specification of string
+  | Cannot_find_protocol_sources of Protocol_hash.t
+  | Protocol_hash_and_protocol_sources_mismatch of {
+      provided_protocol_hash : Protocol_hash.t;
+      computed_protocol_hash : Protocol_hash.t;
+    }
+  | Provided_protocol_sources_and_embedded_protocol_sources_mismatch of {
+      protocol_hash : Protocol_hash.t;
+      computed_protocol_hash : Protocol_hash.t;
+      computed_protocol_hash_from_embedded_sources : Protocol_hash.t;
+    }
+
 val export :
   ?rolling:bool ->
   ?block:string ->
