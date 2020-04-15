@@ -343,7 +343,6 @@ let write_floating_block fd (block : Block_repr.t) =
 
 let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
   let (limit_hash, limit_level) = Store.Block.descriptor export_block in
-  let export_predecessor = Store.Block.predecessor export_block in
   let (stream, bpush) = Lwt_stream.create_bounded 1000 in
   (* Retrieve first floating block *)
   Block_repr.read_next_block_opt floating_ro_fd
@@ -373,12 +372,7 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
         if Block_hash.equal limit_hash (Block_repr.hash block) then raise Done
         else return_unit
       else
-        let block =
-          (* Prune everything below the export's block predecessor *)
-          if Block_hash.equal (Block_repr.hash block) export_predecessor then
-            block
-          else {block with metadata = None}
-        in
+        let block = (* Prune everything  *) {block with metadata = None} in
         bpush#push block >>= return
     in
     let reading_thread =
