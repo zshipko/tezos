@@ -416,13 +416,17 @@ let display_progress ?(every = 1) ?(out = Lwt_unix.stdout) ~pp_print_step f =
     let oc = Unix.out_channel_of_descr (Lwt_unix.unix_file_descr out) in
     let fmt = Format.formatter_of_out_channel oc in
     let cpt = ref 0 in
+    let pp_cpt = ref 0 in
+    let rec loop () = Lwt_unix.sleep 1. >>= fun () -> incr pp_cpt ; loop () in
+    let loop = loop () in
+    let dots () = String.init (!pp_cpt mod 4) (fun _ -> '.') in
     let pp () =
       clear_line fmt ;
-      Format.fprintf fmt "☐ %a%!" pp_print_step !cpt
+      Format.fprintf fmt "%a%s%!" pp_print_step !cpt (dots ())
     in
     let pp_done () =
       clear_line fmt ;
-      Format.fprintf fmt "☑ %a Done@\n%!" pp_print_step !cpt
+      Format.fprintf fmt "%a Done@\n%!" pp_print_step !cpt
     in
     pp () ;
     incr cpt ;
@@ -435,4 +439,6 @@ let display_progress ?(every = 1) ?(out = Lwt_unix.stdout) ~pp_print_step f =
         stream
     in
     thread
-    >>= fun e -> printer >>= fun () -> decr cpt ; pp_done () ; Lwt.return e
+    >>= fun e ->
+    Lwt.cancel loop ;
+    printer >>= fun () -> decr cpt ; pp_done () ; Lwt.return e

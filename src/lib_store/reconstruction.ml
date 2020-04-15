@@ -214,7 +214,7 @@ let reconstruct_cemented chain_store context_index ~user_activated_upgrades
   >>= fun cemented_cycles ->
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun ppf i ->
-      Format.fprintf ppf "Reconstructing cemented blocks: %i/%i..." i limit)
+      Format.fprintf ppf "Reconstructing cemented blocks: %i/%i" i limit)
     (fun notify ->
       reconstruct_chunks
         ~notify
@@ -240,7 +240,7 @@ let reconstruct_floating chain_store context_index ~user_activated_upgrades
   in
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun ppf i ->
-      Format.fprintf ppf "Reconstructing floating blocks: %i..." i)
+      Format.fprintf ppf "Reconstructing floating blocks: %i" i)
     (fun notify ->
       Error_monad.iter_s
         (fun fs ->

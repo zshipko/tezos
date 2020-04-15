@@ -322,7 +322,7 @@ let copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir
         ~pp_print_step:(fun fmt i ->
           Format.fprintf
             fmt
-            "Copying cemented blocks: %d/%d cycles..."
+            "Copying cemented blocks: %d/%d cycles"
             i
             nb_cycles)
         (fun notify ->
@@ -435,7 +435,7 @@ let export_protocols protocol_levels ~src_dir ~dst_dir =
   let nb_proto_to_export = List.length proto_to_export in
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Copying protocols: %d/%d..." i nb_proto_to_export)
+      Format.fprintf fmt "Copying protocols: %d/%d" i nb_proto_to_export)
     (fun notify ->
       let rec copy_protocols () =
         Lwt.catch
@@ -733,7 +733,7 @@ let export_floating_block_stream ~snapshot_dir floating_block_stream =
   Lwt_utils_unix.display_progress
     ~every:10
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Copying floating blocks: %d blocks copied..." i)
+      Format.fprintf fmt "Copying floating blocks: %d blocks copied" i)
     (fun notify ->
       (* The target block is in the middle of a cemented cycle, the
           cycle prefix becomes the floating store. *)
@@ -964,7 +964,7 @@ let copy_and_restore_cemented_blocks ~snapshot_cemented_dir ~dst_cemented_dir
   let len = List.length cemented_files in
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Copying cycles: %d/%d..." i len)
+      Format.fprintf fmt "Copying cycles: %d/%d" i len)
     (fun notify ->
       Lwt_list.iter_s
         (fun file ->
@@ -991,7 +991,7 @@ let copy_and_restore_cemented_blocks ~snapshot_cemented_dir ~dst_cemented_dir
   >>=? fun () ->
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Restoring cycles consistency: %d/%d..." i len)
+      Format.fprintf fmt "Restoring cycles consistency: %d/%d" i len)
     (fun notify ->
       Cemented_block_store.restore_indexes_consistency
         ~post_step:notify
@@ -1064,11 +1064,7 @@ let copy_protocols ~snapshot_protocol_dir ~dst_protocol_dir =
   >>=? fun protocols ->
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf
-        fmt
-        "Copying protocols: %d/%d..."
-        i
-        (List.length protocols))
+      Format.fprintf fmt "Copying protocols: %d/%d" i (List.length protocols))
     (fun notify ->
       let validate_and_copy (expected_hash, protocol_filename) =
         lwt_emit (Validate_protocol_sources expected_hash)
@@ -1246,7 +1242,7 @@ let import ?patch_context ?block:expected_block ~snapshot_dir ~dst_store_dir
   Lwt_utils_unix.display_progress
     ~every:100
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Storing floating blocks: %d blocks wrote..." i)
+      Format.fprintf fmt "Storing floating blocks: %d blocks wrote" i)
     (fun notify ->
       Store.restore_from_snapshot
         ~notify
@@ -1517,7 +1513,7 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
   Lwt_utils_unix.display_progress
     ~every:100
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Storing floating blocks: %d blocks wrote..." i)
+      Format.fprintf fmt "Storing floating blocks: %d blocks wrote" i)
     (fun notify ->
       Store.restore_from_legacy_snapshot
         ~notify

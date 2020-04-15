@@ -559,7 +559,7 @@ module Make (I : Dump_interface) = struct
               ~pp_print_step:(fun fmt i ->
                 Format.fprintf
                   fmt
-                  "Copying context: %dK elements, %s written..."
+                  "Copying context: %dK elements, %s written"
                   (i / 1000)
                   ( if !written > 1_048_576 then
                     Format.asprintf "%dMiB" (!written / 1_048_576)
@@ -655,7 +655,7 @@ module Make (I : Dump_interface) = struct
         ~pp_print_step:(fun fmt i ->
           Format.fprintf
             fmt
-            "Writing context: %dK/%dK (%d%%) elements, %s read..."
+            "Writing context: %dK/%dK (%d%%) elements, %s read"
             (i / 1_000)
             (context_elements / 1_000)
             (100 * i / context_elements)
@@ -909,7 +909,7 @@ module Make_legacy (I : Dump_interface) = struct
         ~pp_print_step:(fun fmt i ->
           Format.fprintf
             fmt
-            "Writing context: %dK elements, %s read..."
+            "Writing context: %dK elements, %s read"
             (i / 1_000)
             ( if !read > 1_048_576 then
               Format.asprintf "%dMiB" (!read / 1_048_576)
@@ -921,7 +921,7 @@ module Make_legacy (I : Dump_interface) = struct
       Lwt_utils_unix.display_progress
         ~every:1000
         ~pp_print_step:(fun fmt i ->
-          Format.fprintf fmt "Storing blocks: %d blocks wrote..." i)
+          Format.fprintf fmt "Storing blocks: %d blocks wrote" i)
         (fun notify -> second_pass notify)
       >>=? fun oldest_header_opt ->
       return (pred_block_header, export_block_data, oldest_header_opt)
