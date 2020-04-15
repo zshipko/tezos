@@ -245,15 +245,22 @@ module Block = struct
     match Block_repr.metadata block with
     | Some metadata ->
         Lwt.return_some metadata
-    | None ->
+    | None -> (
         Block_store.read_block_metadata
           chain_store.block_store
           (Hash (block.hash, 0))
+        >>= function
+        | Some metadata ->
+            block.metadata <- Some metadata ;
+            Lwt.return_some metadata
+        | None ->
+            Lwt.return_none )
 
   let get_block_metadata chain_store block =
     get_block_metadata_opt chain_store block
     >>= function
     | Some metadata ->
+        block.metadata <- Some metadata ;
         return metadata
     | None ->
         fail (Store_errors.Block_metadata_not_found (Block_repr.hash block))
