@@ -974,9 +974,7 @@ module Chain = struct
       Stored_data.write chain_state.savepoint_data savepoint
       >>= fun () ->
       Stored_data.write chain_state.caboose_data caboose
-      >>= fun () ->
-      (* FIXME lockfile may already be closed *)
-      unlock chain_store.lockfile
+      >>= fun () -> unlock chain_store.lockfile
     in
     Block_store.merge_stores
       chain_store.block_store
@@ -1576,9 +1574,7 @@ module Chain = struct
                   return_unit )
               >>=? fun () ->
               unlock chain_store.lockfile
-              >>= fun () ->
-              (* FIXME merge may still be going on ?? *)
-              Lwt_unix.close lockfile >>= return)
+              >>= fun () -> Lwt_unix.close lockfile >>= return)
     in
     loop chain_store
 

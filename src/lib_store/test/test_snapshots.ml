@@ -346,7 +346,7 @@ let make_tests genesis_parameters =
         | None | Some _ ->
             Some
               (wrap_test
-                 ~keep_dir:true
+                 ~keep_dir:false
                  ~history_mode
                  ~patch_context:(fun ctxt ->
                    Alpha_utils.patch_context ~genesis_parameters ctxt)

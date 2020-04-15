@@ -562,7 +562,7 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
         Lwt_idle_waiter.force_idle block_store.merge_scheduler (fun () ->
             swap_floating_stores block_store ~new_ro_store
             >>= fun () ->
-            block_store.merging_thread <- None ;
+            (* Let the clean-up unset the [merging_thread] *)
             return_unit)
       in
       (* Clean-up on cancel/exn *)
