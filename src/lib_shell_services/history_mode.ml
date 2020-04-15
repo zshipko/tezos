@@ -41,6 +41,14 @@ module Legacy = struct
   let encoding =
     Data_encoding.string_enum
       [("archive", Archive); ("full", Full); ("rolling", Rolling)]
+
+  let pp ppf = function
+    | Archive ->
+        Format.fprintf ppf "archive"
+    | Full ->
+        Format.fprintf ppf "full"
+    | Rolling ->
+        Format.fprintf ppf "rolling"
 end
 
 let convert = function

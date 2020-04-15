@@ -27,6 +27,8 @@ module Legacy : sig
   type t = Archive | Full | Rolling
 
   val encoding : t Data_encoding.t
+
+  val pp : Format.formatter -> t -> unit
 end
 
 type additional_cycles = {offset : int}
