@@ -2133,7 +2133,8 @@ let close_store global_store =
     Option.unopt_assert ~loc:__POS__ global_store.main_chain_store
   in
   Chain.close_chain_store main_chain_store
-  >>=? fun () -> Context.close global_store.context_index >>= return
+  >>=? fun () ->
+  Context.close global_store.context_index >>= fun () -> return_unit
 
 let open_for_snapshot_export ~store_dir ~context_dir genesis
     ~(locked_f : chain_store * Context.index -> 'a tzresult Lwt.t) =

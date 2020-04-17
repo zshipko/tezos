@@ -416,7 +416,7 @@ let export_protocols protocol_levels ~src_dir ~dst_dir =
   in
   Lwt_utils_unix.write_bytes ~pos:0 fd bytes
   >>= fun () ->
-  Lwt_unix.close fd
+  Lwt_utils_unix.safe_close fd
   >>= fun () ->
   Lwt_unix.opendir src_dir
   >>= fun dir_handle ->
@@ -741,7 +741,7 @@ let export_floating_block_stream ~snapshot_dir floating_block_stream =
       Lwt_stream.iter_s
         (fun b -> write_floating_block fd b >>= fun () -> notify ())
         floating_block_stream
-      >>= fun () -> Lwt_unix.close fd >>= fun () -> return_unit)
+      >>= fun () -> Lwt_utils_unix.safe_close fd >>= fun () -> return_unit)
 
 let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
     genesis =
@@ -843,8 +843,8 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
             (ro_fd, rw_fd),
             extra_floating_blocks ))
       (fun exn ->
-        Lwt_unix.close ro_fd
-        >>= fun () -> Lwt_unix.close rw_fd >>= fun () -> Lwt.fail exn)
+        Lwt_utils_unix.safe_close ro_fd
+        >>= fun () -> Lwt_utils_unix.safe_close rw_fd >>= fun () -> Lwt.fail exn)
   in
   Store.open_for_snapshot_export
     ~store_dir
@@ -859,7 +859,7 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
              (floating_ro_fd, floating_rw_fd),
              extra_floating_blocks ) ->
   let finalizer () =
-    Lwt_unix.close floating_ro_fd >>= fun () -> Lwt_unix.close floating_rw_fd
+    Lwt_utils_unix.safe_close floating_ro_fd >>= fun () -> Lwt_utils_unix.safe_close floating_rw_fd
   in
   copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir cemented_table
   >>=? fun () ->
@@ -1018,7 +1018,7 @@ let read_floating_blocks ~genesis_hash ~floating_blocks_file =
   let reading_thread =
     Lwt.finalize
       (fun () -> loop eof_offset)
-      (fun () -> bounded_push#close ; Lwt_unix.close fd)
+      (fun () -> bounded_push#close ; Lwt_utils_unix.safe_close fd)
   in
   return (reading_thread, stream)
 

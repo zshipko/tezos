@@ -52,7 +52,7 @@ let write_file ~file encoding data =
   >>= fun fd ->
   Lwt_utils_unix.write_bytes fd bytes
   >>= fun () ->
-  Lwt_unix.close fd >>= fun () -> Lwt_unix.rename tmp_filename file
+  Lwt_utils_unix.safe_close fd >>= fun () -> Lwt_unix.rename tmp_filename file
 
 let write v data =
   Lwt_idle_waiter.force_idle v.scheduler (fun () ->

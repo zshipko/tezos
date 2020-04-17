@@ -181,7 +181,7 @@ let iter_seq f floating_store =
       Lwt_unix.openfile floating_store.filename flags perms
       >>= fun fd ->
       iter_raw f floating_store
-      >>=? fun () -> Lwt_unix.close fd >>= fun () -> return_unit)
+      >>=? fun () -> Lwt_utils_unix.safe_close fd >>= fun () -> return_unit)
 
 let init ~chain_dir ~readonly kind =
   let (flag, perms) =
@@ -204,4 +204,4 @@ let init ~chain_dir ~readonly kind =
 let close {floating_block_index; fd; scheduler; _} =
   Lwt_idle_waiter.force_idle scheduler (fun () ->
       Floating_block_index.close floating_block_index ;
-      Lwt_unix.close fd)
+      Lwt_utils_unix.safe_close fd)

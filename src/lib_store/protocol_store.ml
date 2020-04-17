@@ -41,7 +41,7 @@ let raw_store store protocol_hash bytes =
     >>= fun fd ->
     Lwt_utils_unix.write_bytes fd bytes
     >>= fun () ->
-    Lwt_unix.close fd
+    Lwt_utils_unix.safe_close fd
     >>= fun () ->
     store.protocols <- Protocol_hash.Set.add protocol_hash store.protocols ;
     Lwt.return_some protocol_hash

@@ -386,7 +386,7 @@ let get_cemented_block_by_level (cemented_store : t) ~read_metadata level =
             >>= fun fd ->
             read_block fd block_number
             >>= fun block ->
-            Lwt_unix.close fd
+            Lwt_utils_unix.safe_close fd
             >>= fun () ->
             if read_metadata then
               let metadata =
@@ -494,7 +494,7 @@ let cement_blocks (cemented_store : t) ~write_metadata
   >>= fun _ofs ->
   Lwt_utils_unix.write_bytes ~pos:0 ~len:preamble_length fd offsets_buffer
   >>= fun () ->
-  Lwt_unix.close fd
+  Lwt_utils_unix.safe_close fd
   >>= fun () ->
   (* TODO clear potential artifacts *)
   Lwt_unix.rename file final_file
@@ -664,6 +664,6 @@ let restore_indexes_consistency ?(post_step = fun () -> Lwt.return_unit)
           protect (fun () ->
               iter_blocks 0
               >>=? fun () -> post_step () >>= fun () -> return_unit))
-        (fun () -> Lwt_unix.close fd))
+        (fun () -> Lwt_utils_unix.safe_close fd))
     table_list
   >>=? fun () -> return_unit
