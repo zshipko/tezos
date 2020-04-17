@@ -184,9 +184,6 @@ module Block : sig
     last_allowed_fork_level:Int32.t ->
     block option tzresult Lwt.t
 
-  val store_block_metadata :
-    chain_store -> (t * metadata) list -> unit tzresult Lwt.t
-
   val context_exn : chain_store -> block -> Context.t Lwt.t
 
   val context_opt : chain_store -> block -> Context.t option Lwt.t

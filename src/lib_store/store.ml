@@ -267,17 +267,6 @@ module Block = struct
     | None ->
         fail (Store_errors.Block_metadata_not_found (Block_repr.hash block))
 
-  (* TODO: remove this *)
-  let store_block_metadata chain_store chunk =
-    Lwt_list.map_s
-      (fun ((block : t), metadata) ->
-        Lwt.return {block with metadata = Some metadata})
-      chunk
-    >>= fun blocks ->
-    Cemented_block_store.cement_blocks_metadata
-      (Block_store.cemented_block_store chain_store.block_store)
-      blocks
-
   let read_block_opt chain_store ?(distance = 0) hash =
     (* TODO: Make sure the checkpoint is still reachable *)
     read_block chain_store ~distance hash
