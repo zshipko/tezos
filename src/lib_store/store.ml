@@ -86,8 +86,7 @@ and chain_state = {
   caboose : block_descriptor;
   caboose_data : block_descriptor Stored_data.t;
   protocol_levels :
-    (block_descriptor * Protocol_hash.t * commit_info option) Protocol_levels.t
-    Stored_data.t;
+    Protocol_levels.activation_block Protocol_levels.t Stored_data.t;
   invalid_blocks : invalid_block Block_hash.Map.t Stored_data.t;
   forked_chains : Block_hash.t Chain_id.Map.t Stored_data.t;
   active_testchain : testchain option;
@@ -265,6 +264,7 @@ module Block = struct
     | None ->
         fail (Store_errors.Block_metadata_not_found (Block_repr.hash block))
 
+  (* Pas bon *)
   let store_block_metadata chain_store chunk =
     Lwt_list.map_s
       (fun ((block : t), metadata) ->
@@ -413,15 +413,15 @@ module Block = struct
     Shared.use chain_store.chain_state (fun {protocol_levels; _} ->
         Stored_data.read protocol_levels
         >>= fun protocol_levels ->
-        match
-          Protocol_levels.find_opt
-            (Block_repr.proto_level block)
-            protocol_levels
-        with
-        | Some (_, ph, _) ->
-            return ph
+        let open Protocol_levels in
+        let proto_level = Block_repr.proto_level block in
+        match find_opt proto_level protocol_levels with
+        | Some {protocol; _} ->
+            return protocol
         | None ->
-            failwith "Store.Block.protocol_hash: not found")
+            failwith
+              "Store.Block.protocol_hash: protocol with level %d not found"
+              proto_level)
 
   let protocol_hash_exn chain_store block =
     protocol_hash chain_store block
@@ -1308,9 +1308,11 @@ module Chain = struct
         Protocol_levels.(
           add
             genesis_proto_level
-            ( Block.descriptor genesis_block,
-              genesis_protocol,
-              Some genesis_commit_info )
+            {
+              block = Block.descriptor genesis_block;
+              protocol = genesis_protocol;
+              commit_info = Some genesis_commit_info;
+            }
             empty)
     >>= fun protocol_levels ->
     Stored_data.init
@@ -1462,15 +1464,14 @@ module Chain = struct
         >>=? fun ( _protocol_hash,
                    author,
                    message,
-                   timestamp,
+                   _timestamp,
                    test_chain_status,
                    data_merkle_root,
                    parents_contexts ) ->
         return
           {
-            author;
+            Protocol_levels.author;
             message;
-            timestamp;
             test_chain_status;
             data_merkle_root;
             parents_contexts;
@@ -1741,26 +1742,39 @@ module Chain = struct
         >>=? fun commit_info_opt ->
         Stored_data.update_with protocol_levels (fun protocol_levels ->
             Lwt.return
-              (Protocol_levels.add
-                 protocol_level
-                 (Block.descriptor block, protocol_hash, commit_info_opt)
-                 protocol_levels))
+              Protocol_levels.(
+                add
+                  protocol_level
+                  {
+                    block = Block.descriptor block;
+                    protocol = protocol_hash;
+                    commit_info = commit_info_opt;
+                  }
+                  protocol_levels))
         >>= fun () -> return_unit)
 
-  let find_protocol_level chain_store protocol_level =
+  let find_activation_block chain_store ~proto_level =
     Shared.use chain_store.chain_state (fun {protocol_levels; _} ->
         Stored_data.read protocol_levels
         >>= fun protocol_levels ->
-        Lwt.return (Protocol_levels.find_opt protocol_level protocol_levels))
+        Lwt.return (Protocol_levels.find_opt proto_level protocol_levels))
 
-  let may_update_protocol_level chain_store protocol_level
-      (block, protocol_hash) =
-    find_protocol_level chain_store protocol_level
+  let find_protocol chain_store ~proto_level =
+    find_activation_block chain_store ~proto_level
+    >>= function
+    | None ->
+        Lwt.return_none
+    | Some {Protocol_levels.protocol; _} ->
+        Lwt.return_some protocol
+
+  let may_update_protocol_level chain_store proto_level (block, protocol_hash)
+      =
+    find_activation_block chain_store ~proto_level
     >>= function
     | Some _ ->
         return_unit
     | None ->
-        set_protocol_level chain_store protocol_level (block, protocol_hash)
+        set_protocol_level chain_store proto_level (block, protocol_hash)
 
   let all_protocol_levels chain_store =
     Shared.use chain_store.chain_state (fun {protocol_levels; _} ->
@@ -1779,9 +1793,14 @@ module Chain = struct
         savepoint chain_store
         >>= fun (_, save_point_level) ->
         ( if Compare.Int32.(Block.level pred < save_point_level) then
-          find_protocol_level chain_store (Block.proto_level pred)
+          find_activation_block
+            chain_store
+            ~proto_level:(Block.proto_level pred)
           >>= function
-          | Some (_, ph, _) -> Lwt.return ph | None -> Lwt.fail Not_found
+          | Some {Protocol_levels.protocol; _} ->
+              Lwt.return protocol
+          | None ->
+              Lwt.fail Not_found
         else Block.protocol_hash_exn chain_store pred )
         >>= fun protocol ->
         match
@@ -2240,8 +2259,9 @@ let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
   notify ()
   >>= fun () ->
   (* Check correctness of protocol transition blocks *)
+  let open Protocol_levels in
   iter_s
-    (fun (_, ((bh, _), protocol_hash, commit_info_opt)) ->
+    (fun (_, {block = (bh, _); protocol; commit_info = commit_info_opt}) ->
       Block_store.read_block block_store ~read_metadata:false (Hash (bh, 0))
       >>= fun block_opt ->
       match (block_opt, commit_info_opt) with
@@ -2255,10 +2275,10 @@ let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
           Context.check_protocol_commit_consistency
             context_index
             ~expected_context_hash:(Block.context_hash block)
-            ~given_protocol_hash:protocol_hash
+            ~given_protocol_hash:protocol
             ~author:commit_info.author
             ~message:commit_info.message
-            ~timestamp:commit_info.timestamp
+            ~timestamp:(Block.timestamp block)
             ~test_chain_status:commit_info.test_chain_status
             ~data_merkle_root:commit_info.data_merkle_root
             ~parents_contexts:commit_info.parents_contexts
@@ -2273,7 +2293,7 @@ let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
                      Block_hash.pp
                      (Block.hash block)
                      Protocol_hash.pp
-                     protocol_hash))))
+                     protocol))))
     (Protocol_levels.bindings protocol_levels)
   >>=? fun () ->
   Block_store.close block_store
@@ -2375,9 +2395,11 @@ let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
     Protocol_levels.(
       add
         (Block.proto_level genesis_block)
-        ( Block.descriptor genesis_block,
-          genesis.protocol,
-          Some genesis_commit_info )
+        {
+          block = Block.descriptor genesis_block;
+          protocol = genesis.protocol;
+          commit_info = Some genesis_commit_info;
+        }
         empty)
   in
   (* Compute correct protocol levels and check their correctness *)
@@ -2401,20 +2423,24 @@ let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
       | (Some block, None) ->
           (* TODO no commit info : raise a warning *)
           return
-            (Protocol_levels.add
-               (Block_repr.proto_level block)
-               ( Block_repr.(hash block, level block),
-                 protocol_hash,
-                 commit_info_opt )
-               proto_levels)
+            Protocol_levels.(
+              add
+                (Block_repr.proto_level block)
+                {
+                  block = Block.descriptor block;
+                  protocol = protocol_hash;
+                  commit_info = commit_info_opt;
+                }
+                proto_levels)
       | (Some block, Some commit_info) ->
+          let open Protocol_levels in
           Context.check_protocol_commit_consistency
             context_index
             ~expected_context_hash:(Block.context_hash block)
             ~given_protocol_hash:protocol_hash
             ~author:commit_info.author
             ~message:commit_info.message
-            ~timestamp:commit_info.timestamp
+            ~timestamp:(Block.timestamp block)
             ~test_chain_status:commit_info.test_chain_status
             ~data_merkle_root:commit_info.data_merkle_root
             ~parents_contexts:commit_info.parents_contexts
@@ -2422,12 +2448,15 @@ let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
           if is_consistent || Compare.Int32.(equal (Block_repr.level block) 0l)
           then
             return
-              (Protocol_levels.add
-                 (Block_repr.proto_level block)
-                 ( Block_repr.(hash block, level block),
-                   protocol_hash,
-                   commit_info_opt )
-                 proto_levels)
+              Protocol_levels.(
+                add
+                  (Block_repr.proto_level block)
+                  {
+                    block = Block.descriptor block;
+                    protocol = protocol_hash;
+                    commit_info = commit_info_opt;
+                  }
+                  proto_levels)
           else
             failwith
               "restore_from_snapshot: Inconsistent commit hash found for \

@@ -249,7 +249,7 @@ let reconstruct_floating chain_store context_index ~user_activated_upgrades
             (fun block ->
               let level = Block_repr.level block in
               (* It is needed to read the metadata using the cemented_block_store to
-           avoid the cache mechanism which stores blocks without metadata *)
+                 avoid the cache mechanism which stores blocks without metadata *)
               let metadata_opt =
                 Cemented_block_store.read_block_metadata
                   block_store.cemented_store
@@ -258,8 +258,8 @@ let reconstruct_floating chain_store context_index ~user_activated_upgrades
               ( match metadata_opt with
               | None ->
                   (* When the metadata is not available in the cemented_block_store,
-              it means that the block (in floating) was not cemented yet. It is
-              thus needed to recompute its metadata + context *)
+                     it means that the block (in floating) was not cemented yet. It is
+                     thus needed to recompute its metadata + context *)
                   apply_context
                     chain_store
                     context_index
@@ -293,12 +293,7 @@ let reconstruct_floating chain_store context_index ~user_activated_upgrades
   block_store.rw_floating_block_store <- new_rw_store ;
   Floating_block_index.flush
     new_ro_store.Floating_block_store.floating_block_index ;
-  (* Swapping stores: hard-lock *)
-  Lwt_idle_waiter.force_idle block_store.merge_scheduler (fun () ->
-      Block_store.swap_floating_stores block_store ~new_ro_store
-      >>= fun () ->
-      block_store.merging_thread <- None ;
-      Lwt.return_unit)
+  Block_store.swap_floating_stores block_store ~new_ro_store
   >>= fun () -> return_unit
 
 (* Loads the list of hashes to reconstruct *)
@@ -328,10 +323,12 @@ let get_lowest_cemented_block_with_metadata chain_store offset =
   Cemented_block_store.load_table
     ~cemented_blocks_dir:block_store.cemented_store.cemented_blocks_dir
   >|= Array.to_list >|= List.rev
+  (* FIXME garder l'array *)
   >>= fun cemented_cycles ->
   let lcl =
     try
       let ({start_level; _} : Cemented_block_store.cemented_blocks_file) =
+        (* nth_opt instead *)
         List.nth
           cemented_cycles
           (min (offset - 1) (List.length cemented_cycles - 1))

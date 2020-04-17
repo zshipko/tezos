@@ -429,7 +429,7 @@ let export_protocols protocol_levels ~src_dir ~dst_dir =
   (* Only export the protocols relative to the targeted network *)
   let proto_to_export =
     List.map
-      (fun (_, (_, h, _)) -> h)
+      (fun (_, {Protocol_levels.protocol; _}) -> protocol)
       (Protocol_levels.bindings protocol_levels)
   in
   let nb_proto_to_export = List.length proto_to_export in
@@ -1425,12 +1425,13 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
     >>= fun () -> return_unit
   in
   let partial_protocol_levels :
-      (int32 * Protocol_hash.t * commit_info) list ref =
+      (int32 * Protocol_hash.t * Protocol_levels.commit_info option) list ref =
     ref []
   in
   let handle_protocol_data (transition_level, protocol) =
     let open Context.Protocol_data_legacy in
-    let { info = {author; message; timestamp};
+    let open Protocol_levels in
+    let { info = {author; message; _};
           protocol_hash;
           test_chain_status;
           data_key;
@@ -1441,14 +1442,13 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
       {
         author;
         message;
-        timestamp;
         test_chain_status;
         data_merkle_root = data_key;
         parents_contexts = parents;
       }
     in
     partial_protocol_levels :=
-      (transition_level, protocol_hash, commit_info)
+      (transition_level, protocol_hash, Some commit_info)
       :: !partial_protocol_levels ;
     return_unit
   in

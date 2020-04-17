@@ -139,6 +139,7 @@ let block_metadata metadata = metadata.block_metadata
 let operations_metadata metadata = metadata.operations_metadata
 
 let check_block_consistency ?genesis_hash ?pred_block block =
+  (* TODO add proper errors *)
   let block_header = header block in
   let block_hash = hash block in
   let result_hash = Block_header.hash block_header in
@@ -166,8 +167,8 @@ let check_block_consistency ?genesis_hash ?pred_block block =
         (Exn
            (Failure
               (Format.asprintf
-                 "Inconsistent cemented store: inconsistent predecessor found \
-                  for block %a (%ld) - expected: %a vs got: %a"
+                 "Inconsistent block: inconsistent predecessor found for \
+                  block %a (%ld) - expected: %a vs got: %a"
                  Block_hash.pp
                  block_hash
                  (level block)

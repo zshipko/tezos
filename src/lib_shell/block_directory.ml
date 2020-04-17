@@ -86,9 +86,11 @@ let build_raw_header_rpc_directory (module Proto : Block_services.PROTO) =
       return (Data_encoding.Binary.to_bytes_exn Block_header.encoding header)) ;
   (* protocols *)
   register0 S.protocols (fun (chain_store, _hash, header) () () ->
-      Store.Chain.find_protocol_level chain_store header.shell.proto_level
+      Store.Chain.find_protocol
+        chain_store
+        ~proto_level:header.shell.proto_level
       >>= fun next_proto ->
-      let (_, next_protocol_hash, _) = Option.unopt_exn Not_found next_proto in
+      let next_protocol_hash = Option.unopt_exn Not_found next_proto in
       Store.Block.read_block_opt chain_store header.shell.predecessor
       >>= function
       | None ->
@@ -100,13 +102,11 @@ let build_raw_header_rpc_directory (module Proto : Block_services.PROTO) =
             }
       | Some pred_block ->
           let pred_header = Store.Block.header pred_block in
-          Store.Chain.find_protocol_level
+          Store.Chain.find_protocol
             chain_store
-            pred_header.shell.proto_level
+            ~proto_level:pred_header.shell.proto_level
           >>= fun current_protocol ->
-          let (_, protocol_hash, _) =
-            Option.unopt_exn Not_found current_protocol
-          in
+          let protocol_hash = Option.unopt_exn Not_found current_protocol in
           return
             {
               Tezos_shell_services.Block_services.current_protocol =
@@ -414,11 +414,11 @@ let get_directory ~user_activated_upgrades ~user_activated_protocol_overrides
                   >>= fun (_, savepoint_level) ->
                   ( if Compare.Int32.(Store.Block.level pred < savepoint_level)
                   then
-                    Store.Chain.find_protocol_level
+                    Store.Chain.find_protocol
                       chain_store
-                      (Store.Block.proto_level pred)
+                      ~proto_level:(Store.Block.proto_level pred)
                     >>= fun predecessor_protocol ->
-                    let (_, protocol_hash, _) =
+                    let protocol_hash =
                       Option.unopt_exn Not_found predecessor_protocol
                     in
                     Lwt.return protocol_hash

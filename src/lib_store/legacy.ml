@@ -749,6 +749,8 @@ let dirty_read_i lmdb_chain_store hash target_level =
 let archive_import lmdb_chain_store chain_store cycle_length checkpoint
     current_head_hash =
   let checkpoint_hash = Block_header.hash checkpoint in
+  (* FIXME on doit pas partir du checkpoint mais du caboose *)
+  (* On doit màj le cp quand même *)
   make_block_repr
     ~read_metadata:true
     ~write_metadata:true
@@ -972,7 +974,7 @@ let import_protocols history_mode lmdb_store lmdb_chain_store store =
       Chain_data.Caboose.read lmdb_chain_data
       >>=? fun (_lmdb_caboose_level, lmdb_caboose_hash) ->
       (* We store the oldest known protocol and we assume that its
-       transition_header is the caboose -*)
+         transition_header is the caboose *)
       Block.Pruned_contents.read (lmdb_chain_store, lmdb_caboose_hash)
       >>=? fun {header = transition_header; _} ->
       let protocol_level = current_head.header.shell.proto_level in

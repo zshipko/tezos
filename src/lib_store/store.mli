@@ -171,6 +171,7 @@ module Block : sig
   val read_predecessor_of_hash :
     chain_store -> Block_hash.t -> block tzresult Lwt.t
 
+  (* TODO: give the validation store *)
   val store_block :
     chain_store ->
     block_header:Block_header.t ->
@@ -388,17 +389,20 @@ module Chain : sig
     chain_store -> int -> Block.block * Protocol_hash.t -> unit tzresult Lwt.t
 
   val get_commit_info :
-    Context.index -> Block_header.t -> commit_info tzresult Lwt.t
+    Context.index ->
+    Block_header.t ->
+    Protocol_levels.commit_info tzresult Lwt.t
 
-  val find_protocol_level :
+  val find_activation_block :
     chain_store ->
-    int ->
-    (block_descriptor * Protocol_hash.t * commit_info option) option Lwt.t
+    proto_level:int ->
+    Protocol_levels.activation_block option Lwt.t
+
+  val find_protocol :
+    chain_store -> proto_level:int -> Protocol_hash.t option Lwt.t
 
   val all_protocol_levels :
-    chain_store ->
-    (block_descriptor * Protocol_hash.t * commit_info option) Protocol_levels.t
-    Lwt.t
+    chain_store -> Protocol_levels.activation_block Protocol_levels.t Lwt.t
 
   val watcher : chain_store -> Block.t Lwt_stream.t * Lwt_watcher.stopper
 
@@ -491,8 +495,7 @@ val restore_from_snapshot :
   genesis_context_hash:Context_hash.t ->
   floating_blocks_stream:Block_repr.block Lwt_stream.t ->
   new_head_with_metadata:Block_repr.block ->
-  protocol_levels:(block_descriptor * Protocol_hash.t * commit_info option)
-                  Protocol_levels.t ->
+  protocol_levels:Protocol_levels.activation_block Protocol_levels.t ->
   history_mode:History_mode.t ->
   unit tzresult Lwt.t
 
@@ -504,7 +507,10 @@ val restore_from_legacy_snapshot :
   genesis_context_hash:Context_hash.t ->
   floating_blocks_stream:Block_repr.block Lwt_stream.t ->
   new_head_with_metadata:Block_repr.block ->
-  partial_protocol_levels:(int32 * Protocol_hash.t * commit_info option) list ->
+  partial_protocol_levels:( int32
+                          * Protocol_hash.t
+                          * Protocol_levels.commit_info option )
+                          list ->
   history_mode:History_mode.t ->
   unit tzresult Lwt.t
 
