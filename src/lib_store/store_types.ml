@@ -92,7 +92,7 @@ module Protocol_levels = struct
   end)
 
   let encoding :
-      ((Block_hash.t * int32) * Protocol_hash.t * commit_info) t
+      ((Block_hash.t * int32) * Protocol_hash.t * commit_info option) t
       Data_encoding.t =
     Data_encoding.conv
       (fun map -> bindings map)
@@ -105,5 +105,5 @@ module Protocol_levels = struct
              (tup3
                 (tup2 Block_hash.encoding int32)
                 Protocol_hash.encoding
-                commit_info_encoding)))
+                (option commit_info_encoding))))
 end

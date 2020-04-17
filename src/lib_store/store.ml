@@ -86,7 +86,7 @@ and chain_state = {
   caboose : block_descriptor;
   caboose_data : block_descriptor Stored_data.t;
   protocol_levels :
-    (block_descriptor * Protocol_hash.t * commit_info) Protocol_levels.t
+    (block_descriptor * Protocol_hash.t * commit_info option) Protocol_levels.t
     Stored_data.t;
   invalid_blocks : invalid_block Block_hash.Map.t Stored_data.t;
   forked_chains : Block_hash.t Chain_id.Map.t Stored_data.t;
@@ -1310,7 +1310,7 @@ module Chain = struct
             genesis_proto_level
             ( Block.descriptor genesis_block,
               genesis_protocol,
-              genesis_commit_info )
+              Some genesis_commit_info )
             empty)
     >>= fun protocol_levels ->
     Stored_data.init
@@ -1738,17 +1738,14 @@ module Chain = struct
   let set_protocol_level chain_store protocol_level (block, protocol_hash) =
     Shared.locked_use chain_store.chain_state (fun {protocol_levels; _} ->
         compute_commit_info chain_store (Block.header block)
-        >>=? function
-        | None ->
-            return_unit
-        | Some commit_info ->
-            Stored_data.update_with protocol_levels (fun protocol_levels ->
-                Lwt.return
-                  (Protocol_levels.add
-                     protocol_level
-                     (Block.descriptor block, protocol_hash, commit_info)
-                     protocol_levels))
-            >>= fun () -> return_unit)
+        >>=? fun commit_info_opt ->
+        Stored_data.update_with protocol_levels (fun protocol_levels ->
+            Lwt.return
+              (Protocol_levels.add
+                 protocol_level
+                 (Block.descriptor block, protocol_hash, commit_info_opt)
+                 protocol_levels))
+        >>= fun () -> return_unit)
 
   let find_protocol_level chain_store protocol_level =
     Shared.use chain_store.chain_state (fun {protocol_levels; _} ->
@@ -2244,13 +2241,17 @@ let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
   >>= fun () ->
   (* Check correctness of protocol transition blocks *)
   iter_s
-    (fun (_, ((bh, _), protocol_hash, commit_info)) ->
+    (fun (_, ((bh, _), protocol_hash, commit_info_opt)) ->
       Block_store.read_block block_store ~read_metadata:false (Hash (bh, 0))
-      >>= function
-      | None ->
+      >>= fun block_opt ->
+      match (block_opt, commit_info_opt) with
+      | (None, _) ->
           (* Ignore unknown blocks *)
           return_unit
-      | Some block ->
+      | (Some _block, None) ->
+          (* TODO no commit info : raise a warning *)
+          return_unit
+      | (Some block, Some commit_info) ->
           Context.check_protocol_commit_consistency
             context_index
             ~expected_context_hash:(Block.context_hash block)
@@ -2374,26 +2375,39 @@ let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
     Protocol_levels.(
       add
         (Block.proto_level genesis_block)
-        (Block.descriptor genesis_block, genesis.protocol, genesis_commit_info)
+        ( Block.descriptor genesis_block,
+          genesis.protocol,
+          Some genesis_commit_info )
         empty)
   in
   (* Compute correct protocol levels and check their correctness *)
   fold_left_s
-    (fun proto_levels (transition_level, protocol_hash, commit_info) ->
+    (fun proto_levels (transition_level, protocol_hash, commit_info_opt) ->
       let distance =
         Int32.(
           to_int
             (sub (Block_repr.level new_head_with_metadata) transition_level))
       in
+      (* FIXME? what happens when the snapshot does not contain the block ? (i.e. rolling) *)
       Block_store.read_block
         block_store
         ~read_metadata:false
         (Hash (Block_repr.hash new_head_with_metadata, distance))
-      >>= function
-      | None ->
+      >>= fun block_opt ->
+      match (block_opt, commit_info_opt) with
+      | (None, _) ->
           (* Ignore unknown blocks *)
           return proto_levels
-      | Some block ->
+      | (Some block, None) ->
+          (* TODO no commit info : raise a warning *)
+          return
+            (Protocol_levels.add
+               (Block_repr.proto_level block)
+               ( Block_repr.(hash block, level block),
+                 protocol_hash,
+                 commit_info_opt )
+               proto_levels)
+      | (Some block, Some commit_info) ->
           Context.check_protocol_commit_consistency
             context_index
             ~expected_context_hash:(Block.context_hash block)
@@ -2412,7 +2426,7 @@ let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
                  (Block_repr.proto_level block)
                  ( Block_repr.(hash block, level block),
                    protocol_hash,
-                   commit_info )
+                   commit_info_opt )
                  proto_levels)
           else
             failwith
