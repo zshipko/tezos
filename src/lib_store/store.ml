@@ -165,6 +165,9 @@ let lock_for_read lockfile = Lwt_unix.lockf lockfile Unix.F_RLOCK 0
 
 let unlock lockfile = Lwt_unix.lockf lockfile Unix.F_ULOCK 0
 
+let may_unlock lockfile =
+  Lwt.catch (fun () -> unlock lockfile) (fun _ -> Lwt.return_unit)
+
 module Block = struct
   type nonrec block = block
 
@@ -981,7 +984,7 @@ module Chain = struct
       Stored_data.write chain_state.savepoint_data savepoint
       >>= fun () ->
       Stored_data.write chain_state.caboose_data caboose
-      >>= fun () -> unlock chain_store.lockfile
+      >>= fun () -> may_unlock chain_store.lockfile
     in
     Block_store.merge_stores
       chain_store.block_store
@@ -1581,8 +1584,9 @@ module Chain = struct
               | None ->
                   return_unit )
               >>=? fun () ->
-              unlock chain_store.lockfile
-              >>= fun () -> Lwt_unix.close lockfile >>= return)
+              may_unlock chain_store.lockfile
+              >>= fun () ->
+              Lwt_utils_unix.safe_close lockfile >>= fun () -> return_unit)
     in
     loop chain_store
 
