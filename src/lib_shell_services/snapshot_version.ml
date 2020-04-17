@@ -24,7 +24,7 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-let current_version = "tezos-snapshot-2.0.0"
+let current_version = "2.0.0"
 
 type metadata_v_2_0_0 = {
   snapshot_version : string;
@@ -79,27 +79,18 @@ let metadata_v_2_0_0_encoding =
        (req "context_elements" int31))
 
 let metadata_v_2_0_0_pp ppf
-    { snapshot_version;
-      chain_name;
-      history_mode;
-      block_hash;
-      level;
-      timestamp;
-      _ } =
+    {snapshot_version; chain_name; history_mode; block_hash; level; _} =
   Format.fprintf
     ppf
-    "@[<v>Snapshot version: %s@ Chain name: %a@ Block hash: %a@ Block level: \
-     %ld@ Block timestamp: %a@ Snapshot mode: %a@]"
-    snapshot_version
+    "chain %a, block hash %a at level %ld in %a (snapshot version %s)"
     Distributed_db_version.Name.pp
     chain_name
     Block_hash.pp
     block_hash
     level
-    Time.Protocol.pp_hum
-    timestamp
     History_mode.pp
     history_mode
+    snapshot_version
 
 type metadata = metadata_v_2_0_0
 

@@ -1102,8 +1102,8 @@ let copy_protocols ~snapshot_protocol_dir ~dst_protocol_dir =
       iter_s validate_and_copy protocols)
   >>=? fun () -> return protocol_levels
 
-let import_log_notice filename block =
-  lwt_emit (Import_info filename)
+let import_log_notice ?snapshot_metadata filename block =
+  lwt_emit (Import_info (filename, snapshot_metadata))
   >>= fun () ->
   ( match block with
   | None ->
@@ -1166,11 +1166,11 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
 let import ?patch_context ?block:expected_block ~snapshot_dir ~dst_store_dir
     ~dst_context_dir ~user_activated_upgrades
     ~user_activated_protocol_overrides (genesis : Genesis.t) =
-  import_log_notice snapshot_dir expected_block
-  >>= fun () ->
   let chain_id = Chain_id.of_block_hash genesis.block in
   read_snapshot_metadata (Naming.Snapshot.metadata snapshot_dir)
   >>= fun snapshot_metadata ->
+  import_log_notice ~snapshot_metadata snapshot_dir expected_block
+  >>= fun () ->
   Context.init ~readonly:false ?patch_context dst_context_dir
   >>= fun context_index ->
   (* Restore context *)
