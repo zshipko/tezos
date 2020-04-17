@@ -50,7 +50,6 @@ type result = {
   validation_store : validation_store;
   block_metadata : Bytes.t;
   ops_metadata : Bytes.t list list;
-  forking_testchain : bool;
 }
 
 let update_testchain_status ctxt predecessor_header timestamp =
@@ -71,11 +70,6 @@ let update_testchain_status ctxt predecessor_header timestamp =
         ctxt
         (Running {chain_id; genesis; protocol; expiration})
       >>= fun ctxt -> return ctxt
-
-let is_testchain_forking ctxt =
-  Context.get_test_chain ctxt
-  >>= function
-  | Not_running | Running _ -> Lwt.return_false | Forking _ -> Lwt.return_true
 
 let init_test_chain ctxt forked_header =
   Context.get_test_chain ctxt
@@ -103,15 +97,14 @@ let init_test_chain ctxt forked_header =
 let result_encoding =
   let open Data_encoding in
   conv
-    (fun {validation_store; block_metadata; ops_metadata; forking_testchain} ->
-      (validation_store, block_metadata, ops_metadata, forking_testchain))
-    (fun (validation_store, block_metadata, ops_metadata, forking_testchain) ->
-      {validation_store; block_metadata; ops_metadata; forking_testchain})
-    (obj4
+    (fun {validation_store; block_metadata; ops_metadata} ->
+      (validation_store, block_metadata, ops_metadata))
+    (fun (validation_store, block_metadata, ops_metadata) ->
+      {validation_store; block_metadata; ops_metadata})
+    (obj3
        (req "validation_store" validation_store_encoding)
        (req "block_metadata" bytes)
-       (req "ops_metadata" (list @@ list @@ bytes))
-       (req "forking_testchain" bool))
+       (req "ops_metadata" (list (list bytes))))
 
 let may_force_protocol_upgrade ~user_activated_upgrades ~level
     (validation_result : Tezos_protocol_environment.validation_result) =
@@ -301,15 +294,6 @@ module Make (Proto : Registered_protocol.T) = struct
           | Ok o ->
               return o)
     >>=? fun (validation_result, block_data, ops_metadata) ->
-    (* reset_test_chain
-     *   validation_result.context
-     *   current_block_header
-     *   ~start_testchain >>=? fun forked_genesis_header -> *)
-    let context =
-      Shell_context.unwrap_disk_context validation_result.context
-    in
-    is_testchain_forking context
-    >>= fun forking_testchain ->
     may_patch_protocol
       ~user_activated_upgrades
       ~user_activated_protocol_overrides
@@ -385,7 +369,7 @@ module Make (Proto : Registered_protocol.T) = struct
         last_allowed_fork_level = validation_result.last_allowed_fork_level;
       }
     in
-    return {validation_store; block_metadata; ops_metadata; forking_testchain}
+    return {validation_store; block_metadata; ops_metadata}
 end
 
 let assert_no_duplicate_operations block_hash live_operations operations =
