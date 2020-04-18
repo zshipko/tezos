@@ -27,7 +27,6 @@ type t = int32
 
 let equal x y = Compare.Int32.equal x y
 
-(* FIXME *)
 let hash = Hashtbl.hash
 
 let hash_size = 30

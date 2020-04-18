@@ -25,8 +25,7 @@
 
 include Block_hash
 
-(* let hash_size = 31  *)
-
+(* FIXME the block_hash should be the hash itself *)
 (* Overrides [hash] into [Hashtbl.hash] for compliance with index *)
 let hash = Hashtbl.hash
 

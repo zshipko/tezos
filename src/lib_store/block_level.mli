@@ -23,9 +23,16 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-(** Super-set of {Block_hash} to satisfy {Index.Key} interface. *)
+(** Block level satisfying {Index.Key} interface. *)
 
-include module type of Block_hash
+(** The type for block levels *)
+type t = int32
+
+(** Equality *)
+val equal : t -> t -> bool
+
+(** [hash level] returns the hash of the [level]. *)
+val hash : t -> int
 
 (** [hash_size] is the constant size (in number of bits) of the hashed
     value of the type [t]. *)
@@ -40,3 +47,6 @@ val encode : t -> string
 
 (** Decoder *)
 val decode : string -> int -> t
+
+(** Pretty-printer *)
+val pp : Format.formatter -> t -> unit

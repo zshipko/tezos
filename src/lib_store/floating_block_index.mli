@@ -23,20 +23,28 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-(** Super-set of {Block_hash} to satisfy {Index.Key} interface. *)
+(** Floating blocks index map *)
 
-include module type of Block_hash
+(** {1 Block info stored in the index map} *)
 
-(** [hash_size] is the constant size (in number of bits) of the hashed
-    value of the type [t]. *)
-val hash_size : int
+(** Module {Block_info} represents the values stored in the index used
+    to locate the position of the block in a floating block store and
+    its predecessors. *)
+module Block_info : sig
+  (** The maximum number of predecessors stored per block. *)
+  val max_predecessors : int
 
-(** [encoded_size] is the constant size (in number of bytes) of the
-    encoded value. *)
-val encoded_size : int
+  (** The type for storing the block's info. *)
+  type t = {
+    offset : int;  (** {offset} in the file *)
+    predecessors : Block_hash.t list;  (** {predecessors} of the block *)
+  }
 
-(** Encoder *)
-val encode : t -> string
+  (** Pretty-printer for {t} *)
+  val pp : Format.formatter -> t -> unit
+end
 
-(** Decoder *)
-val decode : string -> int -> t
+(** Key/value index associated to a floating block store where the key
+   is a {Block_hash.t} and the value is {Block_info.t}. *)
+include
+  Index.S with type key = Block_hash.t and type value = Block_info.t

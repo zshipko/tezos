@@ -23,20 +23,31 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-(** Super-set of {Block_hash} to satisfy {Index.Key} interface. *)
+(** Protocol store *)
 
-include module type of Block_hash
+(** The type for the protocol store. *)
+type t
 
-(** [hash_size] is the constant size (in number of bits) of the hashed
-    value of the type [t]. *)
-val hash_size : int
+(** [mem pstore proto_hash] test the existence of the protocol
+    indexed by [proto_hash] in the store. *)
+val mem : t -> Protocol_hash.t -> bool
 
-(** [encoded_size] is the constant size (in number of bytes) of the
-    encoded value. *)
-val encoded_size : int
+(** [all pstore] returns the set of all stored protocols in [pstore]. *)
+val all : t -> Protocol_hash.Set.t
 
-(** Encoder *)
-val encode : t -> string
+(** [raw_store pstore proto_hash proto_bytes] stores on disk the protocol
+    [proto_bytes] (encoded bytes) indexed as [proto_hash]. Returns
+    [None] if the protocol already exists. *)
+val raw_store : t -> Protocol_hash.t -> bytes -> Protocol_hash.t option Lwt.t
 
-(** Decoder *)
-val decode : string -> int -> t
+(** [store pstore proto_hash protocol] stores on disk the protocol [protocol]
+    indexed as [proto_hash]. Returns [None] if the protocol already exists. *)
+val store : t -> Protocol_hash.t -> Protocol.t -> Protocol_hash.t option Lwt.t
+
+(** [read pstore proto_hash] reads from [pstore] and return the
+    protocol indexed by [proto_hash]. *)
+val read : t -> Protocol_hash.t -> Protocol.t option Lwt.t
+
+(** [init ~store_dir] create a store relatively to [store_dir] path or
+    load it if it already exists. *)
+val init : store_dir:string -> t Lwt.t

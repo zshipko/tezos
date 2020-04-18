@@ -105,7 +105,8 @@ let global_predecessor_lookup block_store hash pow_nth =
 *)
 let compute_predecessors block_store block =
   let rec loop predecessors_acc pred dist =
-    if dist = Floating_block_index.nb_predecessors then predecessors_acc
+    if dist = Floating_block_index.Block_info.max_predecessors then
+      predecessors_acc
     else
       match global_predecessor_lookup block_store pred (dist - 1) with
       | None ->
@@ -114,9 +115,8 @@ let compute_predecessors block_store block =
           loop (pred' :: predecessors_acc) pred' (dist + 1)
   in
   let predecessor = predecessor block in
-  if Block_hash.equal block.hash predecessor then
-    (* genesis *)
-    List.init Floating_block_index.nb_predecessors (fun _ -> block.hash)
+  if Block_hash.equal block.hash predecessor then (* genesis *)
+    [block.hash]
   else
     let rev_preds = loop [predecessor] predecessor 1 in
     List.rev rev_preds
@@ -149,9 +149,12 @@ let get_predecessor block_store block_hash distance =
           else
             let (power, rest) = closest_power_two_and_rest distance in
             let (power, rest) =
-              if power < Floating_block_index.nb_predecessors then (power, rest)
+              if power < Floating_block_index.Block_info.max_predecessors then
+                (power, rest)
               else
-                let power = Floating_block_index.nb_predecessors - 1 in
+                let power =
+                  Floating_block_index.Block_info.max_predecessors - 1
+                in
                 let rest = distance - (1 lsl power) in
                 (power, rest)
             in

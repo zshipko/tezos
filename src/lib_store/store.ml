@@ -1855,7 +1855,7 @@ module Protocol = struct
         Lwt.return p
 
   let read_protocol {protocol_store; _} protocol_hash =
-    Protocol_store.read_protocol protocol_store protocol_hash
+    Protocol_store.read protocol_store protocol_hash
 
   let is_protocol_stored {protocol_store; _} protocol_hash =
     Protocol_store.mem protocol_store protocol_hash
@@ -2017,7 +2017,7 @@ let create_store ~store_dir ~context_index ~chain_id ~genesis ~genesis_context
   let open Naming in
   Lwt_utils_unix.create_dir store_dir
   >>= fun () ->
-  Protocol_store.init_store ~store_dir
+  Protocol_store.init ~store_dir
   >>= fun protocol_store ->
   let protocol_watcher = Lwt_watcher.create_input () in
   let global_block_watcher = Lwt_watcher.create_input () in
@@ -2049,7 +2049,7 @@ let load_store ?history_mode ~store_dir ~context_index ~chain_id
     ~allow_testchains ~readonly () =
   (* TODO: check genesis coherence and fail if mismatch *)
   let chain_dir = Naming.(store_dir // chain_store chain_id) in
-  Protocol_store.init_store ~store_dir
+  Protocol_store.init ~store_dir
   >>= fun protocol_store ->
   let protocol_watcher = Lwt_watcher.create_input () in
   let global_block_watcher = Lwt_watcher.create_input () in

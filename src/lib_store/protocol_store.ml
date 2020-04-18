@@ -49,7 +49,7 @@ let raw_store store protocol_hash bytes =
 let store store protocol_hash protocol =
   raw_store store protocol_hash (Protocol.to_bytes protocol)
 
-let read_protocol store protocol_hash =
+let read store protocol_hash =
   Lwt.catch
     (fun () ->
       Lwt_utils_unix.read_file
@@ -58,7 +58,7 @@ let read_protocol store protocol_hash =
       Lwt.return (Protocol.of_bytes (Bytes.unsafe_of_string content)))
     (fun _ -> Lwt.return_none)
 
-let init_store ~store_dir =
+let init ~store_dir =
   let protocol_store_dir = Naming.(store_dir // protocol_store_directory) in
   Lwt_unix.file_exists protocol_store_dir
   >>= fun file_exists ->
