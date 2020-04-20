@@ -160,9 +160,7 @@ type baker_policy =
   | By_account of public_key_hash
   | Excluding of public_key_hash list
 
-let get_next_baker_by_priority chain_store priority block =
-  Store.Block.context chain_store block
-  >>=? fun ctxt ->
+let get_next_baker_by_priority ctxt priority block =
   Alpha_services.Delegate.Baking_rights.get
     (rpc_ctxt ctxt)
     ~all:true
@@ -177,9 +175,7 @@ let get_next_baker_by_priority chain_store priority block =
   in
   return (pkh, priority, Option.unopt_exn (Failure "") timestamp)
 
-let get_next_baker_by_account chain_store pkh block =
-  Store.Block.context chain_store block
-  >>=? fun ctxt ->
+let get_next_baker_by_account ctxt pkh block =
   Alpha_services.Delegate.Baking_rights.get
     (rpc_ctxt ctxt)
     ~delegates:[pkh]
@@ -194,9 +190,7 @@ let get_next_baker_by_account chain_store pkh block =
   in
   return (pkh, priority, Option.unopt_exn (Failure "") timestamp)
 
-let get_next_baker_excluding chain_store excludes block =
-  Store.Block.context chain_store block
-  >>=? fun ctxt ->
+let get_next_baker_excluding ctxt excludes block =
   Alpha_services.Delegate.Baking_rights.get
     (rpc_ctxt ctxt)
     ~max_priority:256
@@ -213,13 +207,13 @@ let get_next_baker_excluding chain_store excludes block =
   in
   return (pkh, priority, Option.unopt_exn (Failure "") timestamp)
 
-let dispatch_policy chain_store = function
+let dispatch_policy ctxt = function
   | By_priority p ->
-      get_next_baker_by_priority chain_store p
+      get_next_baker_by_priority ctxt p
   | By_account a ->
-      get_next_baker_by_account chain_store a
+      get_next_baker_by_account ctxt a
   | Excluding al ->
-      get_next_baker_excluding chain_store al
+      get_next_baker_excluding ctxt al
 
 let get_next_baker chain_store ?(policy = By_priority 0) =
   dispatch_policy chain_store policy
@@ -294,11 +288,9 @@ module Forge = struct
     in
     Block_header.{shell; protocol_data = {contents; signature}} |> return
 
-  let forge_header chain_store ?(policy = By_priority 0) ?timestamp
-      ?(operations = []) pred =
-    Store.Block.context chain_store pred
-    >>=? fun ctxt ->
-    dispatch_policy chain_store policy pred
+  let forge_header ctxt ?(policy = By_priority 0) ?timestamp ?(operations = [])
+      pred =
+    dispatch_policy ctxt policy pred
     >>=? fun (pkh, priority, _timestamp) ->
     Alpha_services.Delegate.Minimal_valid_time.get
       (rpc_ctxt ctxt)
@@ -404,13 +396,10 @@ let patch_context ?(genesis_parameters = default_genesis_parameters) ctxt =
 
 (********* Baking *************)
 
-let apply chain_store ?policy ?(operations = []) pred =
-  Forge.forge_header chain_store ?policy ~operations pred
+let apply ctxt chain_id ~policy ~operations pred =
+  Forge.forge_header ctxt ?policy ~operations pred
   >>=? fun {shell; contents; baker} ->
   let protocol_data = {Block_header.contents; signature = Signature.zero} in
-  Store.Block.context chain_store pred
-  >>=? fun ctxt ->
-  let chain_id = Store.Chain.chain_id chain_store in
   (let open Environment.Error_monad in
   Main.begin_construction
     ~chain_id
@@ -450,6 +439,15 @@ let apply chain_store ?policy ?(operations = []) pred =
   let block_header =
     {Tezos_base.Block_header.shell = header.shell; protocol_data}
   in
+  return (block_header, block_header_metadata, validation)
+
+let apply_and_store chain_store ?policy ?(operations = []) pred =
+  Store.Block.context chain_store pred
+  >>=? fun ctxt ->
+  let chain_id = Store.Chain.chain_id chain_store in
+  apply ctxt chain_id ~policy ~operations pred
+  >>=? fun (block_header, block_header_metadata, validation) ->
+  let context_hash = block_header.shell.context in
   Store.Block.store_block
     chain_store
     ~block_header
@@ -481,7 +479,7 @@ let bake chain_store ?policy ?operation ?operations pred =
     | (None, None) ->
         None
   in
-  apply chain_store ?policy ?operations pred
+  apply_and_store chain_store ?policy ?operations pred
 
 (********** Cycles ****************)
 
