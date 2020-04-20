@@ -160,8 +160,7 @@ let load ~cemented_blocks_dir =
   return cemented_store
 
 let init ~cemented_blocks_dir =
-  Format.printf "caca@." ;
-  if Sys.file_exists cemented_blocks_dir then (
+  if Sys.file_exists cemented_blocks_dir then
     fail_unless
       (Sys.is_directory cemented_blocks_dir)
       (Exn
@@ -169,16 +168,8 @@ let init ~cemented_blocks_dir =
             (Format.sprintf
                "Cemented_block_store.init: file %s is not a directory"
                cemented_blocks_dir)))
-    >>=? fun () ->
-    load ~cemented_blocks_dir
-    >>=? fun res ->
-    Format.printf "after load@." ;
-    return res )
-  else
-    create ~cemented_blocks_dir
-    >>= fun res ->
-    Format.printf "after create@." ;
-    return res
+    >>=? fun () -> load ~cemented_blocks_dir >>=? fun res -> return res
+  else create ~cemented_blocks_dir >>= fun res -> return res
 
 let close cemented_store =
   Cemented_block_level_index.close cemented_store.cemented_block_level_index ;
@@ -189,7 +180,6 @@ let offset_length = 4 (* file offset *)
 let offset_encoding = Data_encoding.int31
 
 let find_block_file cemented_store block_level =
-  Format.printf "find block file@." ;
   try
     if Compare.Int32.(block_level < 0l) then None
     else

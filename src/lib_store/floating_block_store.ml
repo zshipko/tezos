@@ -28,11 +28,13 @@
    File: <block_repr>*
 *)
 
+type floating_kind = Naming.floating_kind = RO | RW | RW_TMP | RO_TMP
+
 type t = {
   floating_block_index : Floating_block_index.t;
   filename : string;
   fd : Lwt_unix.file_descr;
-  kind : Naming.floating_kind;
+  kind : floating_kind;
   scheduler : Lwt_idle_waiter.t;
 }
 
@@ -40,8 +42,15 @@ let floating_blocks_log_size = 100_000
 
 open Floating_block_index.Block_info
 
+let kind {kind; _} = kind
+
+let mem floating_store hash =
+  Lwt_idle_waiter.task floating_store.scheduler (fun () ->
+      Lwt.return
+        (Floating_block_index.mem floating_store.floating_block_index hash))
+
 let find_predecessors floating_store hash =
-  Lwt_idle_waiter.when_idle floating_store.scheduler (fun () ->
+  Lwt_idle_waiter.task floating_store.scheduler (fun () ->
       try
         let {predecessors; _} =
           Floating_block_index.find floating_store.floating_block_index hash
@@ -49,7 +58,8 @@ let find_predecessors floating_store hash =
         Lwt.return_some predecessors
       with Not_found -> Lwt.return_none)
 
-let get_block floating_store hash =
+let read_block floating_store hash =
+  (* Must be `when_idle` or the fd offset might be moved by other calls  *)
   Lwt_idle_waiter.when_idle floating_store.scheduler (fun () ->
       try
         let {offset; _} =
@@ -101,16 +111,12 @@ let locked_write_block floating_store ~offset ~block ~predecessors =
     {offset; predecessors} ;
   Lwt.return block_length
 
-let append_block ?(should_flush = true) floating_store predecessors
-    (block : Block_repr.t) =
+let append_block floating_store predecessors (block : Block_repr.t) =
   Lwt_idle_waiter.force_idle floating_store.scheduler (fun () ->
       Lwt_unix.lseek floating_store.fd 0 Unix.SEEK_END
       >>= fun offset ->
       locked_write_block floating_store ~offset ~block ~predecessors
-      >>= fun _written_len ->
-      if should_flush then
-        Floating_block_index.flush floating_store.floating_block_index ;
-      Lwt.return_unit)
+      >>= fun _written_len -> Lwt.return_unit)
 
 let append_all floating_store
     (blocks : (Block_hash.t list * Block_repr.t) list) =
@@ -128,7 +134,7 @@ let append_all floating_store
       Floating_block_index.flush floating_store.floating_block_index ;
       Lwt.return_unit)
 
-let iter_raw f fd =
+let iter_raw_fd f fd =
   Lwt_unix.lseek fd 0 Unix.SEEK_END
   >>= fun eof_offset ->
   Lwt_unix.lseek fd 0 Unix.SEEK_SET
@@ -145,35 +151,43 @@ let iter_raw f fd =
   in
   loop eof_offset
 
-(* Iter on every blocks in file *)
-let iter f floating_store =
-  Lwt_idle_waiter.force_idle floating_store.scheduler (fun () ->
+let iter_raw f floating_store =
+  Lwt_unix.lseek floating_store.fd 0 Unix.SEEK_END
+  >>= fun eof_offset ->
+  Lwt_unix.lseek floating_store.fd 0 Unix.SEEK_SET
+  >>= fun _ ->
+  let rec loop nb_bytes_left =
+    if nb_bytes_left = 0 then return_unit
+    else
+      Block_repr.read_next_block_opt floating_store.fd
+      >>= function
+      | None ->
+          return_unit
+      | Some (block, length) ->
+          let {predecessors; _} =
+            Floating_block_index.find
+              floating_store.floating_block_index
+              block.hash
+          in
+          f (block, predecessors) >>=? fun () -> loop (nb_bytes_left - length)
+  in
+  loop eof_offset
+
+(* Iter sequentially(!) on every blocks in the file *)
+let iter_seq f floating_store =
+  Lwt_idle_waiter.when_idle floating_store.scheduler (fun () ->
       (* We open a new fd *)
       let (flags, perms) = ([Unix.O_CREAT; O_RDONLY; O_CLOEXEC], 0o444) in
       Lwt_unix.openfile floating_store.filename flags perms
       >>= fun fd ->
-      iter_raw f fd >>=? fun () -> Lwt_unix.close fd >>= fun () -> return_unit)
-
-let fold f init floating_store =
-  let set = ref Block_hash.Set.empty in
-  Floating_block_index.iter
-    (fun k _v -> set := Block_hash.Set.add k !set)
-    floating_store.floating_block_index ;
-  Block_hash.Set.fold
-    (fun h acc ->
-      acc
-      >>= fun acc ->
-      get_block floating_store h
-      >>= fun block_opt ->
-      let block = Option.unopt_assert ~loc:__POS__ block_opt in
-      f block acc)
-    !set
-    (Lwt.return init)
+      iter_raw f floating_store
+      >>=? fun () -> Lwt_unix.close fd >>= fun () -> return_unit)
 
 let init ~chain_dir ~readonly kind =
   let (flag, perms) =
     (* Only RO is readonly: when we open RO_TMP, we actually write in it. *)
-    if kind = Naming.RO then (Unix.O_RDONLY, 0o444) else (Unix.O_RDWR, 0o644)
+    if kind = Naming.RO && readonly then (Unix.O_RDONLY, 0o444)
+    else (Unix.O_RDWR, 0o644)
   in
   let filename = Naming.(chain_dir // floating_blocks kind) in
   Lwt_unix.openfile filename [Unix.O_CREAT; O_CLOEXEC; flag] perms

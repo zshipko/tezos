@@ -388,11 +388,11 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
             (fun () ->
               Lwt_unix.lseek floating_ro_fd 0 Unix.SEEK_SET
               >>= fun _ ->
-              Floating_block_store.iter_raw f floating_ro_fd
+              Floating_block_store.iter_raw_fd f floating_ro_fd
               >>=? fun () ->
               Lwt_unix.lseek floating_rw_fd 0 Unix.SEEK_SET
               >>= fun _ ->
-              Floating_block_store.iter_raw f floating_rw_fd
+              Floating_block_store.iter_raw_fd f floating_rw_fd
               >>=? fun () ->
               failwith "floating_export: could not retrieve the target block")
             (function

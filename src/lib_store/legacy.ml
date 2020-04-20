@@ -727,7 +727,7 @@ let import_cemented ?(display_msg = "") lmdb_chain_store chain_store
         [start_block]
         (Block_repr.predecessor start_block))
 
-(* … *)
+(* … FIXME *)
 let dirty_read_i lmdb_chain_store hash target_level =
   let rec aux hash =
     Block.Pruned_contents.read_opt (lmdb_chain_store, hash)

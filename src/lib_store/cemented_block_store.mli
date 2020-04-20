@@ -25,68 +25,72 @@
 
 (** Persistent block store with linear history
 
-    The cemented block store is store where blocks are stored linearly
-    (by level) in chunks. Blocks in this store should not be
-    reorganized anymore and are thus *cemented*. As these blocks should
-    not be accessed regularly and especially their metadata (if
-    present), the later are compressed using a zip format to save disk
-    space. For each chunk of blocks, a dedicated file is
-    used. Moreover, to enable easy access and to prevent too much
-    on-disk reading, two indexed maps are used to retrieve blocks hash
-    from their level and their level from the block hash.
+    The cemented block store is a store where blocks are stored
+   linearly (by level) in chunks. Blocks in this store should not be
+   reorganized anymore and are thus *cemented*. As these blocks should
+   not be accessed regularly and especially their metadata (if
+   present), the later are compressed using a zip format to save disk
+   space. For each chunk of blocks, a dedicated file is
+   used. Moreover, to enable easy access and to prevent too much
+   on-disk reading, two indexed maps are used to retrieve blocks hash
+   from their level and their level from the block hash.
 
     The cemented block store contains a set of files updated each time
-    a new chunk is added to the store. These files indicate which
-    interval of blocks (w.r.t. their levels) are stored in it.
+   a new chunk is added to the store. These files indicate which
+   interval of blocks (w.r.t. their levels) are stored in it.
 
     {1 Invariants}
 
     This store is expected to respect the following invariants:
 
-    - A cemented chunk of blocks that is represented by the interval
-      [ i ; j ] (with i <= j) contains | j - i + 1 | blocks and are
-      ordered from i to j in the file.
+    - A key/value present in an index is present as well in the other
+    as value/key.
+
+    - Every block stored is correctly indexed.
+
+    - A cemented chunk of blocks that is represented by the interval [
+   i ; j ] (with i <= j) contains | j - i + 1 | blocks and are ordered
+   from i to j in the file.
 
     - The set F of cemented chunks is always ordered by block level.
 
     - The cemented store does not contain holes: let F be the cemented
-      chunks, if |F| > 1 then:
+   chunks, if |F| > 1 then:
 
       ∀f_x=(i,j) ∈ F ∧ x < |F|, ∃f_y =(i', j'), x = y - 1 ∧ j + 1 = j'
 
       meaning the concatenation of every chunk must be continuous.
 
     - A metadata zip file is indexed by the same interval as the
-      chunks and, when it is the lowest chunk of metadata stored, is not
-      assured to contain every block's metadata of the chunk.
+   chunks and, when it is the lowest chunk of metadata stored, is not
+   assured to contain every block's metadata of the chunk.
 
     {1 Files format}
 
     The cemented block store is composed of the following files:
 
     - file : /<i_j>, a chunk of blocks from level i to level j. The
-      format of this file is:
+   format of this file is:
 
     | <n> × <offset> | <n> × <block> |
 
     where n is ( j- i + 1), <offset> is 4 bytes integer representing
-    the absolute offset of the k-th (with 0 <= k <= n) block in the
-    file and with <block>, a {Block_repr.t} value encoded using
-    {Block_repr.encoding} (thus prefixed by the its size).
+   the absolute offset of the k-th (with 0 <= k <= n) block in the
+   file and with <block>, a {Block_repr.t} value encoded using
+   {Block_repr.encoding} (thus prefixed by the its size).
 
     - dir : /<cemented_block_index_level>, the Hash -> Level key/value
-      index ;
+   index ;
 
     - dir : /<cemented_block_index_hash>, the Level -> Hash key/value
-      index.
+   index.
 
     - dir : /metadata, the directory containing chunks of compressed
-      metadata (present if relevent).
+   metadata (present if relevent).
 
     - files : /metadata/<i_j>.zip, the compressed metadata: where
-      every chunk of block's metadata is indexed by their level encoded
-      as string (present if relevent).
-*)
+   every chunk of block's metadata is indexed by their level encoded
+   as string (present if relevent).  *)
 
 (** The type of the cemented block store *)
 type t

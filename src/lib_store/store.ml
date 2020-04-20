@@ -279,7 +279,7 @@ module Block = struct
     >>= function
     | Ok block -> Lwt.return_some block | Error _ -> Lwt.return_none
 
-  (* FIXME returns None for genesis ? *)
+  (* Predecessor = itself for genesis *)
   let read_predecessor chain_store block =
     read_block chain_store (Block_repr.predecessor block)
 
@@ -587,7 +587,7 @@ module Chain_traversal = struct
         | Some path ->
             Lwt.return (ancestor, path) )
 
-  (* FIXME: replace that with a proper cache *)
+  (* FIXME replace that with a proper cache *)
   let live_blocks chain_store ~block n =
     let rec loop bacc oacc block_head n =
       let hashes = Block.all_operation_hashes block_head in

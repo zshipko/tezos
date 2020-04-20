@@ -51,23 +51,19 @@ type key = Hash of (Block_hash.t * int)
 let global_predecessor_lookup block_store hash pow_nth =
   (* pow_nth = 0 => direct predecessor *)
   (* Look in the RW block_store then RO stores then cemented *)
-  let hash_opt =
-    List.find_map
-      (function
-        | {Floating_block_store.floating_block_index; _} -> (
-          try
-            let predecessors =
-              (Floating_block_index.find floating_block_index hash)
-                .predecessors
-            in
-            List.nth_opt predecessors pow_nth
-          with Not_found -> None ))
-      ( block_store.rw_floating_block_store
-      :: block_store.ro_floating_block_stores )
-  in
-  match hash_opt with
+  Lwt_utils.find_map_s
+    (fun floating_store ->
+      Floating_block_store.find_predecessors floating_store hash
+      >>= function
+      | None ->
+          Lwt.return_none
+      | Some predecessors ->
+          Lwt.return (List.nth_opt predecessors pow_nth))
+    ( block_store.rw_floating_block_store
+    :: block_store.ro_floating_block_stores )
+  >>= function
   | Some hash ->
-      Some hash
+      Lwt.return_some hash
   | None -> (
     (* It must be cemented *)
     match
@@ -76,7 +72,7 @@ let global_predecessor_lookup block_store hash pow_nth =
         hash
     with
     | None ->
-        None
+        Lwt.return_none
     | Some level ->
         (* level - 2^n *)
         let pred_level =
@@ -84,9 +80,10 @@ let global_predecessor_lookup block_store hash pow_nth =
             (Block_repr.level block_store.genesis_block)
             Int32.(sub level (shift_left 1l pow_nth))
         in
-        Cemented_block_store.get_cemented_block_hash
-          block_store.cemented_store
-          pred_level )
+        Lwt.return
+          (Cemented_block_store.get_cemented_block_hash
+             block_store.cemented_store
+             pred_level) )
 
 (**
    Takes a block and populates its predecessors store, under the
@@ -106,20 +103,22 @@ let global_predecessor_lookup block_store hash pow_nth =
 let compute_predecessors block_store block =
   let rec loop predecessors_acc pred dist =
     if dist = Floating_block_index.Block_info.max_predecessors then
-      predecessors_acc
+      Lwt.return predecessors_acc
     else
-      match global_predecessor_lookup block_store pred (dist - 1) with
+      global_predecessor_lookup block_store pred (dist - 1)
+      >>= function
       | None ->
-          predecessors_acc
+          Lwt.return predecessors_acc
       | Some pred' ->
           loop (pred' :: predecessors_acc) pred' (dist + 1)
   in
   let predecessor = predecessor block in
-  if Block_hash.equal block.hash predecessor then (* genesis *)
-    [block.hash]
+  if Block_hash.equal block.hash predecessor then
+    (* genesis *)
+    Lwt.return [block.hash]
   else
-    let rev_preds = loop [predecessor] predecessor 1 in
-    List.rev rev_preds
+    loop [predecessor] predecessor 1
+    >>= fun rev_preds -> Lwt.return (List.rev rev_preds)
 
 (** [get_predecessor chain_store hash distance] retrieves the
     block which is at [distance] from the block with corresponding [hash]
@@ -145,7 +144,7 @@ let get_predecessor block_store block_hash distance =
       else
         let rec loop block_hash distance =
           if distance = 1 then
-            Lwt.return (global_predecessor_lookup block_store block_hash 0)
+            global_predecessor_lookup block_store block_hash 0
           else
             let (power, rest) = closest_power_two_and_rest distance in
             let (power, rest) =
@@ -158,7 +157,8 @@ let get_predecessor block_store block_hash distance =
                 let rest = distance - (1 lsl power) in
                 (power, rest)
             in
-            match global_predecessor_lookup block_store block_hash power with
+            global_predecessor_lookup block_store block_hash power
+            >>= function
             | None ->
                 Lwt.return_none (* reached genesis *)
             | Some pred ->
@@ -178,15 +178,11 @@ let is_known block_store key_kind =
           | None ->
               Lwt.return_false
           | Some predecessor_hash ->
-              let is_known =
-                List.exists
-                  (fun store ->
-                    Floating_block_index.mem
-                      store.Floating_block_store.floating_block_index
-                      predecessor_hash)
-                  ( block_store.rw_floating_block_store
-                  :: block_store.ro_floating_block_stores )
-              in
+              Lwt_list.exists_s
+                (fun store -> Floating_block_store.mem store predecessor_hash)
+                ( block_store.rw_floating_block_store
+                :: block_store.ro_floating_block_stores )
+              >>= fun is_known ->
               Lwt.return
                 ( is_known
                 || Cemented_block_store.is_cemented
@@ -210,7 +206,7 @@ let read_block ~read_metadata block_store key_kind =
                   (* First look in the floating stores *)
                   Lwt_utils.find_map_s
                     (fun store ->
-                      Floating_block_store.get_block store adjusted_hash)
+                      Floating_block_store.read_block store adjusted_hash)
                     ( block_store.rw_floating_block_store
                     :: block_store.ro_floating_block_stores )
                   >>= function
@@ -244,7 +240,7 @@ let read_block_metadata block_store key_kind =
                 (* First look in the floating stores *)
                 Lwt_utils.find_map_s
                   (fun store ->
-                    Floating_block_store.get_block store adjusted_hash)
+                    Floating_block_store.read_block store adjusted_hash)
                   ( block_store.rw_floating_block_store
                   :: block_store.ro_floating_block_stores )
                 >>= function
@@ -267,7 +263,8 @@ let read_block_metadata block_store key_kind =
 
 let store_block block_store block =
   Lwt_idle_waiter.task block_store.merge_scheduler (fun () ->
-      let predecessors = compute_predecessors block_store block in
+      compute_predecessors block_store block
+      >>= fun predecessors ->
       Block_cache.push block_store.block_cache block.hash block ;
       Floating_block_store.append_block
         block_store.rw_floating_block_store
@@ -338,7 +335,7 @@ let retrieve_n_predecessors floating_stores block n =
     else
       Lwt_utils.find_map_s
         (fun floating_store ->
-          Floating_block_store.get_block floating_store predecessor_hash)
+          Floating_block_store.read_block floating_store predecessor_hash)
         floating_stores
       >>= function
       | None ->
@@ -395,29 +392,17 @@ let update_floating_stores ~ro_store ~rw_store ~new_store ~from_block ~to_block
   in
   iter_s
     (fun store ->
-      Floating_block_store.iter
-        (fun block ->
+      Floating_block_store.iter_seq
+        (fun (block, predecessors) ->
           if Block_hash.Set.mem (Block_repr.predecessor block) !visited then (
             let hash = Block_repr.hash block in
-            let {Floating_block_index.Block_info.predecessors; _} =
-              Floating_block_index.find
-                store.Floating_block_store.floating_block_index
-                hash
-            in
             visited := Block_hash.Set.add hash !visited ;
-            Floating_block_store.append_block
-              ~should_flush:false
-              new_store
-              predecessors
-              block
+            Floating_block_store.append_block new_store predecessors block
             >>= return )
           else return_unit)
         store)
     [ro_store; rw_store]
-  >>=? fun () ->
-  Floating_block_index.flush
-    new_store.Floating_block_store.floating_block_index ;
-  return blocks_to_cement
+  >>=? fun () -> return blocks_to_cement
 
 let swap_floating_stores block_store ~new_ro_store =
   let chain_dir = block_store.chain_dir in
@@ -425,10 +410,10 @@ let swap_floating_stores block_store ~new_ro_store =
     let open Naming in
     let src_floating_block_index =
       chain_dir
-      // floating_block_index floating_store.Floating_block_store.kind
+      // floating_block_index (Floating_block_store.kind floating_store)
     in
     let src_floating_blocks =
-      chain_dir // floating_blocks floating_store.Floating_block_store.kind
+      chain_dir // floating_blocks (Floating_block_store.kind floating_store)
     in
     let dest_floating_block_index =
       chain_dir // floating_block_index new_kind

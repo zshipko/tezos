@@ -210,10 +210,9 @@ let reconstruct_cemented chain_store context_index ~user_activated_upgrades
   let limit = Array.length history in
   let block_store = Store.unsafe_get_block_store chain_store in
   let cemented_cycles =
-    Cemented_block_store.cemented_blocks_files block_store.cemented_store
+    Array.to_list
+      (Cemented_block_store.cemented_blocks_files block_store.cemented_store)
   in
-  (* FIXME *)
-  let cemented_cycles = Array.to_list cemented_cycles in
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun ppf i ->
       Format.fprintf ppf "Reconstructing cemented blocks: %i/%i" i limit)
@@ -246,8 +245,8 @@ let reconstruct_floating chain_store context_index ~user_activated_upgrades
     (fun notify ->
       Error_monad.iter_s
         (fun fs ->
-          Floating_block_store.iter
-            (fun block ->
+          Floating_block_store.iter_seq
+            (fun (block, predecessors) ->
               let level = Block_repr.level block in
               (* It is needed to read the metadata using the cemented_block_store to
                  avoid the cache mechanism which stores blocks without metadata *)
@@ -272,12 +271,7 @@ let reconstruct_floating chain_store context_index ~user_activated_upgrades
               | Some m ->
                   return (Store.Block.of_repr_metadata m) )
               >>=? fun metadata ->
-              (* We should use find_predecessors but it will deadlock *)
-              let predecessors =
-                Block_store.compute_predecessors block_store block
-              in
               Floating_block_store.append_block
-                ~should_flush:false
                 new_ro_store
                 predecessors
                 {
@@ -292,8 +286,6 @@ let reconstruct_floating chain_store context_index ~user_activated_upgrades
   Floating_block_store.init ~chain_dir ~readonly:false RW_TMP
   >>= fun new_rw_store ->
   block_store.rw_floating_block_store <- new_rw_store ;
-  Floating_block_index.flush
-    new_ro_store.Floating_block_store.floating_block_index ;
   Block_store.swap_floating_stores block_store ~new_ro_store
   >>= fun () -> return_unit
 
@@ -324,12 +316,11 @@ let get_lowest_cemented_block_with_metadata chain_store offset =
   let cemented_cycles =
     Cemented_block_store.cemented_blocks_files block_store.cemented_store
   in
-  (* FIXME  *)
+  (* FIXME keep the array *)
   let cemented_cycles = Array.to_list cemented_cycles |> List.rev in
   let lcl =
     try
       let ({start_level; _} : Cemented_block_store.cemented_blocks_file) =
-        (* nth_opt instead *)
         List.nth
           cemented_cycles
           (min (offset - 1) (List.length cemented_cycles - 1))
