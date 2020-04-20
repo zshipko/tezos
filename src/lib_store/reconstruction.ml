@@ -178,11 +178,11 @@ let reconstruct_chunks ~notify chain_store context_index
       >>= fun () ->
       let new_metadata_chunk = (block, metadata) :: metadata_chunk in
       ( if lafl < metadata.last_allowed_fork_level then
-        (* New cycle : store the chunck and continue with an empty one*)
+        (* New cycle: store the chunck and continue with an empty one*)
         Store.Block.store_block_metadata
           chain_store
           (List.rev new_metadata_chunk)
-        >>= fun () ->
+        >>=? fun () ->
         reconstruct_chunks (level + 1) metadata.last_allowed_fork_level []
       else if
       (* For the first cycles, the last allowed fork level is not updated.
@@ -192,7 +192,7 @@ let reconstruct_chunks ~notify chain_store context_index
         Store.Block.store_block_metadata
           chain_store
           (List.rev new_metadata_chunk)
-        >>= fun () ->
+        >>=? fun () ->
         reconstruct_chunks (level + 1) metadata.last_allowed_fork_level []
       else
         reconstruct_chunks
@@ -209,10 +209,11 @@ let reconstruct_cemented chain_store context_index ~user_activated_upgrades
   let history = Array.of_list history_list in
   let limit = Array.length history in
   let block_store = Store.unsafe_get_block_store chain_store in
-  Cemented_block_store.load_table
-    ~cemented_blocks_dir:block_store.cemented_store.cemented_blocks_dir
-  >|= Array.to_list
-  >>= fun cemented_cycles ->
+  let cemented_cycles =
+    Cemented_block_store.cemented_blocks_files block_store.cemented_store
+  in
+  (* FIXME *)
+  let cemented_cycles = Array.to_list cemented_cycles in
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun ppf i ->
       Format.fprintf ppf "Reconstructing cemented blocks: %i/%i" i limit)
@@ -320,11 +321,11 @@ let check_history_mode_compatibility chain_store =
 (* TODO: should we expose in in the Cemented_block_store ? *)
 let get_lowest_cemented_block_with_metadata chain_store offset =
   let block_store = Store.unsafe_get_block_store chain_store in
-  Cemented_block_store.load_table
-    ~cemented_blocks_dir:block_store.cemented_store.cemented_blocks_dir
-  >|= Array.to_list >|= List.rev
-  (* FIXME garder l'array *)
-  >>= fun cemented_cycles ->
+  let cemented_cycles =
+    Cemented_block_store.cemented_blocks_files block_store.cemented_store
+  in
+  (* FIXME  *)
+  let cemented_cycles = Array.to_list cemented_cycles |> List.rev in
   let lcl =
     try
       let ({start_level; _} : Cemented_block_store.cemented_blocks_file) =

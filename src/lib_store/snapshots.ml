@@ -648,7 +648,7 @@ let retrieve_export_block chain_store block =
 let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
     ~export_block =
   Cemented_block_store.load_table ~cemented_blocks_dir:src_cemented_dir
-  >>= fun table_arr ->
+  >>=? fun table_arr ->
   let table_len = Array.length table_arr in
   let table = Array.to_list table_arr in
   (* Check whether the export_block is in the cemented blocks *)
@@ -977,10 +977,8 @@ let copy_and_restore_cemented_blocks ~snapshot_cemented_dir ~dst_cemented_dir
           Lwt_utils_unix.copy_file ~src ~dst >>= fun () -> notify ())
         cemented_files)
   >>= fun () ->
-  Cemented_block_store.load
-    ~cemented_blocks_dir:dst_cemented_dir
-    ~readonly:false
-  >>= fun cemented_store ->
+  Cemented_block_store.init ~cemented_blocks_dir:dst_cemented_dir
+  >>=? fun cemented_store ->
   iter_s
     (fun cemented_file ->
       if
@@ -988,7 +986,7 @@ let copy_and_restore_cemented_blocks ~snapshot_cemented_dir ~dst_cemented_dir
           (Array.exists
              (fun {Cemented_block_store.filename; _} ->
                Compare.String.equal filename cemented_file)
-             cemented_store.cemented_blocks_files)
+             (Cemented_block_store.cemented_blocks_files cemented_store))
       then failwith "Cemented copy error: cannot find file %s" cemented_file
       else return_unit)
     (List.sort compare cemented_files)
@@ -1351,8 +1349,8 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
     ~protocol:genesis.protocol
   >>=? fun genesis_context_hash ->
   let cycle_length = Legacy.Hardcoded.cycle_length ~chain_name in
-  Cemented_block_store.create ~cemented_blocks_dir:dst_cemented_dir
-  >>= fun cemented_store ->
+  Cemented_block_store.init ~cemented_blocks_dir:dst_cemented_dir
+  >>=? fun cemented_store ->
   let floating_blocks = ref [] in
   let current_blocks = ref [] in
   let has_reached_cemented = ref false in
@@ -1383,7 +1381,6 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
            current_blocks := !floating_blocks ) ;
          Cemented_block_store.cement_blocks
            cemented_store
-           ~ensure_level:false
            ~write_metadata:false
            [Store.Block.repr genesis_block; block]
      | level ->
@@ -1404,7 +1401,7 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
              floating_blocks := !current_blocks ) ;
            (* Start building up the cycle to cement *)
            current_blocks := [block] ;
-           Lwt.return_unit )
+           return_unit )
          else
            let is_dawn_of_a_cycle =
              Compare.Int32.equal 2l Int32.(rem level (of_int cycle_length))
@@ -1413,16 +1410,15 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
              (* Cycle is complete, cement it *)
              Cemented_block_store.cement_blocks
                cemented_store
-               ~ensure_level:false
                ~write_metadata:false
                (block :: !current_blocks)
-             >>= fun () ->
+             >>=? fun () ->
              current_blocks := [] ;
-             Lwt.return_unit )
+             return_unit )
            else (
              current_blocks := block :: !current_blocks ;
-             Lwt.return_unit ))
-    >>= fun () -> return_unit
+             return_unit ))
+    >>=? fun () -> return_unit
   in
   let partial_protocol_levels :
       (int32 * Protocol_hash.t * Protocol_levels.commit_info option) list ref =

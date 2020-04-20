@@ -791,8 +791,8 @@ module Chain = struct
         >>=? fun min_block_to_preserve ->
         (* New savepoint = min min_level_to_preserve (min new lowest cemented block) *)
         let table =
-          locked_chain_store.block_store.Block_store.cemented_store
-            .Cemented_block_store.cemented_blocks_files
+          Cemented_block_store.cemented_blocks_files
+            locked_chain_store.block_store.Block_store.cemented_store
         in
         if
           Compare.Int32.(
@@ -955,8 +955,8 @@ module Chain = struct
           min_level_to_preserve
         >>=? fun min_block_to_preserve ->
         let table =
-          chain_store.block_store.Block_store.cemented_store
-            .Cemented_block_store.cemented_blocks_files
+          Cemented_block_store.cemented_blocks_files
+            chain_store.block_store.Block_store.cemented_store
         in
         if
           Compare.Int32.(
@@ -1489,7 +1489,7 @@ module Chain = struct
     in
     (* Block_store.create also stores genesis *)
     Block_store.create ~chain_dir ~genesis_block
-    >>= fun block_store ->
+    >>=? fun block_store ->
     let chain_config = {Chain_config.history_mode; genesis; expiration} in
     Chain_config.write ~chain_dir chain_config
     >>= fun () ->
@@ -1530,7 +1530,7 @@ module Chain = struct
     Stored_data.read chain_state.genesis
     >>= fun genesis_block ->
     Block_store.load ~chain_dir ~genesis_block ~readonly
-    >>= fun block_store ->
+    >>=? fun block_store ->
     let chain_state = Shared.create chain_state in
     let block_watcher = Lwt_watcher.create_input () in
     let block_rpc_directories = Protocol_hash.Table.create 7 in
@@ -2246,7 +2246,7 @@ let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
   >>= fun () ->
   (* Load the store (containing the cemented if relevant) *)
   Block_store.load ~chain_dir ~genesis_block ~readonly:false
-  >>= fun block_store ->
+  >>=? fun block_store ->
   (* Store the floating *)
   Lwt_stream.iter_s
     (fun block ->
@@ -2376,7 +2376,7 @@ let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
   >>= fun () ->
   (* Load the store (containing the cemented if relevant) *)
   Block_store.load ~chain_dir ~genesis_block ~readonly:false
-  >>= fun block_store ->
+  >>=? fun block_store ->
   (* Store the floating *)
   Lwt_stream.iter_s
     (fun block ->
@@ -2521,12 +2521,7 @@ let global_block_watcher {global_block_watcher; _} =
   Lwt_watcher.create_stream global_block_watcher
 
 let cement_blocks_chunk chain_store blocks ~write_metadata =
-  Block_store.cement_blocks
-    ~ensure_level:false
-    ~write_metadata
-    chain_store.block_store
-    blocks
-  >>= fun () -> Lwt.return_unit
+  Block_store.cement_blocks ~write_metadata chain_store.block_store blocks
 
 (****************** For testing purposes only *****************)
 

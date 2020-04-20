@@ -29,8 +29,8 @@
 
    <offset> is an absolute offset in the file.
    <blocks> are prefixed by 4 bytes of length
-*)
 
+*)
 (* On-disk index of block's hashes to level *)
 module Cemented_block_level_index = Index_unix.Make (Block_key) (Block_level)
 
@@ -51,9 +51,11 @@ type t = {
   mutable cemented_blocks_files : cemented_blocks_file array;
 }
 
-let default_index_log_size = 100_000
+let cemented_blocks_dir {cemented_blocks_dir; _} = cemented_blocks_dir
 
-let default_nb_blocks_per_cemented_files = 4096
+let cemented_blocks_files {cemented_blocks_files; _} = cemented_blocks_files
+
+let default_index_log_size = 100_000
 
 let default_compression_level = 9
 
@@ -90,11 +92,16 @@ let create ~cemented_blocks_dir =
   in
   Lwt.return cemented_store
 
-let close cemented_store =
-  Cemented_block_level_index.close cemented_store.cemented_block_level_index ;
-  Cemented_block_hash_index.close cemented_store.cemented_block_hash_index
-
 let load_table ~cemented_blocks_dir =
+  fail_unless
+    ( Sys.file_exists cemented_blocks_dir
+    && Sys.is_directory cemented_blocks_dir )
+    (Exn
+       (Invalid_argument
+          (Format.sprintf
+             "load_table: directory %s does not exist"
+             cemented_blocks_dir)))
+  >>=? fun () ->
   Lwt_unix.opendir cemented_blocks_dir
   >>= fun dir_handle ->
   let rec loop acc =
@@ -123,26 +130,24 @@ let load_table ~cemented_blocks_dir =
     (fun {start_level; _} {start_level = start_level'; _} ->
       Compare.Int32.compare start_level start_level')
     cemented_files_array ;
-  Lwt.return cemented_files_array
+  return cemented_files_array
 
-let load ~cemented_blocks_dir ~readonly =
+let load ~cemented_blocks_dir =
   let cemented_block_level_index =
     Cemented_block_level_index.v
       ~log_size:default_index_log_size
-      ~readonly
       Naming.(cemented_blocks_dir // cemented_block_level_index_directory)
   in
   let cemented_block_hash_index =
     Cemented_block_hash_index.v
       ~log_size:default_index_log_size
-      ~readonly
       Naming.(cemented_blocks_dir // cemented_block_hash_index_directory)
   in
   let cemented_blocks_metadata_dir =
     Naming.(cemented_blocks_dir // cemented_blocks_metadata_directory)
   in
   load_table ~cemented_blocks_dir
-  >>= fun cemented_blocks_files ->
+  >>=? fun cemented_blocks_files ->
   let cemented_store =
     {
       cemented_blocks_dir;
@@ -152,55 +157,83 @@ let load ~cemented_blocks_dir ~readonly =
       cemented_blocks_files;
     }
   in
-  Lwt.return cemented_store
+  return cemented_store
+
+let init ~cemented_blocks_dir =
+  Format.printf "caca@." ;
+  if Sys.file_exists cemented_blocks_dir then (
+    fail_unless
+      (Sys.is_directory cemented_blocks_dir)
+      (Exn
+         (Failure
+            (Format.sprintf
+               "Cemented_block_store.init: file %s is not a directory"
+               cemented_blocks_dir)))
+    >>=? fun () ->
+    load ~cemented_blocks_dir
+    >>=? fun res ->
+    Format.printf "after load@." ;
+    return res )
+  else
+    create ~cemented_blocks_dir
+    >>= fun res ->
+    Format.printf "after create@." ;
+    return res
+
+let close cemented_store =
+  Cemented_block_level_index.close cemented_store.cemented_block_level_index ;
+  Cemented_block_hash_index.close cemented_store.cemented_block_hash_index
 
 let offset_length = 4 (* file offset *)
 
 let offset_encoding = Data_encoding.int31
 
 let find_block_file cemented_store block_level =
-  if Compare.Int32.(block_level < 0l) then None
-  else
-    let length = Array.length cemented_store.cemented_blocks_files in
-    let last_interval =
-      let {start_level; end_level; _} =
-        cemented_store.cemented_blocks_files.(length - 1)
-      in
-      Int32.(succ (sub end_level start_level))
-    in
-    (* Heuristic: in most chains, the first cemented blocks are [0_1]
-       then real cycles begin [2_4097], .. *)
-    let heuristic_initial_pivot =
-      match block_level with
-      | 0l | 1l ->
-          0
-      | _ ->
-          Compare.Int.min
-            (length - 1)
-            (1 + Int32.(to_int (div (sub block_level 2l) last_interval)))
-    in
-    (* Dichotomic based search. Do not repeat the heuristic *)
-    let rec loop (inf, sup) pivot =
-      if pivot < inf || pivot > sup || inf > sup then None
-      else
-        let ({start_level; end_level; _} as res) =
-          cemented_store.cemented_blocks_files.(pivot)
+  Format.printf "find block file@." ;
+  try
+    if Compare.Int32.(block_level < 0l) then None
+    else
+      let length = Array.length cemented_store.cemented_blocks_files in
+      let last_interval =
+        let {start_level; end_level; _} =
+          cemented_store.cemented_blocks_files.(length - 1)
         in
-        if
-          Compare.Int32.(
-            block_level >= start_level && block_level <= end_level)
-        then (* Found *)
-          Some res
-        else if Compare.Int32.(block_level > end_level) then
-          (* Making sure the pivot is strictly increasing *)
-          let new_pivot = pivot + max 1 ((sup - pivot) / 2) in
-          loop (pivot, sup) new_pivot
+        Int32.(succ (sub end_level start_level))
+      in
+      (* Heuristic: in most chains, the first cemented blocks are [0_1]
+       then real cycles begin [2_4097], .. *)
+      let heuristic_initial_pivot =
+        match block_level with
+        | 0l | 1l ->
+            0
+        | _ ->
+            Compare.Int.min
+              (length - 1)
+              (1 + Int32.(to_int (div (sub block_level 2l) last_interval)))
+      in
+      (* Dichotomic based search. Do not repeat the heuristic *)
+      let rec loop (inf, sup) pivot =
+        if pivot < inf || pivot > sup || inf > sup then None
         else
-          (* Making sure the pivot is strictly decreasing *)
-          let new_pivot = pivot - max 1 ((pivot - inf) / 2) in
-          loop (inf, pivot) new_pivot
-    in
-    loop (0, length - 1) heuristic_initial_pivot
+          let ({start_level; end_level; _} as res) =
+            cemented_store.cemented_blocks_files.(pivot)
+          in
+          if
+            Compare.Int32.(
+              block_level >= start_level && block_level <= end_level)
+          then (* Found *)
+            Some res
+          else if Compare.Int32.(block_level > end_level) then
+            (* Making sure the pivot is strictly increasing *)
+            let new_pivot = pivot + max 1 ((sup - pivot) / 2) in
+            loop (pivot, sup) new_pivot
+          else
+            (* Making sure the pivot is strictly decreasing *)
+            let new_pivot = pivot - max 1 ((pivot - inf) / 2) in
+            loop (inf, pivot) new_pivot
+      in
+      loop (0, length - 1) heuristic_initial_pivot
+  with _ -> None
 
 (* Hypothesis: at least one cemented file and the table is ordered *)
 let compute_location cemented_store block_level =
@@ -264,7 +297,7 @@ let read_block_metadata ?location cemented_store block_level =
                metadata)
         with _ -> Zip.close_in in_file ; None )
 
-let cement_blocks_metadata cemented_store ~filename blocks =
+let cement_blocks_metadata cemented_store blocks =
   let cemented_metadata_dir = cemented_store.cemented_blocks_metadata_dir in
   Lwt_unix.file_exists cemented_metadata_dir
   >>= (function
@@ -273,32 +306,42 @@ let cement_blocks_metadata cemented_store ~filename blocks =
         | false ->
             Lwt_utils_unix.create_dir cemented_metadata_dir)
   >>= fun () ->
-  let metadata_file =
-    Naming.(cemented_metadata_dir // cemented_metadata_file filename)
-  in
-  if List.exists (fun block -> Block_repr.metadata block <> None) blocks then (
-    let out_file = Zip.open_out metadata_file in
-    List.iter
-      (fun block ->
-        let level = Block_repr.level block in
-        match Block_repr.metadata block with
-        | Some metadata ->
-            let metadata_bytes =
-              Data_encoding.Binary.to_bytes_exn
-                Block_repr.metadata_encoding
-                metadata
-            in
-            Zip.add_entry
-              ~level:default_compression_level
-              (Bytes.unsafe_to_string metadata_bytes)
-              out_file
-              (Int32.to_string level)
-        | None ->
-            ())
-      blocks ;
-    Zip.close_out out_file ;
-    Lwt.return_unit )
-  else Lwt.return_unit
+  fail_unless
+    (blocks <> [])
+    (Exn (Invalid_argument "cement_blocks_metadata: empty list of blocks"))
+  >>=? fun () ->
+  find_block_file cemented_store (Block_repr.level (List.hd blocks))
+  |> function
+  | None ->
+      failwith "cement_blocks_metadata: given blocks are not cemented"
+  | Some {filename; _} ->
+      let metadata_file =
+        Naming.(cemented_metadata_dir // cemented_metadata_file filename)
+      in
+      if List.exists (fun block -> Block_repr.metadata block <> None) blocks
+      then (
+        let out_file = Zip.open_out metadata_file in
+        List.iter
+          (fun block ->
+            let level = Block_repr.level block in
+            match Block_repr.metadata block with
+            | Some metadata ->
+                let metadata_bytes =
+                  Data_encoding.Binary.to_bytes_exn
+                    Block_repr.metadata_encoding
+                    metadata
+                in
+                Zip.add_entry
+                  ~level:default_compression_level
+                  (Bytes.unsafe_to_string metadata_bytes)
+                  out_file
+                  (Int32.to_string level)
+            | None ->
+                ())
+          blocks ;
+        Zip.close_out out_file ;
+        return_unit )
+      else return_unit
 
 let read_block fd block_number =
   Lwt_unix.lseek fd (block_number * offset_length) Unix.SEEK_SET
@@ -362,6 +405,9 @@ let get_cemented_block_by_level (cemented_store : t) ~read_metadata level =
               Lwt.return_some {block with metadata}
             else Lwt.return_some block )
 
+let read_block_metadata cemented_store block_level =
+  read_block_metadata cemented_store block_level
+
 let get_cemented_block_by_hash ~read_metadata (cemented_store : t) hash =
   match get_cemented_block_level cemented_store hash with
   | None ->
@@ -375,7 +421,7 @@ let get_cemented_block_by_hash ~read_metadata (cemented_store : t) hash =
    - If the first block has metadata, metadata are written
      and all blocks are expected to have metadata
 *)
-let cement_blocks (cemented_store : t) ?(ensure_level = true) ~write_metadata
+let cement_blocks (cemented_store : t) ~write_metadata
     (blocks : Block_repr.t list) =
   let nb_blocks = List.length blocks in
   let preamble_length = nb_blocks * offset_length in
@@ -388,20 +434,16 @@ let cement_blocks (cemented_store : t) ?(ensure_level = true) ~write_metadata
   let last_block_level =
     Int32.(add first_block_level (of_int (nb_blocks - 1)))
   in
-  ( if ensure_level then
-    match get_highest_cemented_level cemented_store with
-    | None ->
-        Lwt.return_unit
-    | Some highest_cemented_block ->
-        if
-          Compare.Int32.(
-            first_block_level <> Int32.succ highest_cemented_block)
-        then
-          Lwt.fail_invalid_arg
-            "cement_blocks: previously cemented blocks have higher level than \
-             the given blocks"
-        else Lwt.return_unit
-  else Lwt.return_unit )
+  ( match get_highest_cemented_level cemented_store with
+  | None ->
+      Lwt.return_unit
+  | Some highest_cemented_block ->
+      if Compare.Int32.(first_block_level <> Int32.succ highest_cemented_block)
+      then
+        Lwt.fail_invalid_arg
+          "cement_blocks: previously cemented blocks have higher level than \
+           the given blocks"
+      else Lwt.return_unit )
   >>= fun () ->
   let filename = Format.sprintf "%ld_%ld" first_block_level last_block_level in
   let final_file = Naming.(cemented_store.cemented_blocks_dir // filename) in
@@ -470,11 +512,6 @@ let cement_blocks (cemented_store : t) ?(ensure_level = true) ~write_metadata
   (* Flush the indexes *)
   Cemented_block_level_index.flush cemented_store.cemented_block_level_index ;
   Cemented_block_hash_index.flush cemented_store.cemented_block_hash_index ;
-  (* Compress and write the metadatas *)
-  ( if write_metadata then
-    cement_blocks_metadata cemented_store ~filename blocks
-  else Lwt.return_unit )
-  >>= fun () ->
   (* Update table *)
   let cemented_block_interval =
     {start_level = first_block_level; end_level = last_block_level; filename}
@@ -483,7 +520,9 @@ let cement_blocks (cemented_store : t) ?(ensure_level = true) ~write_metadata
     Array.append
       cemented_store.cemented_blocks_files
       [|cemented_block_interval|] ;
-  Lwt.return_unit
+  (* Compress and write the metadatas *)
+  if write_metadata then cement_blocks_metadata cemented_store blocks
+  else return_unit
 
 let trigger_gc (cemented_store : t) = function
   | History_mode.Archive ->

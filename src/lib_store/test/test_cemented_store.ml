@@ -59,7 +59,7 @@ let test_cement_pruned_blocks cemented_store =
     cemented_store
     ~write_metadata:false
     blocks
-  >>= fun () ->
+  >>=? fun () ->
   assert_presence_in_cemented_store ~with_metadata:true cemented_store blocks
 
 let test_cement_full_blocks cemented_store =
@@ -69,14 +69,14 @@ let test_cement_full_blocks cemented_store =
     cemented_store
     ~write_metadata:false
     blocks
-  >>= fun () ->
+  >>=? fun () ->
   assert_presence_in_cemented_store ~with_metadata:false cemented_store blocks
 
 let test_metadata_retrieval cemented_store =
   make_raw_block_list ~kind:`Full (genesis_hash, -1l) 100
   >>= fun (blocks, _head) ->
   Cemented_block_store.cement_blocks cemented_store ~write_metadata:true blocks
-  >>= fun () ->
+  >>=? fun () ->
   assert_presence_in_cemented_store ~with_metadata:true cemented_store blocks
 
 let wrap_cemented_store_test (name, f) =
@@ -90,8 +90,8 @@ let wrap_cemented_store_test (name, f) =
     in
     run (fun base_dir ->
         let dir = Filename.concat base_dir "cemented_store" in
-        Cemented_block_store.create ~cemented_blocks_dir:dir
-        >>= fun cemented_store ->
+        Cemented_block_store.init ~cemented_blocks_dir:dir
+        >>=? fun cemented_store ->
         Error_monad.protect (fun () ->
             f cemented_store
             >>=? fun () ->

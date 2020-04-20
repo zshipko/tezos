@@ -184,7 +184,8 @@ module Block : sig
     last_allowed_fork_level:Int32.t ->
     block option tzresult Lwt.t
 
-  val store_block_metadata : chain_store -> (t * metadata) list -> unit Lwt.t
+  val store_block_metadata :
+    chain_store -> (t * metadata) list -> unit tzresult Lwt.t
 
   val context_exn : chain_store -> block -> Context.t Lwt.t
 
@@ -515,7 +516,10 @@ val restore_from_legacy_snapshot :
   unit tzresult Lwt.t
 
 val cement_blocks_chunk :
-  chain_store -> Block_repr.t list -> write_metadata:bool -> unit Lwt.t
+  chain_store ->
+  Block_repr.t list ->
+  write_metadata:bool ->
+  unit tzresult Lwt.t
 
 (**/*)
 

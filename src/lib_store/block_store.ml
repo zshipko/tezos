@@ -312,7 +312,7 @@ let split_cycles blocks =
         = b'_metadata.last_allowed_fork_level))
     blocks
 
-let cement_blocks ?ensure_level ~write_metadata block_store blocks =
+let cement_blocks ~write_metadata block_store blocks =
   (* No need to lock *)
   let {cemented_store; _} = block_store in
   let are_blocks_consistent = check_blocks_consistency blocks in
@@ -323,24 +323,10 @@ let cement_blocks ?ensure_level ~write_metadata block_store blocks =
        block."
   else Lwt.return_unit )
   >>= fun () ->
-  Cemented_block_store.cement_blocks
-    cemented_store
-    ?ensure_level
-    ~write_metadata
-    blocks
+  Cemented_block_store.cement_blocks cemented_store ~write_metadata blocks
 
 let store_metadata_chunk block_store blocks =
-  let nb_blocks = List.length blocks in
-  let first_block = List.hd blocks in
-  let first_block_level = Block_repr.level first_block in
-  let last_block_level =
-    Int32.(add first_block_level (of_int (nb_blocks - 1)))
-  in
-  let filename = Format.sprintf "%ld_%ld" first_block_level last_block_level in
-  Cemented_block_store.cement_blocks_metadata
-    block_store.cemented_store
-    ~filename
-    blocks
+  Cemented_block_store.cement_blocks_metadata block_store.cemented_store blocks
 
 (* [retrieve_n_predecessors stores block n] retrieves, at most, the
    [n] [block]'s predecessors (including [block]) from the floating
@@ -542,10 +528,9 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
         | History_mode.Archive ->
             (* In archive, we store the metadatas *)
             cement_blocks ~write_metadata:true block_store blocks_to_cement
-            >>= return
         | (Full {offset} | Rolling {offset}) when offset > 0 ->
             cement_blocks ~write_metadata:true block_store blocks_to_cement
-            >>= fun () ->
+            >>=? fun () ->
             (* Clean-up the files that are below the offset *)
             Cemented_block_store.trigger_gc
               block_store.cemented_store
@@ -555,7 +540,6 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
             assert (offset = 0) ;
             (* In full, we do not store the metadata *)
             cement_blocks ~write_metadata:false block_store blocks_to_cement
-            >>= return
         | Rolling {offset} ->
             assert (offset = 0) ;
             (* Drop the blocks *)
@@ -598,8 +582,8 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
 
 let create ~chain_dir ~genesis_block =
   let cemented_blocks_dir = Naming.(chain_dir // cemented_blocks_directory) in
-  Cemented_block_store.create ~cemented_blocks_dir
-  >>= fun cemented_store ->
+  Cemented_block_store.init ~cemented_blocks_dir
+  >>=? fun cemented_store ->
   Floating_block_store.init ~chain_dir ~readonly:false RO
   >>= fun ro_floating_block_stores ->
   let ro_floating_block_stores = [ro_floating_block_stores] in
@@ -621,12 +605,12 @@ let create ~chain_dir ~genesis_block =
       merging_thread = None;
     }
   in
-  store_block block_store genesis_block >>= fun () -> Lwt.return block_store
+  store_block block_store genesis_block >>= fun () -> return block_store
 
 let load ~chain_dir ~genesis_block ~readonly =
   let cemented_blocks_dir = Naming.(chain_dir // cemented_blocks_directory) in
-  Cemented_block_store.load ~cemented_blocks_dir ~readonly
-  >>= fun cemented_store ->
+  Cemented_block_store.init ~cemented_blocks_dir
+  >>=? fun cemented_store ->
   Floating_block_store.init ~chain_dir ~readonly RO
   >>= fun ro_floating_block_store ->
   let ro_floating_block_stores = [ro_floating_block_store] in
@@ -651,7 +635,7 @@ let load ~chain_dir ~genesis_block ~readonly =
   (* Try cleaning up previous artifacts when not in readonly *)
   ( if not readonly then try_remove_temporary_stores block_store
   else Lwt.return_unit )
-  >>= fun () -> Lwt.return block_store
+  >>= fun () -> return block_store
 
 let merging_state block_store =
   match block_store.merging_thread with

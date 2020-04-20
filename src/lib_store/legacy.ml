@@ -695,7 +695,7 @@ let import_cemented ?(display_msg = "") lmdb_chain_store chain_store
               chain_store
               [genesis; block]
               ~write_metadata:with_metadata
-            >>= fun () -> notify () >>= fun () -> return_unit )
+            >>=? fun () -> notify () >>= fun () -> return_unit )
           else (
             assert (List.length acc = 0) ;
             return_unit )
@@ -706,7 +706,7 @@ let import_cemented ?(display_msg = "") lmdb_chain_store chain_store
             chain_store
             new_acc
             ~write_metadata:with_metadata
-          >>= fun () ->
+          >>=? fun () ->
           notify ()
           >>= fun () ->
           aux

@@ -89,6 +89,7 @@ let encoding =
     (fun {hash; contents; metadata} -> (hash, contents, metadata))
     (fun (hash, contents, metadata) -> {hash; contents; metadata})
     (dynamic_size
+       ~kind:`Uint30
        (obj3
           (req "hash" Block_hash.encoding)
           (req "contents" contents_encoding)

@@ -71,7 +71,13 @@ val contents_encoding : contents Data_encoding.t
 (** Encoding for {metadata}. *)
 val metadata_encoding : metadata Data_encoding.t
 
-(** Encoding for {t} (and {block}). *)
+(** Encoding for {t} (and {block}).
+
+    {b Important} An encoded block is prefixed by 4 bytes of the
+    length of the data before the data. This is the case with
+    {Data_encoding.dynamic_size ~kind:`Uint30} encodings. This will
+    be expected to be present to improve the store efficiency.
+*)
 val encoding : t Data_encoding.t
 
 (** [pp_json] pretty-print a block as JSON. *)
