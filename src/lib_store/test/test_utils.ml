@@ -98,7 +98,7 @@ let check_invariants chain_store =
 let dummy_patch_context ctxt =
   let open Tezos_storage in
   let open Tezos_protocol_alpha in
-  Context.set ctxt ["version"] (MBytes.of_string "genesis")
+  Context.set ctxt ["version"] (Bytes.of_string "genesis")
   >>= fun ctxt ->
   let open Tezos_protocol_alpha_parameters in
   let proto_params =

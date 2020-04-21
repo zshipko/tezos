@@ -47,7 +47,7 @@ module Term = struct
       >>= fun () ->
       match subcommand with
       | Storage ->
-          Node_shared_arg.read_config_file args
+          Node_config_file.read args.Node_shared_arg.config_file
           >>=? fun node_config ->
           let data_dir = node_config.data_dir in
           let genesis = node_config.blockchain_network.genesis in

@@ -98,7 +98,7 @@ module Term = struct
             >>= fun () ->
             Lwt_utils_unix.remove_dir (Node_data_version.context_dir data_dir)
           in
-          Node_config_file.write_if_not_exists args.config_file node_config
+          Node_config_file.write args.config_file node_config
           >>=? fun () ->
           Node_data_version.ensure_data_dir ~bare:true data_dir
           >>=? fun () ->
