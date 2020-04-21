@@ -1495,7 +1495,7 @@ module Chain = struct
     >>=? fun block_store ->
     let chain_config = {Chain_config.history_mode; genesis; expiration} in
     Chain_config.write ~chain_dir chain_config
-    >>= fun () ->
+    >>=? fun () ->
     get_commit_info global_store.context_index (Block.header genesis_block)
     >>=? fun genesis_commit_info ->
     create_chain_state
@@ -1527,7 +1527,7 @@ module Chain = struct
 
   let load_chain_store global_store ~chain_dir ~chain_id ~readonly =
     Chain_config.load ~chain_dir
-    >>= fun chain_config ->
+    >>=? fun chain_config ->
     load_chain_state ~chain_dir
     >>= fun chain_state ->
     Stored_data.read chain_state.genesis
@@ -2304,7 +2304,7 @@ let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
   Block_store.close block_store
   >>=? fun () ->
   let chain_config = {Chain_config.history_mode; genesis; expiration = None} in
-  Chain_config.write ~chain_dir chain_config >>= fun () -> return_unit
+  Chain_config.write ~chain_dir chain_config >>=? fun () -> return_unit
 
 let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
     ~store_dir ~context_index ~genesis ~genesis_context_hash
@@ -2481,7 +2481,7 @@ let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
   Block_store.close block_store
   >>=? fun () ->
   let chain_config = {Chain_config.history_mode; genesis; expiration = None} in
-  Chain_config.write ~chain_dir chain_config >>= fun () -> return_unit
+  Chain_config.write ~chain_dir chain_config >>=? fun () -> return_unit
 
 let get_chain_store store chain_id =
   let chain_store = main_chain_store store in

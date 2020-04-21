@@ -23,83 +23,24 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-let ( // ) = Filename.concat
+(** Chain persistent configuration. *)
 
-let chain_store chain_id =
-  Format.asprintf "chain_%a" Chain_id.pp_short chain_id
+(** The type for chain configuration. *)
+type chain_config = {
+  history_mode : History_mode.t;
+  genesis : Genesis.t;
+  expiration : Time.Protocol.t option;
+}
 
-let chain_config_file = "config.json"
+type t = chain_config
 
-let protocol_store_directory = "protocols"
+(** (Versioned) Encoding for the [chain_config]. *)
+val encoding : t Data_encoding.t
 
-let protocol_file hash = Protocol_hash.to_b58check hash
+(** [write ~chain_dir config] writes on disk the chain [config] in
+    [chain_dir] as a JSON file. *)
+val write : chain_dir:string -> t -> unit tzresult Lwt.t
 
-let lockfile = "lock"
-
-module Chain_data = struct
-  let protocol_levels = "protocol_levels"
-
-  let genesis = "genesis"
-
-  let current_head = "current_head"
-
-  let alternate_heads = "alternate_heads"
-
-  let checkpoint = "checkpoint"
-
-  let savepoint = "savepoint"
-
-  let caboose = "caboose"
-
-  let invalid_blocks = "invalid_blocks"
-
-  let forked_chains = "forked_chains"
-end
-
-let cemented_blocks_directory = "cemented"
-
-let cemented_blocks_metadata_directory = "metadata"
-
-let cemented_metadata_file ~cemented_filename = cemented_filename ^ ".zip"
-
-let cemented_block_level_index_directory = "level_index"
-
-let cemented_block_hash_index_directory = "hash_index"
-
-let testchain_dir = "testchains"
-
-type floating_kind = RO | RW | RW_TMP | RO_TMP
-
-let floating_block_index = function
-  | RO ->
-      "ro_floating_block_index"
-  | RW ->
-      "rw_floating_block_index"
-  | RO_TMP ->
-      "ro_tmp_floating_block_index"
-  | RW_TMP ->
-      "rw_tmp_floating_block_index"
-
-let floating_blocks = function
-  | RO ->
-      "ro_floating_blocks"
-  | RW ->
-      "rw_floating_blocks"
-  | RO_TMP ->
-      "ro_tmp_floating_blocks"
-  | RW_TMP ->
-      "rw_tmp_floating_blocks"
-
-module Snapshot = struct
-  let context = "context"
-
-  let cemented_blocks = "cemented_blocks"
-
-  let floating_blocks = "floating_blocks"
-
-  let protocols = "protocols"
-
-  let protocols_table = "protocols_index"
-
-  let metadata = "metadata.json"
-end
+(** [load ~chain_dir] reads and parse from disk the chain [config]
+    from the [chain_dir]. *)
+val load : chain_dir:string -> t tzresult Lwt.t

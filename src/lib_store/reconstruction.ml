@@ -352,7 +352,7 @@ let default_starting_block chain_store offset =
 
 let restore_constants chain_store genesis_block =
   Store.Chain.set_history_mode chain_store History_mode.Archive
-  >>= fun () ->
+  >>=? fun () ->
   Store.Chain.current_head chain_store
   >>= fun new_head ->
   Store.Chain.checkpoint chain_store

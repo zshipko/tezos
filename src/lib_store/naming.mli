@@ -39,8 +39,8 @@ val protocol_store_directory : string
 (** Protocol filename *)
 val protocol_file : Protocol_hash.t -> string
 
-(** Store configuration filename. *)
-val configuration_file : string
+(** Chain configuration filename. *)
+val chain_config_file : string
 
 (** Store lockfile name. *)
 val lockfile : string

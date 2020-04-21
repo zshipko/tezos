@@ -23,12 +23,6 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-(* TODO: add more configuration *)
-(* Ideas:
-   - perserved blocks below checkpoint (=> keep them in floating, for example)
-   - ...
-*)
-
 type chain_config = {
   history_mode : History_mode.t;
   genesis : Genesis.t;
@@ -37,51 +31,30 @@ type chain_config = {
 
 type t = chain_config
 
-let genesis_encoding =
+let initial_encoding : chain_config Data_encoding.With_version.t =
   let open Data_encoding in
-  conv
-    (fun {Genesis.time; block; protocol} -> (time, block, protocol))
-    (fun (time, block, protocol) -> {time; block; protocol})
-    (obj3
-       (req "timestamp" Time.Protocol.encoding)
-       (req "hash" Block_hash.encoding)
-       (req "protocol" Protocol_hash.encoding))
+  With_version.first_version
+    (conv
+       (fun {history_mode; genesis; expiration} ->
+         (history_mode, genesis, expiration))
+       (fun (history_mode, genesis, expiration) ->
+         {history_mode; genesis; expiration})
+       (obj3
+          (req "history_mode" History_mode.encoding)
+          (req "genesis" Genesis.encoding)
+          (varopt "expiration" Time.Protocol.encoding)))
 
 let encoding : chain_config Data_encoding.t =
-  let open Data_encoding in
-  conv
-    (fun {history_mode; genesis; expiration} ->
-      (history_mode, genesis, expiration))
-    (fun (history_mode, genesis, expiration) ->
-      {history_mode; genesis; expiration})
-    (obj3
-       (req "history_mode" History_mode.encoding)
-       (req "genesis" genesis_encoding)
-       (varopt "expiration" Time.Protocol.encoding))
+  Data_encoding.With_version.encoding ~name:"store.config" initial_encoding
 
 let write ~chain_dir chain_config =
+  (* TODO proper error *)
   let config_json = Data_encoding.Json.construct encoding chain_config in
   Lwt_utils_unix.Json.write_file
-    Naming.(chain_dir // configuration_file)
+    Naming.(chain_dir // chain_config_file)
     config_json
-  >>= function
-  | Error err ->
-      Format.kasprintf
-        Lwt.fail_with
-        "error while writing the configuration: %a"
-        Error_monad.pp_print_error
-        err
-  | Ok () ->
-      Lwt.return_unit
 
 let load ~chain_dir =
-  Lwt_utils_unix.Json.read_file Naming.(chain_dir // configuration_file)
-  >>= function
-  | Error err ->
-      Format.kasprintf
-        Lwt.fail_with
-        "Error while reading the configuration: %a"
-        Error_monad.pp_print_error
-        err
-  | Ok c ->
-      Lwt.return (Data_encoding.Json.destruct encoding c)
+  (* TODO proper error *)
+  Lwt_utils_unix.Json.read_file Naming.(chain_dir // chain_config_file)
+  >>=? fun config -> return (Data_encoding.Json.destruct encoding config)

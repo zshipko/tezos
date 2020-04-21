@@ -293,7 +293,7 @@ module Chain : sig
   val history_mode : chain_store -> History_mode.t
 
   (* Must be used with care. Invariant are node handled here *)
-  val set_history_mode : chain_store -> History_mode.t -> unit Lwt.t
+  val set_history_mode : chain_store -> History_mode.t -> unit tzresult Lwt.t
 
   val genesis : chain_store -> Genesis.t
 
