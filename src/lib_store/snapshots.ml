@@ -39,8 +39,7 @@ type error +=
         | `Unknown
         | `Caboose
         | `Genesis
-        | `Not_enough_pred
-        | `Missing_context ];
+        | `Not_enough_pred ];
     }
   | (* TODO *)
       Snapshot_import_failure of string
@@ -109,9 +108,7 @@ let () =
         | `Caboose ->
             "the caboose block is not a valid export point"
         | `Not_enough_pred ->
-            "not enough of the block's predecessors are known"
-        | `Missing_context ->
-            "the block's associated context is missing" ))
+            "not enough of the block's predecessors are known" ))
     (obj2
        (opt "block" Block_hash.encoding)
        (req
@@ -122,8 +119,7 @@ let () =
                ("unknown", `Unknown);
                ("genesis", `Genesis);
                ("caboose", `Genesis);
-               ("not_enough_pred", `Not_enough_pred);
-               ("missing_context", `Missing_context) ])))
+               ("not_enough_pred", `Not_enough_pred) ])))
     (function
       | Invalid_export_block {block; reason} ->
           Some (block, reason)
@@ -510,11 +506,6 @@ let check_export_block_validity chain_store block =
     Compare.Int32.(savepoint_level > block_level)
     (Invalid_export_block {block = Some block_hash; reason = `Pruned})
   >>=? fun () ->
-  (* We also need the predecessor not to be pruned *)
-  fail_when
-    Compare.Int32.(savepoint_level > Int32.pred block_level)
-    (Invalid_export_block {block = Some block_hash; reason = `Pruned_pred})
-  >>=? fun () ->
   Store.Block.read_block chain_store block_hash
   >>=? fun block ->
   Store.Block.read_predecessor_opt chain_store block
@@ -529,9 +520,11 @@ let check_export_block_validity chain_store block =
   (* Make sure that the predecessor's context is known *)
   Store.Block.context_exists chain_store pred_block
   >>= fun pred_context_exists ->
-  fail_unless
-    pred_context_exists
-    (Invalid_export_block {block = Some block_hash; reason = `Missing_context})
+  (* We also need the predecessor not to be pruned *)
+  fail_when
+    Compare.Int32.(
+      savepoint_level > Int32.pred block_level && not pred_context_exists)
+    (Invalid_export_block {block = Some block_hash; reason = `Pruned_pred})
   >>=? fun () ->
   Store.Block.get_block_metadata_opt chain_store block
   >>= (function
@@ -964,7 +957,7 @@ let copy_and_restore_cemented_blocks ~snapshot_cemented_dir ~dst_cemented_dir
   let len = List.length cemented_files in
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Copying cycles: %d/%d" i len)
+      Format.fprintf fmt "Copying cycles: %d/%d (%d)" i len (100 * i / len))
     (fun notify ->
       Lwt_list.iter_s
         (fun file ->
@@ -989,7 +982,12 @@ let copy_and_restore_cemented_blocks ~snapshot_cemented_dir ~dst_cemented_dir
   >>=? fun () ->
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Restoring cycles consistency: %d/%d" i len)
+      Format.fprintf
+        fmt
+        "Restoring cycles consistency: %d/%d (%d)"
+        i
+        len
+        (100 * i / len))
     (fun notify ->
       Cemented_block_store.restore_indexes_consistency
         ~post_step:notify
@@ -1159,6 +1157,7 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
     block_header
   >>=? fun () -> return (block_data, genesis_ctxt_hash, block_validation_result)
 
+(* TODO parallelise in another process *)
 let import ?patch_context ?block:expected_block ~snapshot_dir ~dst_store_dir
     ~dst_context_dir ~user_activated_upgrades
     ~user_activated_protocol_overrides (genesis : Genesis.t) =
@@ -1380,6 +1379,7 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
            assert (!floating_blocks = []) ;
            current_blocks := !floating_blocks ) ;
          Cemented_block_store.cement_blocks
+           ~check_consistency:false
            cemented_store
            ~write_metadata:false
            [Store.Block.repr genesis_block; block]
@@ -1409,6 +1409,7 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
            if is_dawn_of_a_cycle && !has_reached_cemented then (
              (* Cycle is complete, cement it *)
              Cemented_block_store.cement_blocks
+               ~check_consistency:false
                cemented_store
                ~write_metadata:false
                (block :: !current_blocks)

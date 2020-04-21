@@ -36,8 +36,7 @@ type error +=
         | `Unknown
         | `Caboose
         | `Genesis
-        | `Not_enough_pred
-        | `Missing_context ];
+        | `Not_enough_pred ];
     }
   | (* TODO *)
       Snapshot_import_failure of string
