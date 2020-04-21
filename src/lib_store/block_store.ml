@@ -429,7 +429,9 @@ let swap_floating_stores block_store ~new_ro_store =
       Lwt_utils_unix.remove_dir dest_floating_block_index
     else Lwt.return_unit )
     >>= fun () ->
-    Lwt_unix.rename src_floating_block_index dest_floating_block_index
+    ( if Sys.file_exists src_floating_block_index then
+      Lwt_unix.rename src_floating_block_index dest_floating_block_index
+    else Lwt.return_unit )
     >>= fun () ->
     (* Replace blocks file *)
     Lwt_unix.rename src_floating_blocks dest_floating_blocks
