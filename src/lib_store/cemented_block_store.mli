@@ -179,10 +179,14 @@ val get_cemented_block_by_hash :
 
 (** [cemented_blocks cemented_store ~write_metadata chunk] store the
     [chunk] of blocks and write their metadata if the flag
-    [write_metadata] is set. Fails if the blocks in [chunk] are not
-    contiguous. *)
+    [write_metadata] is set. [check_consistency] (default is true) check
+    the blocks in [chunk] are contiguous.  *)
 val cement_blocks :
-  t -> write_metadata:bool -> Block_repr.t list -> unit tzresult Lwt.t
+  ?check_consistency:bool ->
+  t ->
+  write_metadata:bool ->
+  Block_repr.t list ->
+  unit tzresult Lwt.t
 
 (** [trigger_gc cemented_store history_mode] garbage collect metadata
    chunks and/or chunks from [cemented_store] depending on the

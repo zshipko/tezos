@@ -413,8 +413,8 @@ let get_cemented_block_by_hash ~read_metadata (cemented_store : t) hash =
    - If the first block has metadata, metadata are written
      and all blocks are expected to have metadata
 *)
-let cement_blocks (cemented_store : t) ~write_metadata
-    (blocks : Block_repr.t list) =
+let cement_blocks ?(check_consistency = true) (cemented_store : t)
+    ~write_metadata (blocks : Block_repr.t list) =
   let nb_blocks = List.length blocks in
   let preamble_length = nb_blocks * offset_length in
   ( if nb_blocks = 0 then
@@ -426,16 +426,20 @@ let cement_blocks (cemented_store : t) ~write_metadata
   let last_block_level =
     Int32.(add first_block_level (of_int (nb_blocks - 1)))
   in
-  ( match get_highest_cemented_level cemented_store with
-  | None ->
-      Lwt.return_unit
-  | Some highest_cemented_block ->
-      if Compare.Int32.(first_block_level <> Int32.succ highest_cemented_block)
-      then
-        Lwt.fail_invalid_arg
-          "cement_blocks: previously cemented blocks have higher level than \
-           the given blocks"
-      else Lwt.return_unit )
+  ( if check_consistency then
+    match get_highest_cemented_level cemented_store with
+    | None ->
+        Lwt.return_unit
+    | Some highest_cemented_block ->
+        if
+          Compare.Int32.(
+            first_block_level <> Int32.succ highest_cemented_block)
+        then
+          Lwt.fail_invalid_arg
+            "cement_blocks: previously cemented blocks have higher level than \
+             the given blocks"
+        else Lwt.return_unit
+  else Lwt.return_unit )
   >>= fun () ->
   let filename = Format.sprintf "%ld_%ld" first_block_level last_block_level in
   let final_file = Naming.(cemented_store.cemented_blocks_dir // filename) in

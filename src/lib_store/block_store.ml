@@ -309,7 +309,8 @@ let split_cycles blocks =
         = b'_metadata.last_allowed_fork_level))
     blocks
 
-let cement_blocks ~write_metadata block_store blocks =
+let cement_blocks ?(check_consistency = true) ~write_metadata block_store
+    blocks =
   (* No need to lock *)
   let {cemented_store; _} = block_store in
   let are_blocks_consistent = check_blocks_consistency blocks in
@@ -320,7 +321,11 @@ let cement_blocks ~write_metadata block_store blocks =
        block."
   else Lwt.return_unit )
   >>= fun () ->
-  Cemented_block_store.cement_blocks cemented_store ~write_metadata blocks
+  Cemented_block_store.cement_blocks
+    ~check_consistency
+    cemented_store
+    ~write_metadata
+    blocks
 
 let store_metadata_chunk block_store blocks =
   Cemented_block_store.cement_blocks_metadata block_store.cemented_store blocks
