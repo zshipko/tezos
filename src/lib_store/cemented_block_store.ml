@@ -271,7 +271,7 @@ let read_block_metadata ?location cemented_store block_level =
       let metadata_file =
         Naming.(
           cemented_store.cemented_blocks_metadata_dir
-          // cemented_metadata_file filename)
+          // cemented_metadata_file ~cemented_filename:filename)
       in
       if not (Sys.file_exists metadata_file) then None
       else
@@ -306,7 +306,9 @@ let cement_blocks_metadata cemented_store blocks =
       failwith "cement_blocks_metadata: given blocks are not cemented"
   | Some {filename; _} ->
       let metadata_file =
-        Naming.(cemented_metadata_dir // cemented_metadata_file filename)
+        Naming.(
+          cemented_metadata_dir
+          // cemented_metadata_file ~cemented_filename:filename)
       in
       if List.exists (fun block -> Block_repr.metadata block <> None) blocks
       then (
@@ -529,7 +531,7 @@ let trigger_gc (cemented_store : t) = function
         let metadata_file =
           Naming.(
             cemented_store.cemented_blocks_metadata_dir
-            // cemented_metadata_file file_to_prune.filename)
+            // cemented_metadata_file ~cemented_filename:file_to_prune.filename)
         in
         Lwt.catch
           (fun () -> Lwt_unix.unlink metadata_file)
@@ -564,7 +566,7 @@ let trigger_gc (cemented_store : t) = function
             let metadata_file =
               Naming.(
                 cemented_store.cemented_blocks_metadata_dir
-                // cemented_metadata_file filename)
+                // cemented_metadata_file ~cemented_filename:filename)
             in
             Lwt.catch
               (fun () -> Lwt_unix.unlink metadata_file)

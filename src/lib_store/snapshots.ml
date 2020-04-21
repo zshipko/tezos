@@ -404,7 +404,7 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
 (* Export the protocol table (info regarding the protocol transitions) as well
    as all the stored protocols *)
 let export_protocols protocol_levels ~src_dir ~dst_dir =
-  let protocol_tbl_filename = Naming.Snapshot.protocols_table dst_dir in
+  let protocol_tbl_filename = Naming.(dst_dir // Snapshot.protocols_table) in
   Lwt_unix.openfile
     protocol_tbl_filename
     Unix.[O_CREAT; O_TRUNC; O_WRONLY]
@@ -471,10 +471,10 @@ let create_snapshot_dir ~snapshot_dir =
   >>=? fun () ->
   Lwt_unix.mkdir snapshot_dir 0o755
   >>= fun () ->
-  let dst_cemented_dir = Naming.Snapshot.cemented_blocks snapshot_dir in
+  let dst_cemented_dir = Naming.(snapshot_dir // Snapshot.cemented_blocks) in
   Lwt_unix.mkdir dst_cemented_dir 0o755
   >>= fun () ->
-  let dst_protocol_dir = Naming.Snapshot.protocols snapshot_dir in
+  let dst_protocol_dir = Naming.(snapshot_dir // Snapshot.protocols) in
   Lwt_unix.mkdir dst_protocol_dir 0o755
   >>= fun () -> return (dst_cemented_dir, dst_protocol_dir)
 
@@ -715,7 +715,7 @@ let dump_context context_index ~snapshot_dir ~pred_block ~export_block =
   Context.dump_context
     context_index
     block_data
-    ~context_file_path:(Naming.Snapshot.context snapshot_dir)
+    ~context_file_path:Naming.(snapshot_dir // Snapshot.context)
 
 let check_history_mode chain_store ~rolling =
   let open History_mode in
@@ -735,7 +735,7 @@ let export_floating_block_stream ~snapshot_dir floating_block_stream =
     (fun notify ->
       (* The target block is in the middle of a cemented cycle, the
           cycle prefix becomes the floating store. *)
-      let floating_file = Naming.Snapshot.floating_blocks snapshot_dir in
+      let floating_file = Naming.(snapshot_dir // Snapshot.floating_blocks) in
       Lwt_unix.openfile floating_file Unix.[O_CREAT; O_TRUNC; O_WRONLY] 0o444
       >>= fun fd ->
       Lwt_stream.iter_s
@@ -844,7 +844,8 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
             extra_floating_blocks ))
       (fun exn ->
         Lwt_utils_unix.safe_close ro_fd
-        >>= fun () -> Lwt_utils_unix.safe_close rw_fd >>= fun () -> Lwt.fail exn)
+        >>= fun () ->
+        Lwt_utils_unix.safe_close rw_fd >>= fun () -> Lwt.fail exn)
   in
   Store.open_for_snapshot_export
     ~store_dir
@@ -859,7 +860,8 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
              (floating_ro_fd, floating_rw_fd),
              extra_floating_blocks ) ->
   let finalizer () =
-    Lwt_utils_unix.safe_close floating_ro_fd >>= fun () -> Lwt_utils_unix.safe_close floating_rw_fd
+    Lwt_utils_unix.safe_close floating_ro_fd
+    >>= fun () -> Lwt_utils_unix.safe_close floating_rw_fd
   in
   copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir cemented_table
   >>=? fun () ->
@@ -932,7 +934,7 @@ let export ?(rolling = false) ?block ~store_dir ~context_dir ~chain_name
       }
       : Snapshot_version.metadata )
   in
-  write_snapshot_metadata metadata Naming.Snapshot.(metadata snapshot_dir)
+  write_snapshot_metadata metadata Naming.(snapshot_dir // Snapshot.metadata)
   >>= fun () ->
   lwt_emit (Export_success snapshot_dir) >>= fun () -> return_unit
 
@@ -1018,14 +1020,16 @@ let read_floating_blocks ~genesis_hash ~floating_blocks_file =
   let reading_thread =
     Lwt.finalize
       (fun () -> loop eof_offset)
-      (fun () -> bounded_push#close ; Lwt_utils_unix.safe_close fd)
+      (fun () ->
+        bounded_push#close ;
+        Lwt_utils_unix.safe_close fd)
   in
   return (reading_thread, stream)
 
 let copy_protocols ~snapshot_protocol_dir ~dst_protocol_dir =
   (* Import protocol table *)
   let protocol_tbl_filename =
-    Naming.Snapshot.protocols_table snapshot_protocol_dir
+    Naming.(snapshot_protocol_dir // Snapshot.protocols_table)
   in
   Lwt_utils_unix.read_file protocol_tbl_filename
   >>= fun table_bytes ->
@@ -1125,7 +1129,7 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
   Context.restore_context
     context_index
     ?expected_block
-    ~context_file_path:Naming.Snapshot.(context snapshot_dir)
+    ~context_file_path:Naming.(snapshot_dir // Snapshot.context)
     ~metadata:snapshot_metadata
   >>=? fun ({block_header; operations; predecessor_header} as block_data) ->
   let pred_context_hash = predecessor_header.shell.context in
@@ -1159,7 +1163,7 @@ let import ?patch_context ?block:expected_block ~snapshot_dir ~dst_store_dir
     ~dst_context_dir ~user_activated_upgrades
     ~user_activated_protocol_overrides (genesis : Genesis.t) =
   let chain_id = Chain_id.of_block_hash genesis.block in
-  read_snapshot_metadata (Naming.Snapshot.metadata snapshot_dir)
+  read_snapshot_metadata Naming.(snapshot_dir // Snapshot.metadata)
   >>= fun snapshot_metadata ->
   import_log_notice ~snapshot_metadata snapshot_dir expected_block
   >>= fun () ->
@@ -1188,16 +1192,18 @@ let import ?patch_context ?block:expected_block ~snapshot_dir ~dst_store_dir
   (* Restore store *)
   (* Restore protocols *)
   copy_protocols
-    ~snapshot_protocol_dir:Naming.Snapshot.(protocols snapshot_dir)
+    ~snapshot_protocol_dir:Naming.(snapshot_dir // Snapshot.(protocols))
     ~dst_protocol_dir
   >>=? fun protocol_levels ->
   (* Restore cemented dir *)
   copy_and_restore_cemented_blocks
-    ~snapshot_cemented_dir:(Naming.Snapshot.cemented_blocks snapshot_dir)
+    ~snapshot_cemented_dir:Naming.(snapshot_dir // Snapshot.cemented_blocks)
     ~dst_cemented_dir
     ~genesis_hash:genesis.block
   >>=? fun () ->
-  let floating_blocks_file = Naming.Snapshot.floating_blocks snapshot_dir in
+  let floating_blocks_file =
+    Naming.(snapshot_dir // Snapshot.floating_blocks)
+  in
   read_floating_blocks ~genesis_hash:genesis.block ~floating_blocks_file
   >>=? fun (reading_thread, floating_blocks_stream) ->
   let {Block_validation.validation_store; block_metadata; ops_metadata; _} =
@@ -1258,7 +1264,7 @@ let import ?patch_context ?block:expected_block ~snapshot_dir ~dst_store_dir
   lwt_emit (Import_success snapshot_dir) >>= fun () -> return_unit
 
 let snapshot_info ~snapshot_dir =
-  read_snapshot_metadata (Naming.Snapshot.metadata snapshot_dir)
+  read_snapshot_metadata Naming.(snapshot_dir // Snapshot.metadata)
   >>= fun metadata ->
   Format.printf "@[%a@]@." Snapshot_version.metadata_pp metadata ;
   Lwt.return_unit

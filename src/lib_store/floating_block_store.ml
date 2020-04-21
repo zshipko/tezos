@@ -23,11 +23,6 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-(*
-   Index : Hash -> <offset> x <length> x Hash^{12}
-   File: <block_repr>*
-*)
-
 type floating_kind = Naming.floating_kind = RO | RW | RW_TMP | RO_TMP
 
 type t = {

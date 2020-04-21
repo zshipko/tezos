@@ -25,14 +25,12 @@
 
 let ( // ) = Filename.concat
 
-let globals = "globals"
-
-let protocol_store_directory = "protocols"
-
 let chain_store chain_id =
   Format.asprintf "chain_%a" Chain_id.pp_short chain_id
 
 let configuration_file = "config.json"
+
+let protocol_store_directory = "protocols"
 
 let protocol_file hash = Protocol_hash.to_b58check hash
 
@@ -58,13 +56,11 @@ module Chain_data = struct
   let forked_chains = "forked_chains"
 end
 
-let chain_globals = "globals"
-
 let cemented_blocks_directory = "cemented"
 
 let cemented_blocks_metadata_directory = "metadata"
 
-let cemented_metadata_file cemented_filename = cemented_filename ^ ".zip"
+let cemented_metadata_file ~cemented_filename = cemented_filename ^ ".zip"
 
 let cemented_block_level_index_directory = "level_index"
 
@@ -94,24 +90,16 @@ let floating_blocks = function
   | RW_TMP ->
       "rw_tmp_floating_blocks"
 
-let consistent_rw_blocks = "consistent_rw_blocks"
-
 module Snapshot = struct
-  let context dir = dir // "context"
+  let context = "context"
 
-  let cemented_blocks dir = dir // "cemented_blocks"
+  let cemented_blocks = "cemented_blocks"
 
-  let cemented_level_index dir =
-    dir // "cemented_blocks" // cemented_block_level_index_directory
+  let floating_blocks = "floating_blocks"
 
-  let cemented_hash_index dir =
-    dir // "cemented_blocks" // cemented_block_hash_index_directory
+  let protocols = "protocols"
 
-  let floating_blocks dir = dir // "floating_blocks"
+  let protocols_table = "protocols_index"
 
-  let protocols dir = dir // "protocols"
-
-  let protocols_table dir = dir // "protocols_index"
-
-  let metadata dir = dir // "metadata.json"
+  let metadata = "metadata.json"
 end
