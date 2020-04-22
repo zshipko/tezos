@@ -518,6 +518,7 @@ val restore_from_legacy_snapshot :
   unit tzresult Lwt.t
 
 val cement_blocks_chunk :
+  check_consistency:bool ->
   chain_store ->
   Block_repr.t list ->
   write_metadata:bool ->

@@ -692,6 +692,7 @@ let import_cemented ?(display_msg = "") lmdb_chain_store chain_store
               (Block_repr.predecessor block)
             >>=? fun genesis ->
             Store.cement_blocks_chunk
+              ~check_consistency:false
               chain_store
               [genesis; block]
               ~write_metadata:with_metadata
@@ -703,6 +704,7 @@ let import_cemented ?(display_msg = "") lmdb_chain_store chain_store
           Hardcoded.may_update_checkpoint ~cycle_length (List.length new_acc)
         then
           Store.cement_blocks_chunk
+            ~check_consistency:false
             chain_store
             new_acc
             ~write_metadata:with_metadata

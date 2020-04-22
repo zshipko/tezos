@@ -2529,8 +2529,12 @@ let allow_testchains {allow_testchains; _} = allow_testchains
 let global_block_watcher {global_block_watcher; _} =
   Lwt_watcher.create_stream global_block_watcher
 
-let cement_blocks_chunk chain_store blocks ~write_metadata =
-  Block_store.cement_blocks ~write_metadata chain_store.block_store blocks
+let cement_blocks_chunk ~check_consistency chain_store blocks ~write_metadata =
+  Block_store.cement_blocks
+    ~check_consistency
+    ~write_metadata
+    chain_store.block_store
+    blocks
 
 (****************** For testing purposes only *****************)
 
