@@ -290,6 +290,8 @@ module Chain : sig
 
   val chain_id : chain_store -> Chain_id.t
 
+  val chain_dir : chain_store -> string
+
   val history_mode : chain_store -> History_mode.t
 
   (* Must be used with care. Invariant are node handled here *)

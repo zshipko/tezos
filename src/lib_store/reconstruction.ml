@@ -211,7 +211,8 @@ let reconstruct_cemented chain_store context_index ~user_activated_upgrades
   let block_store = Store.unsafe_get_block_store chain_store in
   let cemented_cycles =
     Array.to_list
-      (Cemented_block_store.cemented_blocks_files block_store.cemented_store)
+      (Cemented_block_store.cemented_blocks_files
+         (Block_store.cemented_block_store block_store))
   in
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun ppf i ->
@@ -232,13 +233,10 @@ let reconstruct_floating chain_store context_index ~user_activated_upgrades
     ~user_activated_protocol_overrides =
   let chain_id = Store.Chain.chain_id chain_store in
   let block_store = Store.unsafe_get_block_store chain_store in
-  let chain_dir = block_store.chain_dir in
+  let chain_dir = Store.Chain.chain_dir chain_store in
   Floating_block_store.init ~chain_dir ~readonly:false RO_TMP
   >>= fun new_ro_store ->
-  let floating_stores =
-    [ List.hd block_store.ro_floating_block_stores;
-      block_store.rw_floating_block_store ]
-  in
+  let floating_stores = Block_store.floating_block_stores block_store in
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun ppf i ->
       Format.fprintf ppf "Reconstructing floating blocks: %i" i)
@@ -252,7 +250,7 @@ let reconstruct_floating chain_store context_index ~user_activated_upgrades
                  avoid the cache mechanism which stores blocks without metadata *)
               let metadata_opt =
                 Cemented_block_store.read_block_metadata
-                  block_store.cemented_store
+                  (Block_store.cemented_block_store block_store)
                   level
               in
               ( match metadata_opt with
@@ -283,11 +281,11 @@ let reconstruct_floating chain_store context_index ~user_activated_upgrades
           >>=? fun () -> return_unit)
         floating_stores)
   >>=? fun () ->
-  Floating_block_store.init ~chain_dir ~readonly:false RW_TMP
-  >>= fun new_rw_store ->
-  block_store.rw_floating_block_store <- new_rw_store ;
-  Block_store.swap_floating_stores block_store ~new_ro_store
-  >>= fun () -> return_unit
+  Block_store.swap_floating_store
+    block_store
+    ~src:new_ro_store
+    ~dst_kind:Floating_block_store.RO
+  >>=? fun () -> return_unit
 
 (* Loads the list of hashes to reconstruct *)
 let gather_history chain_store low_limit block_hash acc =
@@ -314,7 +312,8 @@ let check_history_mode_compatibility chain_store =
 let get_lowest_cemented_block_with_metadata chain_store offset =
   let block_store = Store.unsafe_get_block_store chain_store in
   let cemented_cycles =
-    Cemented_block_store.cemented_blocks_files block_store.cemented_store
+    Cemented_block_store.cemented_blocks_files
+      (Block_store.cemented_block_store block_store)
   in
   (* FIXME keep the array *)
   let cemented_cycles = Array.to_list cemented_cycles |> List.rev in

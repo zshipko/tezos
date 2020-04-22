@@ -23,8 +23,7 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-open Tezos_protocol_alpha
-open Protocol
+open Tezos_protocol_alpha.Protocol
 open Alpha_context
 open Tezos_storage
 open Tezos_shell_context
@@ -263,7 +262,7 @@ module Forge = struct
         fitness;
         operations_hash;
         proto_level = 0;
-        validation_passes = List.length Protocol.Main.validation_passes;
+        validation_passes = List.length Main.validation_passes;
         context = Context_hash.zero (* to update later *);
       }
 

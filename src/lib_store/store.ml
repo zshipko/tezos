@@ -125,7 +125,7 @@ let read_ancestor_hash {block_store; _} ~distance hash =
 
 let get_highest_cemented_level chain_store =
   Cemented_block_store.get_highest_cemented_level
-    chain_store.block_store.Block_store.cemented_store
+    (Block_store.cemented_block_store chain_store.block_store)
 
 (* Will that block be compatible with the current store ? *)
 let locked_is_acceptable_block chain_store chain_state (hash, level) =
@@ -650,6 +650,8 @@ module Chain = struct
 
   let chain_id chain_store = chain_store.chain_id
 
+  let chain_dir chain_store = chain_store.chain_dir
+
   let history_mode chain_store = history_mode chain_store
 
   let set_history_mode chain_store history_mode =
@@ -795,7 +797,7 @@ module Chain = struct
         (* New savepoint = min min_level_to_preserve (min new lowest cemented block) *)
         let table =
           Cemented_block_store.cemented_blocks_files
-            locked_chain_store.block_store.Block_store.cemented_store
+            (Block_store.cemented_block_store locked_chain_store.block_store)
         in
         if
           Compare.Int32.(
@@ -959,7 +961,7 @@ module Chain = struct
         >>=? fun min_block_to_preserve ->
         let table =
           Cemented_block_store.cemented_blocks_files
-            chain_store.block_store.Block_store.cemented_store
+            (Block_store.cemented_block_store chain_store.block_store)
         in
         if
           Compare.Int32.(

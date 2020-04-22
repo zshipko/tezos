@@ -43,6 +43,12 @@ type t = block_store
 
 type key = Hash of (Block_hash.t * int)
 
+let cemented_block_store {cemented_store; _} = cemented_store
+
+let floating_block_stores {ro_floating_block_stores; rw_floating_block_store; _}
+    =
+  List.rev (rw_floating_block_store :: ro_floating_block_stores)
+
 (** [global_predecessor_lookup chain_block_store hash nth] retrieves the
     2^[nth] predecessor's hash from the block with corresponding [hash]
     by checking all stores iteratively.
@@ -352,6 +358,13 @@ let retrieve_n_predecessors floating_stores block n =
   in
   loop [] block n
 
+let await_merging block_store =
+  match block_store.merging_thread with
+  | None ->
+      return_unit
+  | Some (_, th) ->
+      th
+
 (* TODO Document invariants *)
 let update_floating_stores ~ro_store ~rw_store ~new_store ~from_block ~to_block
     ~nb_blocks_to_preserve =
@@ -409,53 +422,76 @@ let update_floating_stores ~ro_store ~rw_store ~new_store ~from_block ~to_block
     [ro_store; rw_store]
   >>=? fun () -> return blocks_to_cement
 
-let swap_floating_stores block_store ~new_ro_store =
-  let chain_dir = block_store.chain_dir in
-  let swap floating_store new_kind =
-    let open Naming in
-    let src_floating_block_index =
-      chain_dir
-      // floating_block_index (Floating_block_store.kind floating_store)
-    in
-    let src_floating_blocks =
-      chain_dir // floating_blocks (Floating_block_store.kind floating_store)
-    in
-    let dest_floating_block_index =
-      chain_dir // floating_block_index new_kind
-    in
-    let dest_floating_blocks = chain_dir // floating_blocks new_kind in
-    (* Replace index *)
-    ( if Sys.is_directory dest_floating_block_index then
-      Lwt_utils_unix.remove_dir dest_floating_block_index
-    else Lwt.return_unit )
-    >>= fun () ->
-    ( if Sys.file_exists src_floating_block_index then
-      Lwt_unix.rename src_floating_block_index dest_floating_block_index
-    else Lwt.return_unit )
-    >>= fun () ->
-    (* Replace blocks file *)
-    Lwt_unix.rename src_floating_blocks dest_floating_blocks
-  in
-  (* Prepare the swap: close all floating stores. *)
-  Lwt_list.iter_p
-    Floating_block_store.close
-    ( new_ro_store :: block_store.rw_floating_block_store
+let find_floating_store_by_kind block_store kind =
+  List.find_opt
+    (fun floating_store -> kind = Floating_block_store.kind floating_store)
+    ( block_store.rw_floating_block_store
     :: block_store.ro_floating_block_stores )
+
+let swap_floating_store block_store ~src:floating_store ~dst_kind =
+  let src_kind = Floating_block_store.kind floating_store in
+  fail_when
+    (src_kind = dst_kind)
+    (Exn
+       (Invalid_argument
+          "swap_floating_store: try swapping floating store of the same kind"))
+  >>=? fun () ->
+  (* If the destination floating store exists, try closing it. *)
+  ( match find_floating_store_by_kind block_store dst_kind with
+  | Some floating_store ->
+      Floating_block_store.close floating_store >>= return
+  | None ->
+      return_unit )
+  >>=? fun () ->
+  (* ... also close the src floating store *)
+  Floating_block_store.close floating_store
   >>= fun () ->
+  let open Naming in
+  (* Replace index *)
+  let dst_floating_block_index_dir =
+    block_store.chain_dir // floating_block_index dst_kind
+  in
+  let dst_floating_blocks =
+    block_store.chain_dir // floating_blocks dst_kind
+  in
+  (* Remove old index *)
+  ( if Sys.is_directory dst_floating_block_index_dir then
+    Lwt_utils_unix.remove_dir dst_floating_block_index_dir
+  else Lwt.return_unit )
+  >>= fun () ->
+  let src_floating_block_index_dir =
+    block_store.chain_dir // floating_block_index src_kind
+  in
+  let src_floating_blocks =
+    block_store.chain_dir // floating_blocks src_kind
+  in
+  ( if Sys.file_exists src_floating_block_index_dir then
+    Lwt_unix.rename src_floating_block_index_dir dst_floating_block_index_dir
+  else Lwt.return_unit )
+  >>= fun () ->
+  (* Replace blocks file *)
+  Lwt_unix.rename src_floating_blocks dst_floating_blocks
+  >>= fun () -> return_unit
+
+let swap_all_floating_stores block_store ~new_ro_store =
   (* (atomically?) Promote [new_ro] to [ro] *)
-  swap new_ro_store Naming.RO
-  >>= fun () ->
+  swap_floating_store block_store ~src:new_ro_store ~dst_kind:Naming.RO
+  >>=? fun () ->
   (* ...and [new_rw] to [rw]  *)
-  swap block_store.rw_floating_block_store Naming.RW
-  >>= fun () ->
+  swap_floating_store
+    block_store
+    ~src:block_store.rw_floating_block_store
+    ~dst_kind:Naming.RW
+  >>=? fun () ->
   (* Load the swapped stores *)
+  let chain_dir = block_store.chain_dir in
   Floating_block_store.init ~chain_dir ~readonly:false RO
   >>= fun ro ->
   block_store.ro_floating_block_stores <- [ro] ;
   Floating_block_store.init ~chain_dir ~readonly:false RW
   >>= fun rw ->
   block_store.rw_floating_block_store <- rw ;
-  Lwt.return_unit
+  return_unit
 
 let try_remove_temporary_stores block_store =
   let chain_dir = block_store.chain_dir in
@@ -474,13 +510,6 @@ let try_remove_temporary_stores block_store =
   Lwt.catch
     (fun () -> Lwt_utils_unix.remove_dir rw_index_tmp)
     (fun _ -> Lwt.return_unit)
-
-let await_merging block_store =
-  match block_store.merging_thread with
-  | None ->
-      return_unit
-  | Some (_, th) ->
-      th
 
 let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
     ~nb_blocks_to_preserve ~history_mode ~from_block ~to_block () =
@@ -539,9 +568,9 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
         >>=? fun () ->
         (* Swapping stores: hard-lock *)
         Lwt_idle_waiter.force_idle block_store.merge_scheduler (fun () ->
-            swap_floating_stores block_store ~new_ro_store
-            >>= fun () ->
-            (* Let the clean-up unset the [merging_thread] *)
+            swap_all_floating_stores block_store ~new_ro_store
+            >>=? fun () ->
+            (* The clean-up will unset the [merging_thread] *)
             return_unit)
       in
       (* Clean-up on cancel/exn *)
