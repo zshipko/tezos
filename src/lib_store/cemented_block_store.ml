@@ -92,6 +92,9 @@ let create ~cemented_blocks_dir =
   in
   Lwt.return cemented_store
 
+let compare_files {start_level; _} {start_level = start_level'; _} =
+  Compare.Int32.compare start_level start_level'
+
 let load_table ~cemented_blocks_dir =
   fail_unless
     ( Sys.file_exists cemented_blocks_dir
@@ -126,10 +129,7 @@ let load_table ~cemented_blocks_dir =
   Lwt.finalize (fun () -> loop []) (fun () -> Lwt_unix.closedir dir_handle)
   >>= fun cemented_files_list ->
   let cemented_files_array = Array.of_list cemented_files_list in
-  Array.sort
-    (fun {start_level; _} {start_level = start_level'; _} ->
-      Compare.Int32.compare start_level start_level')
-    cemented_files_array ;
+  Array.sort compare_files cemented_files_array ;
   return cemented_files_array
 
 let load ~cemented_blocks_dir =
@@ -512,10 +512,15 @@ let cement_blocks ?(check_consistency = true) (cemented_store : t)
   let cemented_block_interval =
     {start_level = first_block_level; end_level = last_block_level; filename}
   in
-  cemented_store.cemented_blocks_files <-
+  let new_array =
     Array.append
       cemented_store.cemented_blocks_files
-      [|cemented_block_interval|] ;
+      [|cemented_block_interval|]
+  in
+  (* If the cementing is done arbitrarily, we need to make sure the
+     files remain sorted. *)
+  if not check_consistency then Array.sort compare_files new_array ;
+  cemented_store.cemented_blocks_files <- new_array ;
   (* Compress and write the metadatas *)
   if write_metadata then cement_blocks_metadata cemented_store blocks
   else return_unit
