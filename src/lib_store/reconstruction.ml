@@ -178,7 +178,7 @@ let reconstruct_chunks ~notify chain_store context_index
       >>= fun () ->
       let new_metadata_chunk = (block, metadata) :: metadata_chunk in
       ( if lafl < metadata.last_allowed_fork_level then
-        (* New cycle: store the chunck and continue with an empty one*)
+        (* New cycle: store the chunk and continue with an empty one*)
         Store.Block.store_block_metadata
           chain_store
           (List.rev new_metadata_chunk)
@@ -406,4 +406,6 @@ let reconstruct ?patch_context ~store_root ~context_root ~(genesis : Genesis.t)
     ~user_activated_protocol_overrides
   >>=? fun () ->
   restore_constants chain_store genesis.block
-  >>=? fun () -> lwt_emit Reconstruct_success >>= fun () -> return_unit
+  >>=? fun () ->
+  lwt_emit Reconstruct_success
+  >>= fun () -> Store.close_store store >>=? fun () -> return_unit

@@ -121,7 +121,7 @@ let genesis chain_store = chain_store.chain_config.genesis
 let history_mode chain_store = chain_store.chain_config.history_mode
 
 let read_ancestor_hash {block_store; _} ~distance hash =
-  Block_store.get_predecessor block_store hash distance
+  Block_store.get_hash block_store (Block (hash, distance))
 
 let get_highest_cemented_level chain_store =
   Cemented_block_store.get_highest_cemented_level
@@ -133,7 +133,7 @@ let locked_is_acceptable_block chain_store chain_state (hash, level) =
   >>= fun current_head ->
   Block_store.read_block_metadata
     chain_store.block_store
-    (Hash (Block_repr.hash current_head, 0))
+    (Block (Block_repr.hash current_head, 0))
   >>= function
   | None ->
       assert false
@@ -196,7 +196,7 @@ module Block = struct
   (* I/O operations *)
 
   let is_known_valid {block_store; _} hash =
-    Block_store.(is_known block_store (Hash (hash, 0)))
+    Block_store.(mem block_store (Block (hash, 0)))
 
   let is_known_invalid {chain_state; _} hash =
     Shared.use chain_state (fun {invalid_blocks; _} ->
@@ -230,7 +230,7 @@ module Block = struct
     Block_store.read_block
       ~read_metadata:false
       block_store
-      (Hash (hash, distance))
+      (Block (hash, distance))
     >>= function
     | None ->
         (* TODO lift the error to block_store *)
@@ -241,7 +241,7 @@ module Block = struct
   let read_block_metadata ?(distance = 0) chain_store hash =
     Block_store.read_block_metadata
       chain_store.block_store
-      (Hash (hash, distance))
+      (Block (hash, distance))
 
   let get_block_metadata_opt chain_store block =
     match Block_repr.metadata block with
@@ -250,7 +250,7 @@ module Block = struct
     | None -> (
         Block_store.read_block_metadata
           chain_store.block_store
-          (Hash (block.hash, 0))
+          (Block (block.hash, 0))
         >>= function
         | Some metadata ->
             block.metadata <- Some metadata ;
@@ -267,14 +267,16 @@ module Block = struct
     | None ->
         fail (Store_errors.Block_metadata_not_found (Block_repr.hash block))
 
-  (* Pas bon *)
+  (* TODO: remove this *)
   let store_block_metadata chain_store chunk =
     Lwt_list.map_s
       (fun ((block : t), metadata) ->
         Lwt.return {block with metadata = Some metadata})
       chunk
     >>= fun blocks ->
-    Block_store.store_metadata_chunk chain_store.block_store blocks
+    Cemented_block_store.cement_blocks_metadata
+      (Block_store.cemented_block_store chain_store.block_store)
+      blocks
 
   let read_block_opt chain_store ?(distance = 0) hash =
     (* TODO: Make sure the checkpoint is still reachable *)
@@ -630,7 +632,7 @@ end
  *       >>= fun written_head ->
  *       (\* Hypothesis: the head is known in block_store *\)
  *       let head_is_known =
- *         Block_store.is_known block_store (Hash (written_head.hash, 0))
+ *         Block_store.is_known block_store (Block (written_head.hash, 0))
  *       in
  *       assert head_is_known ;
  *       (\* Removing alternate heads will make the store eventually consistent *\)
@@ -2269,7 +2271,7 @@ let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
   let open Protocol_levels in
   iter_s
     (fun (_, {block = (bh, _); protocol; commit_info = commit_info_opt}) ->
-      Block_store.read_block block_store ~read_metadata:false (Hash (bh, 0))
+      Block_store.read_block block_store ~read_metadata:false (Block (bh, 0))
       >>= fun block_opt ->
       match (block_opt, commit_info_opt) with
       | (None, _) ->
@@ -2421,7 +2423,7 @@ let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
       Block_store.read_block
         block_store
         ~read_metadata:false
-        (Hash (Block_repr.hash new_head_with_metadata, distance))
+        (Block (Block_repr.hash new_head_with_metadata, distance))
       >>= fun block_opt ->
       match (block_opt, commit_info_opt) with
       | (None, _) ->

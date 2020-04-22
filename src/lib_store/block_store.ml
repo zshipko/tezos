@@ -41,7 +41,7 @@ type block_store = {
 
 type t = block_store
 
-type key = Hash of (Block_hash.t * int)
+type key = Block of (Block_hash.t * int)
 
 let cemented_block_store {cemented_store; _} = cemented_store
 
@@ -126,10 +126,10 @@ let compute_predecessors block_store block =
     loop [predecessor] predecessor 1
     >>= fun rev_preds -> Lwt.return (List.rev rev_preds)
 
-(** [get_predecessor chain_store hash distance] retrieves the
+(** [get_hash chain_store key] retrieves the
     block which is at [distance] from the block with corresponding [hash]
     by every store iteratively *)
-let get_predecessor block_store block_hash distance =
+let get_hash block_store (Block (block_hash, offset)) =
   Lwt_idle_waiter.task block_store.merge_scheduler (fun () ->
       let closest_power_two_and_rest n =
         if n < 0 then invalid_arg "negative argument"
@@ -141,18 +141,14 @@ let get_predecessor block_store block_hash distance =
           loop 0 n 0
       in
       (* actual predecessor function *)
-      if distance = 0 then Lwt.return_some block_hash
-      else if distance < 0 then
-        Format.kasprintf
-          Stdlib.failwith
-          "nth_predecessor: distance = %d"
-          distance
+      if offset = 0 then Lwt.return_some block_hash
+      else if offset < 0 then
+        Format.kasprintf Stdlib.failwith "nth_predecessor: offset = %d" offset
       else
-        let rec loop block_hash distance =
-          if distance = 1 then
-            global_predecessor_lookup block_store block_hash 0
+        let rec loop block_hash offset =
+          if offset = 1 then global_predecessor_lookup block_store block_hash 0
           else
-            let (power, rest) = closest_power_two_and_rest distance in
+            let (power, rest) = closest_power_two_and_rest offset in
             let (power, rest) =
               if power < Floating_block_index.Block_info.max_predecessors then
                 (power, rest)
@@ -160,7 +156,7 @@ let get_predecessor block_store block_hash distance =
                 let power =
                   Floating_block_index.Block_info.max_predecessors - 1
                 in
-                let rest = distance - (1 lsl power) in
+                let rest = offset - (1 lsl power) in
                 (power, rest)
             in
             global_predecessor_lookup block_store block_hash power
@@ -173,99 +169,93 @@ let get_predecessor block_store block_hash distance =
                 else loop pred rest
           (* need to jump further back *)
         in
-        loop block_hash distance)
+        loop block_hash offset)
 
-let is_known block_store key_kind =
+let mem block_store key =
   Lwt_idle_waiter.task block_store.merge_scheduler (fun () ->
-      match key_kind with
-      | Hash (hash, offset) -> (
-          get_predecessor block_store hash offset
-          >>= function
-          | None ->
-              Lwt.return_false
-          | Some predecessor_hash ->
-              Lwt_list.exists_s
-                (fun store -> Floating_block_store.mem store predecessor_hash)
-                ( block_store.rw_floating_block_store
-                :: block_store.ro_floating_block_stores )
-              >>= fun is_known ->
-              Lwt.return
-                ( is_known
-                || Cemented_block_store.is_cemented
-                     block_store.cemented_store
-                     predecessor_hash ) ))
+      get_hash block_store key
+      >>= function
+      | None ->
+          Lwt.return_false
+      | Some predecessor_hash ->
+          Lwt_list.exists_s
+            (fun store -> Floating_block_store.mem store predecessor_hash)
+            ( block_store.rw_floating_block_store
+            :: block_store.ro_floating_block_stores )
+          >>= fun is_known ->
+          Lwt.return
+            ( is_known
+            || Cemented_block_store.is_cemented
+                 block_store.cemented_store
+                 predecessor_hash ))
 
 let read_block ~read_metadata block_store key_kind =
   Lwt_idle_waiter.task block_store.merge_scheduler (fun () ->
-      match key_kind with
-      | Hash (hash, offset) -> (
-          (* Resolve the hash *)
-          get_predecessor block_store hash offset
-          >>= function
-          | None ->
-              Lwt.return_none
-          | Some adjusted_hash ->
-              if Block_hash.equal block_store.genesis_block.hash adjusted_hash
-              then Lwt.return_some block_store.genesis_block
-              else
-                let fetch_block adjusted_hash =
-                  (* First look in the floating stores *)
-                  Lwt_utils.find_map_s
-                    (fun store ->
-                      Floating_block_store.read_block store adjusted_hash)
-                    ( block_store.rw_floating_block_store
-                    :: block_store.ro_floating_block_stores )
-                  >>= function
-                  | Some block ->
-                      Lwt.return_some block
-                  | None ->
-                      (* Lastly, look in the cemented blocks *)
-                      Cemented_block_store.get_cemented_block_by_hash
-                        ~read_metadata
-                        block_store.cemented_store
-                        adjusted_hash
-                in
-                Block_cache.get_opt_lwt
-                  block_store.block_cache
-                  fetch_block
-                  adjusted_hash ))
+      (* Resolve the hash *)
+      get_hash block_store key_kind
+      >>= function
+      | None ->
+          Lwt.return_none
+      | Some adjusted_hash ->
+          if Block_hash.equal block_store.genesis_block.hash adjusted_hash then
+            Lwt.return_some block_store.genesis_block
+          else
+            let fetch_block adjusted_hash =
+              (* First look in the floating stores *)
+              Lwt_utils.find_map_s
+                (fun store ->
+                  Floating_block_store.read_block store adjusted_hash)
+                ( block_store.rw_floating_block_store
+                :: block_store.ro_floating_block_stores )
+              >>= function
+              | Some block ->
+                  Lwt.return_some block
+              | None ->
+                  (* Lastly, look in the cemented blocks *)
+                  Cemented_block_store.get_cemented_block_by_hash
+                    ~read_metadata
+                    block_store.cemented_store
+                    adjusted_hash
+            in
+            Block_cache.get_opt_lwt
+              block_store.block_cache
+              fetch_block
+              adjusted_hash)
 
 let read_block_metadata block_store key_kind =
   Lwt_idle_waiter.task block_store.merge_scheduler (fun () ->
-      match key_kind with
-      | Hash (hash, offset) -> (
-          (* Resolve the hash *)
-          get_predecessor block_store hash offset
-          >>= function
-          | None ->
-              Lwt.return_none
-          | Some adjusted_hash -> (
-              if Block_hash.equal block_store.genesis_block.hash adjusted_hash
-              then Lwt.return (Block_repr.metadata block_store.genesis_block)
-              else
-                (* First look in the floating stores *)
-                Lwt_utils.find_map_s
-                  (fun store ->
-                    Floating_block_store.read_block store adjusted_hash)
-                  ( block_store.rw_floating_block_store
-                  :: block_store.ro_floating_block_stores )
-                >>= function
-                | Some block ->
-                    Lwt.return block.metadata
-                | None -> (
-                  match
-                    Cemented_block_store.get_cemented_block_level
-                      block_store.cemented_store
-                      adjusted_hash
-                  with
-                  | None ->
-                      Lwt.return_none
-                  | Some level ->
-                      (* Lastly, look in the cemented blocks *)
-                      Lwt.return
-                        (Cemented_block_store.read_block_metadata
-                           block_store.cemented_store
-                           level) ) ) ))
+      (* Resolve the hash *)
+      get_hash block_store key_kind
+      >>= function
+      | None ->
+          Lwt.return_none
+      | Some adjusted_hash -> (
+          if Block_hash.equal block_store.genesis_block.hash adjusted_hash then
+            Lwt.return (Block_repr.metadata block_store.genesis_block)
+          else
+            (* First look in the floating stores *)
+            Lwt_utils.find_map_s
+              (fun store ->
+                Floating_block_store.read_block store adjusted_hash)
+              ( block_store.rw_floating_block_store
+              :: block_store.ro_floating_block_stores )
+            >>= function
+            | Some block ->
+                Lwt.return block.metadata
+            | None -> (
+              match
+                Cemented_block_store.get_cemented_block_level
+                  block_store.cemented_store
+                  adjusted_hash
+              with
+              | None ->
+                  Lwt.return_none
+              | Some level ->
+                  (* Lastly, look in the cemented blocks *)
+                  Lwt.return
+                    (Cemented_block_store.read_block_metadata
+                       block_store.cemented_store
+                       level) ) ))
 
 let store_block block_store block =
   Lwt_idle_waiter.task block_store.merge_scheduler (fun () ->
@@ -290,31 +280,6 @@ let check_blocks_consistency blocks =
   in
   loop blocks
 
-(* Partition the blocks per cycle : each list in the  *)
-let split_cycles blocks =
-  let rec partition_elements (l, acc) p = function
-    | [] ->
-        List.rev acc
-    | [h] ->
-        List.rev (List.rev (h :: l) :: acc)
-    | h :: (h' :: t as r) ->
-        if p h h' then partition_elements (h :: l, acc) p r
-        else partition_elements ([h'], List.rev (h :: l) :: acc) p t
-  in
-  partition_elements
-    ([], [])
-    (fun b b' ->
-      let b_metadata =
-        Option.unopt_assert ~loc:__POS__ (Block_repr.metadata b)
-      in
-      let b'_metadata =
-        Option.unopt_assert ~loc:__POS__ (Block_repr.metadata b')
-      in
-      Compare.Int32.(
-        b_metadata.last_allowed_fork_level
-        = b'_metadata.last_allowed_fork_level))
-    blocks
-
 let cement_blocks ?(check_consistency = true) ~write_metadata block_store
     blocks =
   (* No need to lock *)
@@ -332,9 +297,6 @@ let cement_blocks ?(check_consistency = true) ~write_metadata block_store
     cemented_store
     ~write_metadata
     blocks
-
-let store_metadata_chunk block_store blocks =
-  Cemented_block_store.cement_blocks_metadata block_store.cemented_store blocks
 
 (* [retrieve_n_predecessors stores block n] retrieves, at most, the
    [n] [block]'s predecessors (including [block]) from the floating
@@ -518,6 +480,8 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
   >>= fun () ->
   (* Force waiting for a potential previous merging operation *)
   let chain_dir = block_store.chain_dir in
+  (* TODO improvement for non-blocking cases: replace force_idle by
+     when_idle_force (somehow) *)
   Lwt_idle_waiter.force_idle block_store.merge_scheduler (fun () ->
       assert (block_store.merging_thread = None) ;
       let (_, final_level) = to_block in
@@ -537,34 +501,41 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
       let create_merging_thread () : unit tzresult Lwt.t =
         Floating_block_store.init ~chain_dir ~readonly:false RO_TMP
         >>= fun new_ro_store ->
-        update_floating_stores
-          ~ro_store
-          ~rw_store
-          ~new_store:new_ro_store
-          ~from_block
-          ~to_block
-          ~nb_blocks_to_preserve
-        >>=? fun blocks_to_cement ->
-        ( match history_mode with
-        | History_mode.Archive ->
-            (* In archive, we store the metadatas *)
-            cement_blocks ~write_metadata:true block_store blocks_to_cement
-        | (Full {offset} | Rolling {offset}) when offset > 0 ->
-            cement_blocks ~write_metadata:true block_store blocks_to_cement
-            >>=? fun () ->
-            (* Clean-up the files that are below the offset *)
-            Cemented_block_store.trigger_gc
-              block_store.cemented_store
-              history_mode
-            >>= return
-        | Full {offset} ->
-            assert (offset = 0) ;
-            (* In full, we do not store the metadata *)
-            cement_blocks ~write_metadata:false block_store blocks_to_cement
-        | Rolling {offset} ->
-            assert (offset = 0) ;
-            (* Drop the blocks *)
-            return_unit )
+        Lwt.catch
+          (fun () ->
+            update_floating_stores
+              ~ro_store
+              ~rw_store
+              ~new_store:new_ro_store
+              ~from_block
+              ~to_block
+              ~nb_blocks_to_preserve
+            >>=? fun blocks_to_cement ->
+            match history_mode with
+            | History_mode.Archive ->
+                (* In archive, we store the metadatas *)
+                cement_blocks ~write_metadata:true block_store blocks_to_cement
+            | (Full {offset} | Rolling {offset}) when offset > 0 ->
+                cement_blocks ~write_metadata:true block_store blocks_to_cement
+                >>=? fun () ->
+                (* Clean-up the files that are below the offset *)
+                Cemented_block_store.trigger_gc
+                  block_store.cemented_store
+                  history_mode
+                >>= return
+            | Full {offset} ->
+                assert (offset = 0) ;
+                (* In full, we do not store the metadata *)
+                cement_blocks
+                  ~write_metadata:false
+                  block_store
+                  blocks_to_cement
+            | Rolling {offset} ->
+                assert (offset = 0) ;
+                (* Drop the blocks *)
+                return_unit)
+          (fun exn ->
+            Floating_block_store.close new_ro_store >>= fun () -> Lwt.fail exn)
         >>=? fun () ->
         (* Swapping stores: hard-lock *)
         Lwt_idle_waiter.force_idle block_store.merge_scheduler (fun () ->
@@ -659,24 +630,12 @@ let load ~chain_dir ~genesis_block ~readonly =
   else Lwt.return_unit )
   >>= fun () -> return block_store
 
-let merging_state block_store =
-  match block_store.merging_thread with
-  | Some (lvl, th) -> (
-    match Lwt.state th with
-    | Return (Ok () | Error _) ->
-        `Done
-    | Sleep ->
-        `Ongoing lvl
-    | Fail _ ->
-        assert false )
-  | None ->
-      `Done
-
 let close block_store =
   (* Wait a bit for the merging to end but hard-stop it if it takes
      too long. *)
   Lwt_unix.with_timeout 5. (fun () -> await_merging block_store)
   >>=? fun () ->
+  (* FIXME cancel ? *)
   Cemented_block_store.close block_store.cemented_store ;
   Lwt_list.iter_s
     Floating_block_store.close

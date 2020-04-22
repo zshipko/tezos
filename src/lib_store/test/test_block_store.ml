@@ -33,7 +33,7 @@ let assert_presence_in_block_store ?(with_metadata = false) block_store blocks
   iter_s
     (fun b ->
       let hash = Block_repr.hash b in
-      Block_store.is_known block_store (Hash (hash, 0))
+      Block_store.mem block_store (Block (hash, 0))
       >>= fun is_known ->
       if not is_known then
         Alcotest.failf
@@ -43,7 +43,7 @@ let assert_presence_in_block_store ?(with_metadata = false) block_store blocks
       Block_store.read_block
         ~read_metadata:with_metadata
         block_store
-        (Hash (hash, 0))
+        (Block (hash, 0))
       >>= function
       | None ->
           Alcotest.failf
@@ -66,7 +66,7 @@ let assert_absence_in_block_store block_store blocks =
   iter_s
     (fun b ->
       let hash = Block_repr.hash b in
-      Block_store.is_known block_store (Hash (hash, 0))
+      Block_store.mem block_store (Block (hash, 0))
       >>= function
       | true ->
           Alcotest.failf
@@ -90,7 +90,7 @@ let test_storing_and_access_predecessors block_store =
       let level = Block_repr.level b in
       Lwt_list.iter_s
         (fun distance ->
-          Block_store.get_predecessor block_store hash distance
+          Block_store.get_hash block_store (Block (hash, distance))
           >>= function
           | None ->
               Alcotest.fail "expected predecessor but none found"
