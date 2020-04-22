@@ -26,18 +26,18 @@
 (** Persistent block store with linear history
 
     The cemented block store is a store where blocks are stored
-   linearly (by level) in chunks. Blocks in this store should not be
-   reorganized anymore and are thus *cemented*. As these blocks should
-   not be accessed regularly and especially their metadata (if
-   present), the later are compressed using a zip format to save disk
-   space. For each chunk of blocks, a dedicated file is
-   used. Moreover, to enable easy access and to prevent too much
-   on-disk reading, two indexed maps are used to retrieve blocks hash
-   from their level and their level from the block hash.
+    linearly (by level) in chunks. Blocks in this store should not be
+    reorganized anymore and are thus *cemented*. As these blocks should
+    not be accessed regularly and especially their metadata (if
+    present), the later are compressed using a zip format to save disk
+    space. For each chunk of blocks, a dedicated file is
+    used. Moreover, to enable easy access and to prevent too much
+    on-disk reading, two indexed maps are used to retrieve blocks hash
+    from their level and their level from the block hash.
 
     The cemented block store contains a set of files updated each time
-   a new chunk is added to the store. These files indicate which
-   interval of blocks (w.r.t. their levels) are stored in it.
+    a new chunk is added to the store. These files indicate which
+    interval of blocks (w.r.t. their levels) are stored in it.
 
     {1 Invariants}
 
@@ -102,10 +102,12 @@ type cemented_blocks_file = {
   filename : string;
 }
 
-(** [init ~cemented_blocks_dir] create or load an existing cemented
-    block store at path [cemented_blocks_dir]. [cemented_blocks_dir]
-    will be created if it does not exists. *)
-val init : cemented_blocks_dir:string -> t tzresult Lwt.t
+(** [init ~cemented_blocks_dir ~readonly] create or load an existing
+    cemented block store at path
+    [cemented_blocks_dir]. [cemented_blocks_dir] will be created if it
+    does not exists. If [readonly] is true, cementing blocks
+    will result in an error. *)
+val init : cemented_blocks_dir:string -> readonly:bool -> t tzresult Lwt.t
 
 (** [close cemented_store] closes the [cemented_store] opened files:
    its indexes. *)

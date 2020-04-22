@@ -132,14 +132,16 @@ let load_table ~cemented_blocks_dir =
   Array.sort compare_files cemented_files_array ;
   return cemented_files_array
 
-let load ~cemented_blocks_dir =
+let load ~readonly ~cemented_blocks_dir =
   let cemented_block_level_index =
     Cemented_block_level_index.v
+      ~readonly
       ~log_size:default_index_log_size
       Naming.(cemented_blocks_dir // cemented_block_level_index_directory)
   in
   let cemented_block_hash_index =
     Cemented_block_hash_index.v
+      ~readonly
       ~log_size:default_index_log_size
       Naming.(cemented_blocks_dir // cemented_block_hash_index_directory)
   in
@@ -159,7 +161,7 @@ let load ~cemented_blocks_dir =
   in
   return cemented_store
 
-let init ~cemented_blocks_dir =
+let init ~cemented_blocks_dir ~readonly =
   if Sys.file_exists cemented_blocks_dir then
     fail_unless
       (Sys.is_directory cemented_blocks_dir)
@@ -168,7 +170,8 @@ let init ~cemented_blocks_dir =
             (Format.sprintf
                "Cemented_block_store.init: file %s is not a directory"
                cemented_blocks_dir)))
-    >>=? fun () -> load ~cemented_blocks_dir >>=? fun res -> return res
+    >>=? fun () ->
+    load ~readonly ~cemented_blocks_dir >>=? fun res -> return res
   else create ~cemented_blocks_dir >>= fun res -> return res
 
 let close cemented_store =

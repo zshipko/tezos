@@ -968,7 +968,9 @@ let copy_and_restore_cemented_blocks ~snapshot_cemented_dir ~dst_cemented_dir
           Lwt_utils_unix.copy_file ~src ~dst >>= fun () -> notify ())
         cemented_files)
   >>= fun () ->
-  Cemented_block_store.init ~cemented_blocks_dir:dst_cemented_dir
+  Cemented_block_store.init
+    ~cemented_blocks_dir:dst_cemented_dir
+    ~readonly:false
   >>=? fun cemented_store ->
   iter_s
     (fun cemented_file ->
@@ -1350,7 +1352,9 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
     ~protocol:genesis.protocol
   >>=? fun genesis_context_hash ->
   let cycle_length = Legacy.Hardcoded.cycle_length ~chain_name in
-  Cemented_block_store.init ~cemented_blocks_dir:dst_cemented_dir
+  Cemented_block_store.init
+    ~cemented_blocks_dir:dst_cemented_dir
+    ~readonly:false
   >>=? fun cemented_store ->
   let floating_blocks = ref [] in
   let current_blocks = ref [] in

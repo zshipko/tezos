@@ -90,7 +90,7 @@ let wrap_cemented_store_test (name, f) =
     in
     run (fun base_dir ->
         let dir = Filename.concat base_dir "cemented_store" in
-        Cemented_block_store.init ~cemented_blocks_dir:dir
+        Cemented_block_store.init ~cemented_blocks_dir:dir ~readonly:false
         >>=? fun cemented_store ->
         Error_monad.protect (fun () ->
             f cemented_store

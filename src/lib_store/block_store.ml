@@ -603,7 +603,7 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
 
 let create ~chain_dir ~genesis_block =
   let cemented_blocks_dir = Naming.(chain_dir // cemented_blocks_directory) in
-  Cemented_block_store.init ~cemented_blocks_dir
+  Cemented_block_store.init ~readonly:false ~cemented_blocks_dir
   >>=? fun cemented_store ->
   Floating_block_store.init ~chain_dir ~readonly:false RO
   >>= fun ro_floating_block_stores ->
@@ -629,8 +629,9 @@ let create ~chain_dir ~genesis_block =
   store_block block_store genesis_block >>= fun () -> return block_store
 
 let load ~chain_dir ~genesis_block ~readonly =
+  (* TODO fail if dir does not exists *)
   let cemented_blocks_dir = Naming.(chain_dir // cemented_blocks_directory) in
-  Cemented_block_store.init ~cemented_blocks_dir
+  Cemented_block_store.init ~cemented_blocks_dir ~readonly
   >>=? fun cemented_store ->
   Floating_block_store.init ~chain_dir ~readonly RO
   >>= fun ro_floating_block_store ->
