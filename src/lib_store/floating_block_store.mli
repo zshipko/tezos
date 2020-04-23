@@ -64,7 +64,7 @@ type t
 (** The type for the kind of floating store opened. *)
 type floating_kind = Naming.floating_kind = RO | RW | RW_TMP | RO_TMP
 
-(** [kind floating_store] returns the kind. *)
+(** [kind floating_store] return the kind. *)
 val kind : t -> floating_kind
 
 (** [mem floating_store hash] test whether [hash] is stored in
@@ -72,8 +72,8 @@ val kind : t -> floating_kind
 val mem : t -> Block_hash.t -> bool Lwt.t
 
 (** [find_predecessors floating_store hash] reads from the index the
-   list of predecessors for [hash] if the block is stored in
-   [floating_store], returns [None] otherwise. *)
+    list of predecessors for [hash] if the block is stored in
+    [floating_store], returns [None] otherwise. *)
 val find_predecessors : t -> Block_hash.t -> Block_hash.t list option Lwt.t
 
 (** [read_block floating_store hash] reads from the file the block of

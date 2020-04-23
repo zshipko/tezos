@@ -162,7 +162,7 @@ let get_hash block_store (Block (block_hash, offset)) =
             global_predecessor_lookup block_store block_hash power
             >>= function
             | None ->
-                Lwt.return_none (* reached genesis *)
+                Lwt.return_none
             | Some pred ->
                 if rest = 0 then Lwt.return_some pred
                   (* landed on the requested predecessor *)
@@ -177,14 +177,18 @@ let mem block_store key =
       >>= function
       | None ->
           Lwt.return_false
+      | Some predecessor_hash
+        when Block_hash.equal block_store.genesis_block.hash predecessor_hash
+        ->
+          Lwt.return_true
       | Some predecessor_hash ->
           Lwt_list.exists_s
             (fun store -> Floating_block_store.mem store predecessor_hash)
             ( block_store.rw_floating_block_store
             :: block_store.ro_floating_block_stores )
-          >>= fun is_known ->
+          >>= fun is_known_in_floating ->
           Lwt.return
-            ( is_known
+            ( is_known_in_floating
             || Cemented_block_store.is_cemented
                  block_store.cemented_store
                  predecessor_hash ))

@@ -111,7 +111,9 @@ let append_block floating_store predecessors (block : Block_repr.t) =
       Lwt_unix.lseek floating_store.fd 0 Unix.SEEK_END
       >>= fun offset ->
       locked_write_block floating_store ~offset ~block ~predecessors
-      >>= fun _written_len -> Lwt.return_unit)
+      >>= fun _written_len ->
+      Floating_block_index.flush floating_store.floating_block_index ;
+      Lwt.return_unit)
 
 let append_all floating_store
     (blocks : (Block_hash.t list * Block_repr.t) list) =
@@ -125,7 +127,6 @@ let append_all floating_store
         eof_offset
         blocks
       >>= fun _last_offset ->
-      (* Flush for some reason *)
       Floating_block_index.flush floating_store.floating_block_index ;
       Lwt.return_unit)
 
@@ -151,6 +152,7 @@ let iter_raw f floating_store =
   >>= fun eof_offset ->
   Lwt_unix.lseek floating_store.fd 0 Unix.SEEK_SET
   >>= fun _ ->
+  Floating_block_index.flush floating_store.floating_block_index ;
   let rec loop nb_bytes_left =
     if nb_bytes_left = 0 then return_unit
     else
