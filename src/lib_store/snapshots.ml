@@ -456,16 +456,6 @@ let export_protocols protocol_levels ~src_dir ~dst_dir =
 (* Creates the requested export folder and its hierarchy *)
 
 let create_snapshot_dir ~snapshot_dir =
-  Lwt_unix.file_exists snapshot_dir
-  >>= fun exists ->
-  ( if exists then
-    (* TODO: clean error *)
-    failwith
-      "The file %s already exists. Please provide a valid path for the \
-       snapshot."
-      snapshot_dir
-  else return_unit )
-  >>=? fun () ->
   Lwt_unix.mkdir snapshot_dir 0o755
   >>= fun () ->
   let dst_cemented_dir = Naming.(snapshot_dir // Snapshot.cemented_blocks) in

@@ -70,6 +70,16 @@ module Term = struct
       in
       match subcommand with
       | Export ->
+          Lwt_unix.file_exists snapshot_path
+          >>= fun snapshot_dir_exists ->
+          (* TODO: clean error *)
+          ( if snapshot_dir_exists then
+            failwith
+              "The file %s already exists. Please provide a valid path for \
+               the snapshot."
+              snapshot_path
+          else return_unit )
+          >>=? fun () ->
           let dir_cleaner () =
             Event.(emit cleaning_up_after_failure) snapshot_path
             >>= fun () -> Lwt_utils_unix.remove_dir snapshot_path
