@@ -757,9 +757,7 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
     let floating_block_stream =
       Lwt_stream.of_list
         (List.filter_map
-           (fun b ->
-             if Store.Block.equal pred_block b then Some (Store.Block.repr b)
-             else Some {(Store.Block.repr b) with metadata = None})
+           (fun b -> Some {(Store.Block.repr b) with metadata = None})
            floating_blocks)
     in
     (* We need to dump the context while locking the store, the
