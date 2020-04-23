@@ -946,47 +946,56 @@ let copy_and_restore_cemented_blocks ~snapshot_cemented_dir ~dst_cemented_dir
           else return_true)
     files
   >>=? fun cemented_files ->
-  let len = List.length cemented_files in
-  Lwt_utils_unix.display_progress
-    ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Copying cycles: %d/%d (%d)" i len (100 * i / len))
-    (fun notify ->
-      Lwt_list.iter_s
-        (fun file ->
-          let src = Naming.(snapshot_cemented_dir // file) in
-          let dst = Naming.(dst_cemented_dir // file) in
-          Lwt_utils_unix.copy_file ~src ~dst >>= fun () -> notify ())
-        cemented_files)
+  let nb_cemented_files = List.length cemented_files in
+  ( if nb_cemented_files > 0 then
+    Lwt_utils_unix.display_progress
+      ~pp_print_step:(fun fmt i ->
+        Format.fprintf
+          fmt
+          "Copying cycles: %d/%d (%d)"
+          i
+          nb_cemented_files
+          (100 * i / nb_cemented_files))
+      (fun notify ->
+        Lwt_list.iter_s
+          (fun file ->
+            let src = Naming.(snapshot_cemented_dir // file) in
+            let dst = Naming.(dst_cemented_dir // file) in
+            Lwt_utils_unix.copy_file ~src ~dst >>= fun () -> notify ())
+          cemented_files)
+  else Lwt.return_unit )
   >>= fun () ->
   Cemented_block_store.init
     ~cemented_blocks_dir:dst_cemented_dir
     ~readonly:false
   >>=? fun cemented_store ->
-  iter_s
-    (fun cemented_file ->
-      if
-        not
-          (Array.exists
-             (fun {Cemented_block_store.filename; _} ->
-               Compare.String.equal filename cemented_file)
-             (Cemented_block_store.cemented_blocks_files cemented_store))
-      then failwith "Cemented copy error: cannot find file %s" cemented_file
-      else return_unit)
-    (List.sort compare cemented_files)
-  >>=? fun () ->
-  Lwt_utils_unix.display_progress
-    ~pp_print_step:(fun fmt i ->
-      Format.fprintf
-        fmt
-        "Restoring cycles consistency: %d/%d (%d)"
-        i
-        len
-        (100 * i / len))
-    (fun notify ->
-      Cemented_block_store.restore_indexes_consistency
-        ~post_step:notify
-        ~genesis_hash
-        cemented_store)
+  ( if nb_cemented_files > 0 then
+    iter_s
+      (fun cemented_file ->
+        if
+          not
+            (Array.exists
+               (fun {Cemented_block_store.filename; _} ->
+                 Compare.String.equal filename cemented_file)
+               (Cemented_block_store.cemented_blocks_files cemented_store))
+        then failwith "Cemented copy error: cannot find file %s" cemented_file
+        else return_unit)
+      (List.sort compare cemented_files)
+    >>=? fun () ->
+    Lwt_utils_unix.display_progress
+      ~pp_print_step:(fun fmt i ->
+        Format.fprintf
+          fmt
+          "Restoring cycles consistency: %d/%d (%d)"
+          i
+          nb_cemented_files
+          (100 * i / nb_cemented_files))
+      (fun notify ->
+        Cemented_block_store.restore_indexes_consistency
+          ~post_step:notify
+          ~genesis_hash
+          cemented_store)
+  else return_unit )
   >>=? fun () ->
   Cemented_block_store.close cemented_store ;
   return_unit
