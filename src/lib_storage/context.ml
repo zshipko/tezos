@@ -502,7 +502,6 @@ let init ?patch_context ?readonly root =
     (Irmin_pack.config ?readonly ?index_log_size:!index_log_size root)
   >>= fun repo ->
   let v = {path = root; repo; patch_context} in
-  Gc.finalise (fun v -> Lwt.async (fun () -> Store.Repo.close v.repo)) v ;
   Lwt.return v
 
 let get_branch chain_id = Format.asprintf "%a" Chain_id.pp chain_id
