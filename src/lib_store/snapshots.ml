@@ -1159,6 +1159,7 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
   >>=? fun () -> return (block_data, genesis_ctxt_hash, block_validation_result)
 
 (* TODO parallelise in another process *)
+(* TODO? remove patch context *)
 let import ?patch_context ?block:expected_block ~snapshot_dir ~dst_store_dir
     ~dst_context_dir ~user_activated_upgrades
     ~user_activated_protocol_overrides (genesis : Genesis.t) =

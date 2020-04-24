@@ -133,8 +133,6 @@ module Account = struct
     return @@ (unactivated_account, {blinded_public_key_hash = bpkh; amount})
 end
 
-type t = Store.Block.t
-
 let rpc_context ctxt block =
   let ctxt = Shell_context.wrap_disk_context ctxt in
   {
@@ -512,7 +510,7 @@ let bake_until_n_cycle_end chain_store ?policy n b =
     (1 -- n)
   >>=? fun (bll, last) -> return (List.concat (List.rev bll), last)
 
-let bake_until_cycle chain_store ?policy cycle (b : t) =
+let bake_until_cycle chain_store ?policy cycle b =
   get_constants chain_store b
   >>=? fun Constants.{parametric = {blocks_per_cycle; _}; _} ->
   let rec loop (bl, b) =
