@@ -37,6 +37,10 @@ val convert : Legacy.t -> t
 
 val default_offset : int
 
+val default_full : t
+
+val default_rolling : t
+
 val default : t
 
 val encoding : t Data_encoding.t

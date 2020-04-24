@@ -29,7 +29,11 @@ type t = Archive | Full of additional_cycles | Rolling of additional_cycles
 
 let default_offset = 5
 
-let default = Full {offset = default_offset}
+let default_full = Full {offset = default_offset}
+
+let default_rolling = Rolling {offset = default_offset}
+
+let default = default_full
 
 module Legacy = struct
   type t = Archive | Full | Rolling
@@ -59,7 +63,7 @@ let encoding =
                default: %d additional cycles will be stored."
               default_offset)
          "additional_cycles"
-         int31)
+         (ranged_int 0 1_000))
   in
   def
     "history_mode"
