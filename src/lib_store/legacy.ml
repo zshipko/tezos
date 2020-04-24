@@ -656,7 +656,7 @@ let upgrade_0_0_4 ~data_dir genesis patch_context
         ~new_caboose
       >>=? fun () ->
       Legacy_store.close lmdb_store ;
-      Store.close_store store >>=? fun () -> return_unit)
+      Store.close_store store >>= fun () -> return_unit)
     (function
       | Ok () ->
           return

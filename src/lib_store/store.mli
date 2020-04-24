@@ -472,7 +472,7 @@ val all_chain_stores : store -> chain_store list Lwt.t
 val global_block_watcher :
   t -> (chain_store * Block.t) Lwt_stream.t * Lwt_watcher.stopper
 
-val close_store : store -> unit tzresult Lwt.t
+val close_store : store -> unit Lwt.t
 
 val open_for_snapshot_export :
   store_dir:string ->

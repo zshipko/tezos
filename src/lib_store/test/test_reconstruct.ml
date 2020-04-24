@@ -35,7 +35,7 @@ let test_from_bootstrapped ~descr (store_root, context_root) store
   Alpha_utils.bake_n chain_store nb_blocks_to_bake genesis_block
   >>=? fun (baked_blocks, last) ->
   Store.close_store store
-  >>=? fun () ->
+  >>= fun () ->
   Error_monad.protect
     (fun () ->
       Reconstruction.reconstruct
@@ -101,7 +101,7 @@ let test_from_bootstrapped ~descr (store_root, context_root) store
       (snd savepoint)
       (snd caboose) ;
     assert_presence_in_store ~with_metadata:true chain_store baked_blocks
-    >>=? fun () -> Store.close_store store >>=? fun () -> return_unit
+    >>=? fun () -> Store.close_store store >>= fun () -> return_unit
 
 let make_tests genesis_parameters =
   let history_modes =
@@ -129,7 +129,7 @@ let make_tests genesis_parameters =
       wrap_simple_store_init_test
         ~patch_context
         ~history_mode
-        ~keep_dir:true
+        ~keep_dir:false
         ( descr,
           fun data_dir store ->
             test_from_bootstrapped

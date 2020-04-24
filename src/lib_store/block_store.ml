@@ -637,12 +637,12 @@ let load ~chain_dir ~genesis_block ~readonly =
 let close block_store =
   (* Wait a bit for the merging to end but hard-stop it if it takes
      too long. *)
-  Lwt_unix.with_timeout 5. (fun () -> await_merging block_store)
-  >>=? fun () ->
+  Lwt_unix.with_timeout 5. (fun () ->
+      await_merging block_store >>= fun _ -> Lwt.return_unit)
+  >>= fun () ->
   (* FIXME cancel ? *)
   Cemented_block_store.close block_store.cemented_store ;
   Lwt_list.iter_s
     Floating_block_store.close
     ( block_store.rw_floating_block_store
     :: block_store.ro_floating_block_stores )
-  >>= return

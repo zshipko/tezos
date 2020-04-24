@@ -153,7 +153,7 @@ let wrap_store_init ?(patch_context = dummy_patch_context)
       >>=? fun store ->
       protect
         ~on_error:(fun err ->
-          Store.close_store store >>=? fun () -> Lwt.return (Error err))
+          Store.close_store store >>= fun () -> Lwt.return (Error err))
         (fun () ->
           k (store_dir, context_dir) store
           >>=? fun () ->
@@ -161,7 +161,7 @@ let wrap_store_init ?(patch_context = dummy_patch_context)
           check_invariants (Store.main_chain_store store)
           >>= fun () ->
           Store.close_store store
-          >>=? fun () ->
+          >>= fun () ->
           Store.init
             ~history_mode
             ~store_dir
@@ -211,8 +211,12 @@ let wrap_simple_store_init ?(patch_context = dummy_patch_context)
         genesis
       >>=? fun store ->
       protect
-        ~on_error:(fun err -> Lwt.return (Error err))
-        (fun () -> k (store_dir, context_dir) store))
+        ~on_error:(fun err ->
+          Store.close_store store >>= fun () -> Lwt.return (Error err))
+        (fun () ->
+          Lwt.finalize
+            (fun () -> k (store_dir, context_dir) store)
+            (fun () -> Store.close_store store >>= fun _ -> Lwt.return_unit)))
   >>= function
   | Error err ->
       Format.printf "@\nTest failed:@\n%a@." Error_monad.pp_print_error err ;

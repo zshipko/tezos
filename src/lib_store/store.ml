@@ -1568,16 +1568,16 @@ module Chain = struct
       | {block_store; lockfile; chain_state; _} ->
           Shared.use chain_state (fun {active_testchain; _} ->
               Block_store.close block_store
-              >>=? fun () ->
+              >>= fun () ->
               ( match active_testchain with
               | Some {testchain_store; _} ->
                   loop testchain_store
               | None ->
-                  return_unit )
-              >>=? fun () ->
+                  Lwt.return_unit )
+              >>= fun () ->
               may_unlock chain_store.lockfile
               >>= fun () ->
-              Lwt_utils_unix.safe_close lockfile >>= fun () -> return_unit)
+              Lwt_utils_unix.safe_close lockfile >>= fun () -> Lwt.return_unit)
     in
     loop chain_store
 
@@ -1716,7 +1716,7 @@ module Chain = struct
         match active_testchain with
         | Some testchain ->
             close_chain_store testchain.testchain_store
-            >>=? fun () ->
+            >>= fun () ->
             return (Some {chain_state with active_testchain = None}, ())
         | None ->
             return (None, ()))
@@ -2128,8 +2128,7 @@ let close_store global_store =
     Option.unopt_assert ~loc:__POS__ global_store.main_chain_store
   in
   Chain.close_chain_store main_chain_store
-  >>=? fun () ->
-  Context.close global_store.context_index >>= fun () -> return_unit
+  >>= fun () -> Context.close global_store.context_index
 
 let open_for_snapshot_export ~store_dir ~context_dir genesis
     ~(locked_f : chain_store * Context.index -> 'a tzresult Lwt.t) =
@@ -2149,10 +2148,10 @@ let open_for_snapshot_export ~store_dir ~context_dir genesis
   >>= fun () ->
   Error_monad.protect
     ~on_error:(fun err ->
-      close_store store >>=? fun () -> Lwt.return (Error err))
+      close_store store >>= fun () -> Lwt.return (Error err))
     (fun () ->
       locked_f (chain_store, context_index)
-      >>=? fun res -> close_store store >>=? fun () -> return res)
+      >>=? fun res -> close_store store >>= fun () -> return res)
 
 let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
     ~context_index ~genesis ~genesis_context_hash ~floating_blocks_stream
@@ -2293,7 +2292,7 @@ let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
     (Protocol_levels.bindings protocol_levels)
   >>=? fun () ->
   Block_store.close block_store
-  >>=? fun () ->
+  >>= fun () ->
   let chain_config = {Chain_config.history_mode; genesis; expiration = None} in
   Chain_config.write ~chain_dir chain_config >>=? fun () -> return_unit
 
@@ -2470,7 +2469,7 @@ let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
     protocol_levels
   >>= fun () ->
   Block_store.close block_store
-  >>=? fun () ->
+  >>= fun () ->
   let chain_config = {Chain_config.history_mode; genesis; expiration = None} in
   Chain_config.write ~chain_dir chain_config >>=? fun () -> return_unit
 

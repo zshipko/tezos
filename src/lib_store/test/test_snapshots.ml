@@ -133,7 +133,7 @@ let export_import ~test_descr (store_dir, context_dir) chain_store
   >>=? fun store' ->
   protect
     ~on_error:(fun err ->
-      Store.close_store store' >>=? fun () -> Lwt.return (Error err))
+      Store.close_store store' >>= fun () -> Lwt.return (Error err))
     (fun () ->
       let chain_store' = Store.main_chain_store store' in
       Store.Chain.current_head chain_store'
@@ -530,7 +530,7 @@ let test_rolling genesis_parameters =
       ~eq:Compare.Int32.equal
       max_op_ttl_cp
       (snd caboose) ;
-    Store.close_store store' >>=? fun () -> return_unit
+    Store.close_store store' >>= fun () -> return_unit
   in
   wrap_test
     ~keep_dir:false

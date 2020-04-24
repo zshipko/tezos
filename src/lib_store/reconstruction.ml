@@ -471,35 +471,41 @@ let reconstruct ?patch_context ~store_root ~context_root ~(genesis : Genesis.t)
     ~allow_testchains:false
     genesis
   >>=? fun store ->
-  let context_index = Store.context_index store in
-  let chain_store = Store.main_chain_store store in
-  Store.Chain.genesis_block chain_store
-  >>= fun genesis_block ->
-  check_history_mode_compatibility chain_store
-  >>=? fun () ->
-  default_target_block chain_store
-  >>=? fun target_block ->
-  fail_when
-    (Store.Block.level target_block = Store.Block.level genesis_block)
-    (Reconstruction_failure Nothing_to_reconstruct)
-  >>=? fun () ->
-  lwt_emit (Reconstruct_start_default (Store.Block.descriptor target_block))
-  >>= fun () ->
-  lwt_emit Reconstruct_enum
-  >>= fun () ->
-  reconstruct_cemented
-    chain_store
-    context_index
-    ~user_activated_upgrades
-    ~user_activated_protocol_overrides
-  >>=? fun () ->
-  let chain_store = Store.main_chain_store store in
-  reconstruct_floating
-    chain_store
-    context_index
-    ~user_activated_upgrades
-    ~user_activated_protocol_overrides
-  >>=? fun () ->
-  restore_constants chain_store genesis_block
-  >>=? fun () ->
-  lwt_emit Reconstruct_success >>= fun () -> Store.close_store store
+  protect
+    ~on_error:(fun err ->
+      Store.close_store store >>= fun () -> Lwt.return (Error err))
+    (fun () ->
+      let context_index = Store.context_index store in
+      let chain_store = Store.main_chain_store store in
+      Store.Chain.genesis_block chain_store
+      >>= fun genesis_block ->
+      check_history_mode_compatibility chain_store
+      >>=? fun () ->
+      default_target_block chain_store
+      >>=? fun target_block ->
+      fail_when
+        (Store.Block.level target_block = Store.Block.level genesis_block)
+        (Reconstruction_failure Nothing_to_reconstruct)
+      >>=? fun () ->
+      lwt_emit
+        (Reconstruct_start_default (Store.Block.descriptor target_block))
+      >>= fun () ->
+      lwt_emit Reconstruct_enum
+      >>= fun () ->
+      reconstruct_cemented
+        chain_store
+        context_index
+        ~user_activated_upgrades
+        ~user_activated_protocol_overrides
+      >>=? fun () ->
+      let chain_store = Store.main_chain_store store in
+      reconstruct_floating
+        chain_store
+        context_index
+        ~user_activated_upgrades
+        ~user_activated_protocol_overrides
+      >>=? fun () ->
+      restore_constants chain_store genesis_block
+      >>=? fun () ->
+      lwt_emit Reconstruct_success
+      >>= fun () -> Store.close_store store >>= return)

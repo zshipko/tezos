@@ -283,4 +283,4 @@ val load :
 
     {b Warning} If a merging thread is occuring, it will wait up to 5s
     for its termination before effectively closing the store. *)
-val close : block_store -> unit tzresult Lwt.t
+val close : block_store -> unit Lwt.t
