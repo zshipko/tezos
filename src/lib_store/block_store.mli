@@ -156,8 +156,7 @@ type t = block_store
 
     - Block (h, 0) represents the block h itself ;
 
-    - Block (h, n) represents the block's [n]th predecessor.
-*)
+    - Block (h, n) represents the block's [n]th predecessor. *)
 type key = Block of (Block_hash.t * int)
 
 (** [cemented_block_store block_store] returns the instance of the
@@ -204,8 +203,7 @@ val store_block : block_store -> Block_repr.t -> unit Lwt.t
 
     Wrapper of {Cemented_block_store.cement_blocks}. If the flag
     [check_consistency] is set, it verifies that all the blocks in [chunk]
-    are in a consecutive order.
-*)
+    are in a consecutive order. *)
 val cement_blocks :
   ?check_consistency:bool ->
   write_metadata:bool ->
@@ -241,9 +239,9 @@ val await_merging : block_store -> unit tzresult Lwt.t
     in the description above. This will result, {b asynchronously}, by
     a cementing (if needs be) a cycle from [from_block] to [to_block]
     (included), trims the floating stores and preserves [to_block] -
-    [nb_blocks_to_preserve] blocks along with their metadata in the
-    floating store potentially having duplicate in the cemented block
-    store.
+    [nb_blocks_to_preserve] blocks (iff these blocks are present or the
+    longest suffix otherwise) along with their metadata in the floating
+    store potentially having duplicate in the cemented block store.
 
     After the cementing, {Cemented_block_store.trigger_gc} will be
     called with the given [history_mode]. When the merging thread
@@ -255,8 +253,7 @@ val await_merging : block_store -> unit tzresult Lwt.t
     {b Warning} For a given [block_store], the caller must wait for
     this function termination before calling it again or it may result
     in concurrent intertwinings causing the cementing to be out of
-    order.
- *)
+    order. *)
 val merge_stores :
   block_store ->
   ?finalizer:(unit -> unit Lwt.t) ->
@@ -268,14 +265,13 @@ val merge_stores :
   unit Lwt.t
 
 (** [create ~chain_dir ~genesis_block] instanciate a fresh block_store
-    in directory [chain_dir] and stores the [genesis_block] in it.  *)
+    in directory [chain_dir] and stores the [genesis_block] in it. *)
 val create :
   chain_dir:string -> genesis_block:Block_repr.t -> block_store tzresult Lwt.t
 
 (** [load ~chain_dir ~genesis_block] load an existing block_store
     present in directory [chain_dir] and stores the [genesis_block] in it.
-    Setting [readonly] will prevent new blocks from being stored.
-*)
+    Setting [readonly] will prevent new blocks from being stored. *)
 val load :
   chain_dir:string ->
   genesis_block:Block_repr.t ->
