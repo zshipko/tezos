@@ -103,6 +103,38 @@ let lwt_emit (status : status) =
 
 open Reconstruction_errors
 
+(* The status of a metadata. It is:
+   - Complete: all the metadata of the corresponding cycle are stored
+   - Partial level: the metadata before level are missing
+   - Not_stored: no metada are stored *)
+type metadata_status = Complete | Partial of Int32.t | Not_stored
+
+(* We assume that :
+   - a cemented metadata cycle is partial if, at least, the first
+     metadata of the cycle (start_level) is missing.
+   - there only exists a contiguous set of empty metadata *)
+let cemented_metadata_status cemented_store = function
+  | {Cemented_block_store.start_level; end_level; _} ->
+      let end_metadata_opt =
+        Cemented_block_store.read_block_metadata cemented_store end_level
+      in
+      if end_metadata_opt = None then Not_stored
+      else
+        let start_metadata_opt =
+          Cemented_block_store.read_block_metadata cemented_store end_level
+        in
+        if start_metadata_opt <> None then Complete
+        else
+          (* TODO dicho search *)
+          let rec search level =
+            if level >= end_level then assert false
+            else
+              Cemented_block_store.read_block_metadata cemented_store level
+              |> function
+              | None -> search (Int32.succ level) | Some _ -> Partial level
+          in
+          search start_level
+
 let check_context_hash_consistency block_validation_result block_header =
   let expected = block_header.Block_header.shell.context in
   let got = block_validation_result.Block_validation.context_hash in
