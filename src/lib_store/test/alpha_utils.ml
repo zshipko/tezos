@@ -417,6 +417,14 @@ let apply ctxt chain_id ~policy ~operations pred =
   >>=? fun vstate -> Main.finalize_block vstate)
   >|= Environment.wrap_error
   >>=? fun (validation, block_header_metadata) ->
+  let max_operations_ttl =
+    max
+      0
+      (min
+         (Int32.to_int (Store.Block.level pred) + 1)
+         validation.max_operations_ttl)
+  in
+  let validation = {validation with max_operations_ttl} in
   let context = Shell_context.unwrap_disk_context validation.context in
   Context.commit ~time:shell.timestamp ?message:validation.message context
   >>= fun context_hash ->
