@@ -188,6 +188,45 @@ let wrap_test ?history_mode ?(speed = `Quick) ?patch_context ?keep_dir (name, f)
     speed
     (wrap_store_init ?patch_context ?history_mode ?keep_dir f)
 
+let wrap_simple_store_init ?(patch_context = dummy_patch_context)
+    ?(history_mode = History_mode.default) ?(allow_testchains = true)
+    ?(keep_dir = false) k _ () : unit Lwt.t =
+  let prefix_dir = "tezos_indexed_store_test_" in
+  let run f =
+    if not keep_dir then Lwt_utils_unix.with_tempdir prefix_dir f
+    else
+      let base_dir = Filename.temp_file prefix_dir "" in
+      Lwt_unix.unlink base_dir
+      >>= fun () -> Lwt_unix.mkdir base_dir 0o700 >>= fun () -> f base_dir
+  in
+  run (fun base_dir ->
+      let store_dir = base_dir // "store" in
+      let context_dir = base_dir // "context" in
+      Store.init
+        ~history_mode
+        ~patch_context
+        ~store_dir
+        ~context_dir
+        ~allow_testchains
+        genesis
+      >>=? fun store ->
+      protect
+        ~on_error:(fun err -> Lwt.return (Error err))
+        (fun () -> k (store_dir, context_dir) store))
+  >>= function
+  | Error err ->
+      Format.printf "@\nTest failed:@\n%a@." Error_monad.pp_print_error err ;
+      Lwt.fail Alcotest.Test_error
+  | Ok () ->
+      Lwt.return_unit
+
+let wrap_simple_store_init_test ?history_mode ?(speed = `Quick) ?patch_context
+    ?keep_dir (name, f) =
+  test_case
+    name
+    speed
+    (wrap_simple_store_init ?history_mode ?patch_context ?keep_dir f)
+
 let make_raw_block ?(max_operations_ttl = default_max_operations_ttl)
     ?(constants = default_protocol_constants) ?(context = Context_hash.zero)
     (pred_block_hash, pred_block_level) =
