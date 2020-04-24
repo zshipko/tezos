@@ -1,14 +1,11 @@
 (library
- (name tezos_storage)
- (public_name tezos-storage)
+ (name tezos_legacy_store)
+ (public_name tezos-legacy-store)
  (libraries tezos-base
             tezos-shell-services
-            logs.fmt
-            digestif.c
-            irmin
-            irmin-pack
-            tezos-stdlib-unix)
+            tezos-lmdb)
  (flags (:standard -open Tezos_shell_services
+                   -open Tezos_base
                    -open Tezos_base__TzPervasives
                    -open Tezos_stdlib_unix
                    -open Tezos_stdlib)))

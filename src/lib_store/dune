@@ -7,6 +7,7 @@
 	    irmin-pack
             tezos-stdlib-unix
 	    tezos-storage
+	    tezos-legacy-store
 	    tezos-validation
 	    lwt-watcher
             camlzip)
@@ -14,6 +15,7 @@
                    -open Tezos_base
                    -open Tezos_base__TzPervasives
                    -open Tezos_storage
+                   -open Tezos_legacy_store
 		   -open Tezos_validation
                    -open Tezos_stdlib_unix
                    -open Tezos_stdlib)))

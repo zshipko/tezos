@@ -9,14 +9,13 @@ depends: [
   "tezos-tooling" { with-test }
   "dune" { >= "1.11" }
   "tezos-base"
-  "irmin-pack"
-  "digestif" {>= "0.7.3"}
+  "tezos-lmdb"
   "tezos-shell-services"
   "tezos-stdlib-unix"
-  "alcotest-lwt" { with-test & >= "1.1.0" }
+  "alcotest-lwt" { with-test & = "0.8.5" }
 ]
 build: [
   ["dune" "build" "-p" name "-j" jobs]
   ["dune" "runtest" "-p" name "-j" jobs] {with-test}
 ]
-synopsis: "Tezos: on-disk context abstraction for `tezos-node`"
+synopsis: "Tezos: legacy low-level key-value store for `tezos-node`"

@@ -2,6 +2,7 @@
 (*                                                                           *)
 (* Open Source License                                                       *)
 (* Copyright (c) 2018 Dynamic Ledger Solutions, Inc. <contact@tezos.com>     *)
+(* Copyright (c) 2020 Nomadic Labs, <contact@nomadic-labs.com>               *)
 (*                                                                           *)
 (* Permission is hereby granted, free of charge, to any person obtaining a   *)
 (* copy of this software and associated documentation files (the "Software"),*)
@@ -23,6 +24,4 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-let () =
-  Alcotest.run "tezos-storage" [("context", Test_context.tests)]
-  |> Lwt_main.run
+let () = Alcotest.run "tezos-legacy-store" [("raw_store", Test_raw_store.tests)]
