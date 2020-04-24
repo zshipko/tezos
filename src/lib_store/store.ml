@@ -809,7 +809,7 @@ module Chain = struct
           let table_len = Array.length table in
           (* If the offset is 0, the minimum block to preserve will be
              the savepoint. *)
-          if offset <= 0 then return (Block.descriptor min_block_to_preserve)
+          if offset = 0 then return (Block.descriptor min_block_to_preserve)
           else if
             (* If the number of cemented cycles is not yet the offset,
                then the savepoint is unchanged. *)
@@ -956,30 +956,32 @@ module Chain = struct
         (* caboose = genesis *)
         return chain_state.caboose
     | Rolling {offset} ->
-        Block.locked_read_block_by_level
-          chain_store
-          new_head
-          min_level_to_preserve
-        >>=? fun min_block_to_preserve ->
-        let table =
-          Cemented_block_store.cemented_blocks_files
-            (Block_store.cemented_block_store chain_store.block_store)
-        in
-        if
-          Compare.Int32.(
-            snd chain_state.caboose >= Block.level min_block_to_preserve)
+        Format.printf "min level to preserve : %ld@." min_level_to_preserve ;
+        (* If the caboose is above the min block to preserve, we leave it unchanged. *)
+        if Compare.Int32.(snd chain_state.caboose >= min_level_to_preserve)
         then return chain_state.caboose
+        else if
+          (* If the min level to preserve is lower than the savepoint
+             or if we don't keep any extra cycles, the genesis is the
+             min block to preserve. *)
+          Compare.Int32.(min_level_to_preserve < snd savepoint) || offset = 0
+        then
+          Block.locked_read_block_by_level
+            chain_store
+            new_head
+            min_level_to_preserve
+          >>=? fun min_block_to_preserve ->
+          return (Block.descriptor min_block_to_preserve)
         else
+          (* Else genesis = new savepoint except for the first
+             cemented cycle which might be partial when cementing
+             after an import. *)
+          let table =
+            Cemented_block_store.cemented_blocks_files
+              (Block_store.cemented_block_store chain_store.block_store)
+          in
           let table_len = Array.length table in
-          if offset <= 0 then return (Block.descriptor min_block_to_preserve)
-          else if table_len <= offset then
-            (* When the first cycle is merged, we shift the genesis to
-               its lower bound : cannot be the savepoint because it
-               might not have metadata *)
-            if table_len = 0 then return from_block
-            else return chain_state.caboose
-          else (* new lowest cemented block  *)
-            return savepoint )
+          if table_len = 0 then return from_block else return savepoint )
     >>=? fun caboose ->
     let finalizer () =
       (* Update the stored value after the merge *)
