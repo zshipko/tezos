@@ -43,4 +43,5 @@ let () =
          Test_protocol_store.tests;
          Test_testchain.tests;
          Test_snapshots.tests speed;
-         Test_reconstruct.tests ])
+         Test_reconstruct.tests;
+         Test_legacy.tests speed ])
