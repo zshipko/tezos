@@ -25,7 +25,7 @@
 
 open Tezos_protocol_alpha.Protocol
 open Alpha_context
-open Tezos_storage
+open Tezos_context
 open Tezos_shell_context
 
 module Proto_nonce = struct

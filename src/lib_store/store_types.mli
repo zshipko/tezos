@@ -60,9 +60,9 @@ module Protocol_levels : sig
         parents.
 
       This structure should be populated with the result of
-      {Tezos_storage.Context.retrieve_commit_info} and the consistency
+      {Tezos_context.Context.retrieve_commit_info} and the consistency
       check is done by
-      {Tezos_storage.Context.check_protocol_commit_consistency}
+      {Tezos_context.Context.check_protocol_commit_consistency}
   *)
   type commit_info = {
     author : string;

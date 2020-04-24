@@ -11,7 +11,7 @@ depends: [
   "tezos-base"
   "tezos-version"
   "tezos-p2p"
-  "tezos-storage"
+  "tezos-context"
   "tezos-store"
   "tezos-shell-services"
   "tezos-p2p-services"

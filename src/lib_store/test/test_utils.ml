@@ -96,7 +96,7 @@ let check_invariants chain_store =
       Assert.fail_msg "check_invariant: could not find the caboose block"
 
 let dummy_patch_context ctxt =
-  let open Tezos_storage in
+  let open Tezos_context in
   let open Tezos_protocol_alpha in
   Context.set ctxt ["version"] (Bytes.of_string "genesis")
   >>= fun ctxt ->
@@ -320,7 +320,7 @@ let append_blocks ?constants ?max_operations_ttl ?root ?(kind = `Full)
   >>= fun root ->
   Store.Block.read_block chain_store (fst root)
   >>=? fun root_b ->
-  Tezos_storage.Context.checkout
+  Tezos_context.Context.checkout
     (Store.context_index (Store.Chain.global_store chain_store))
     (Store.Block.context_hash root_b)
   >>= fun ctxt_opt ->
@@ -329,9 +329,9 @@ let append_blocks ?constants ?max_operations_ttl ?root ?(kind = `Full)
   fold_left_s
     (fun (ctxt_opt, last_opt, blocks) b ->
       ( if should_commit then
-        let open Tezos_storage in
+        let open Tezos_context in
         let ctxt = Option.unopt_assert ~loc:__POS__ ctxt_opt in
-        Tezos_storage.Context.set
+        Tezos_context.Context.set
           ctxt
           ["level"]
           (Bytes.of_string (Format.asprintf "%ld" (Block_repr.level b)))

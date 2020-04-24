@@ -36,7 +36,7 @@ let fork_testchain chain_store (blocks, forked_block) =
   let expiration = Time.Protocol.epoch in
   let global_store = Store.Chain.global_store chain_store in
   let context_index = Store.context_index global_store in
-  let open Tezos_storage in
+  let open Tezos_context in
   (* Call [Context.fork_test_chain] then commit so we are able to gather
      commit info *)
   Context.checkout_exn context_index head_header.shell.context
