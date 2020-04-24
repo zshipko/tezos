@@ -108,7 +108,7 @@ module Block : sig
 
   type block = t
 
-  type metadata = {
+  type metadata = Block_repr.metadata = {
     message : string option;
     max_operations_ttl : int;
     last_allowed_fork_level : Int32.t;
@@ -121,12 +121,6 @@ module Block : sig
 
   (** Unsafe *)
   val of_repr : Block_repr.t -> t
-
-  (** Unsafe *)
-  val repr_metadata : metadata -> Block_repr.metadata
-
-  (** Unsafe *)
-  val of_repr_metadata : Block_repr.metadata -> metadata
 
   val equal : block -> block -> bool
 

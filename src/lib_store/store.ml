@@ -185,10 +185,6 @@ module Block = struct
 
   let of_repr b = b
 
-  let repr_metadata m = m
-
-  let of_repr_metadata m = m
-
   let equal b b' = Block_hash.equal (Block_repr.hash b) (Block_repr.hash b')
 
   let descriptor blk = (Block_repr.hash blk, Block_repr.level blk)

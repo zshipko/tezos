@@ -25,7 +25,7 @@
 (*****************************************************************************)
 
 type status =
-  | Reconstruct_start_default of Block_hash.t * Int32.t
+  | Reconstruct_start_default of (Block_hash.t * Int32.t)
   | Reconstruct_enum
   | Reconstruct_success
 
@@ -174,71 +174,6 @@ let apply_context chain_store context_index chain_id ~user_activated_upgrades
       operations_metadata = ops_metadata;
     }
 
-(* let reconstruct_chunks ~notify chain_store context_index
- *     ~user_activated_upgrades ~user_activated_protocol_overrides cemented_cycles
- *     =
- *   let chain_id = Store.Chain.chain_id chain_store in
- *   Store.Chain.genesis_block chain_store
- *   >|= Store.Block.hash
- *   >>= fun genesis_hash ->
- *   Store.Block.read_block chain_store genesis_hash
- *   >>=? fun genesis_b ->
- *   Store.Block.get_block_metadata chain_store genesis_b
- *   >>=? fun genesis_metadata ->
- *   let find block =
- *     List.find_opt
- *       (fun ({end_level; _} : Cemented_block_store.cemented_blocks_file) ->
- *         Store.Block.level block = end_level)
- *       cemented_cycles
- *   in
- *   let exist block = match find block with None -> false | Some _ -> true in
- *   let rec reconstruct_chunks level lafl metadata_chunk =
- *     if level = limit then return_unit
- *     else
- *       let block_hash = history.(level) in
- *       Store.Block.read_block chain_store block_hash
- *       >>=? fun block ->
- *       apply_context
- *         chain_store
- *         context_index
- *         chain_id
- *         ~user_activated_upgrades
- *         ~user_activated_protocol_overrides
- *         block
- *       >>=? fun metadata ->
- *       notify ()
- *       >>= fun () ->
- *       let new_metadata_chunk = (block, metadata) :: metadata_chunk in
- *       ( if lafl < metadata.last_allowed_fork_level then
- *         (\* New cycle : store the chunck and continue with an empty one*\)
- *         Store.Block.store_block_metadata
- *           chain_store
- *           (List.rev new_metadata_chunk)
- *         >>= fun () ->
- *         reconstruct_chunks (level + 1) metadata.last_allowed_fork_level []
- *       else if
- *       (\* For the first cycles, the last allowed fork level is not updated.
- *          We must rely on the previously stored cycles.*\)
- *       lafl = 0l && exist block
- *     then
- *         Store.Block.store_block_metadata
- *           chain_store
-  let block_store = Store.unsafe_get_block_store chain_store in
-  Cemented_block_store.load_table
-    ~cemented_blocks_dir:block_store.cemented_store.cemented_blocks_dir
-  >|= Array.to_list
-  >>= fun cemented_cycles -> *           (List.rev new_metadata_chunk)
- *         >>= fun () ->
- *         reconstruct_chunks (level + 1) metadata.last_allowed_fork_level []
- *       else
- *         reconstruct_chunks
- *           (level + 1)
- *           metadata.last_allowed_fork_level
- *           new_metadata_chunk )
- *       >>=? fun () -> return_unit
- *   in
- *   reconstruct_chunks 0 0l [(genesis_b, genesis_metadata)] *)
-
 let store_chunk cemented_store raw_chunk =
   Lwt_list.map_s
     (fun (block, metadata) ->
@@ -267,17 +202,20 @@ let reconstruct_complete_chunk chain_store context_index
             | Some b ->
                 return b)
       >>=? fun block ->
-      apply_context
-        chain_store
-        context_index
-        chain_id
-        ~user_activated_upgrades
-        ~user_activated_protocol_overrides
-        block
+      ( if Store.Block.is_genesis chain_store (Store.Block.hash block) then
+        Store.Chain.genesis_block chain_store
+        >>= fun genesis_block ->
+        Store.Block.get_block_metadata chain_store genesis_block
+      else
+        apply_context
+          chain_store
+          context_index
+          chain_id
+          ~user_activated_upgrades
+          ~user_activated_protocol_overrides
+          block )
       >>=? fun metadata ->
-      aux
-        (Int32.succ level)
-        (Store.Block.(repr block, repr_metadata metadata) :: acc)
+      aux (Int32.succ level) (Store.Block.(repr block, metadata) :: acc)
   in
   aux start_level []
 
@@ -289,38 +227,33 @@ let gather_available_metadata chain_store ~start_level ~end_level =
       >>=? fun block ->
       Store.Block.get_block_metadata chain_store block
       >>=? fun metadata ->
-      aux
-        (Int32.succ level)
-        (Store.Block.(repr block, repr_metadata metadata) :: acc)
+      aux (Int32.succ level) (Store.Block.(repr block, metadata) :: acc)
   in
   aux start_level []
 
 let reconstruct_partial_chunk chain_store context_index
     ~user_activated_upgrades ~user_activated_protocol_overrides ~start_level
-    ~limit ~end_level =
-  let block_store = Store.unsafe_get_block_store chain_store in
-  let cemented_block_store = Block_store.cemented_block_store block_store in
+    ~end_level =
   let chain_id = Store.Chain.chain_id chain_store in
   let rec aux level acc =
-    if level = limit then
-      gather_available_metadata chain_store ~start_level:limit ~end_level
-      >>=? fun read ->
-      store_chunk cemented_block_store List.(rev (append read acc))
-      >>=? fun () -> return_unit
+    if level > end_level then return List.(rev acc)
     else
       Store.Block.read_block_by_level chain_store level
       >>=? fun block ->
-      apply_context
-        chain_store
-        context_index
-        chain_id
-        ~user_activated_upgrades
-        ~user_activated_protocol_overrides
-        block
+      ( if Store.Block.is_genesis chain_store (Store.Block.hash block) then
+        Store.Chain.genesis_block chain_store
+        >>= fun genesis_block ->
+        Store.Block.get_block_metadata chain_store genesis_block
+      else
+        apply_context
+          chain_store
+          context_index
+          chain_id
+          ~user_activated_upgrades
+          ~user_activated_protocol_overrides
+          block )
       >>=? fun metadata ->
-      aux
-        (Int32.succ level)
-        (Store.Block.(repr block, repr_metadata metadata) :: acc)
+      aux (Int32.succ level) (Store.Block.(repr block, metadata) :: acc)
   in
   aux start_level []
 
@@ -341,46 +274,27 @@ let reconstruct_chunks ~notify chain_store context_index
         return_unit
     | ({Cemented_block_store.start_level; end_level; _} as file) :: tl -> (
       match cemented_metadata_status cemented_block_store file with
-      (* Should not happend: we should have stopped or not started *)
       | Complete ->
+          (* Should not happen: we should have stopped or not started *)
           return_unit
-      (* Reconstruct it partially and the stop *)
       | Partial limit ->
+          (* Reconstruct it partially and the stop *)
+          (* As the block at level = limit contains metadata the sub chunk
+             stops before. Then, we gather the stored metadata at limit (incl.) *)
           reconstruct_partial_chunk
             chain_store
             context_index
             ~user_activated_upgrades
             ~user_activated_protocol_overrides
-            ~start_level
-            ~limit
-            ~end_level
+            ~start_level:1l
+            ~end_level:Int32.(pred limit)
+          >>=? fun chunk ->
+          gather_available_metadata chain_store ~start_level:limit ~end_level
+          >>=? fun read ->
+          store_chunk cemented_block_store (List.append chunk read)
           >>=? fun () -> notify () >>= fun () -> return_unit
-      (* Reconstruct it and continue *)
-      | Not_stored when start_level = 0l && end_level = 1l ->
-          Store.Block.read_block_by_level chain_store 1l
-          >>=? fun block ->
-          let chain_id = Store.Chain.chain_id chain_store in
-          apply_context
-            chain_store
-            context_index
-            chain_id
-            ~user_activated_upgrades
-            ~user_activated_protocol_overrides
-            block
-          >>=? fun metadata ->
-          Store.Block.read_block_by_level chain_store 0l
-          >>=? fun genesis ->
-          Store.Block.get_block_metadata chain_store genesis
-          >>=? fun genesis_metadata ->
-          store_chunk
-            cemented_block_store
-            List.(
-              Store.Block.
-                [ (repr genesis, repr_metadata genesis_metadata);
-                  (repr block, repr_metadata metadata) ])
-          >>=? fun () ->
-          return_unit >>=? fun () -> notify () >>= fun () -> aux tl
       | Not_stored ->
+          (* Reconstruct it and continue *)
           reconstruct_complete_chunk
             chain_store
             context_index
@@ -425,36 +339,41 @@ let reconstruct_floating chain_store context_index ~user_activated_upgrades
           Floating_block_store.iter_seq
             (fun (block, predecessors) ->
               let level = Block_repr.level block in
-              (* It is needed to read the metadata using the cemented_block_store to
-                 avoid the cache mechanism which stores blocks without metadata *)
-              let metadata_opt =
-                Cemented_block_store.read_block_metadata
-                  (Block_store.cemented_block_store block_store)
-                  level
-              in
-              ( match metadata_opt with
-              | None ->
-                  (* When the metadata is not available in the cemented_block_store,
-                     it means that the block (in floating) was not cemented yet. It is
-                     thus needed to recompute its metadata + context *)
-                  apply_context
-                    chain_store
-                    context_index
-                    chain_id
-                    ~user_activated_upgrades
-                    ~user_activated_protocol_overrides
-                    (Store.Block.of_repr block)
-                  >>=? fun metadata -> return metadata
-              | Some m ->
-                  return (Store.Block.of_repr_metadata m) )
+              (* If the block is genesis then just retrieve its metadata. *)
+              ( if Store.Block.is_genesis chain_store (Block_repr.hash block)
+              then
+                Store.Chain.genesis_block chain_store
+                >>= fun genesis_block ->
+                Store.Block.get_block_metadata chain_store genesis_block
+              else
+                (* It is needed to read the metadata using the
+                   cemented_block_store to avoid the cache mechanism which
+                   stores blocks without metadata *)
+                let metadata_opt =
+                  Cemented_block_store.read_block_metadata
+                    (Block_store.cemented_block_store block_store)
+                    level
+                in
+                match metadata_opt with
+                | None ->
+                    (* When the metadata is not available in the
+                      cemented_block_store, it means that the block
+                      (in floating) was not cemented yet. It is thus needed to
+                      recompute its metadata + context *)
+                    apply_context
+                      chain_store
+                      context_index
+                      chain_id
+                      ~user_activated_upgrades
+                      ~user_activated_protocol_overrides
+                      (Store.Block.of_repr block)
+                | Some m ->
+                    return m )
               >>=? fun metadata ->
               Floating_block_store.append_block
                 new_ro_store
                 predecessors
-                {
-                  block with
-                  metadata = Some (Store.Block.repr_metadata metadata);
-                }
+                {block with metadata = Some metadata}
               >>= fun () -> notify () >>= fun () -> return_unit)
             fs
           >>=? fun () -> return_unit)
@@ -464,41 +383,55 @@ let reconstruct_floating chain_store context_index ~user_activated_upgrades
     block_store
     ~src:new_ro_store
     ~dst_kind:Floating_block_store.RO
+  >>=? fun () ->
+  (* Reset the RW to an empty floating_block_store *)
+  Floating_block_store.init ~chain_dir ~readonly:false RW_TMP
+  >>= fun empty_rw ->
+  Block_store.swap_floating_store
+    block_store
+    ~src:empty_rw
+    ~dst_kind:Floating_block_store.RW
   >>=? fun () -> return_unit
 
 (* Only Full modes with any offset can be reconstructed *)
 let check_history_mode_compatibility chain_store =
   match Store.Chain.history_mode chain_store with
-  | History_mode.(Full {offset}) ->
-      return offset
+  | History_mode.(Full _) ->
+      return_unit
   | _ as history_mode ->
       fail (Cannot_reconstruct history_mode)
 
-(* TODO: should we expose in in the Cemented_block_store ? *)
-let get_lowest_cemented_block_with_metadata chain_store offset =
+let get_lowest_cemented_block_with_metadata chain_store =
   let block_store = Store.unsafe_get_block_store chain_store in
-  let cemented_cycles =
-    Cemented_block_store.cemented_blocks_files
-      (Block_store.cemented_block_store block_store)
+  let cemented_block_store = Block_store.cemented_block_store block_store in
+  let chain_id = Store.Chain.chain_id chain_store in
+  let store_dir = Store.(directory (Chain.global_store chain_store)) in
+  let chain_dir = Naming.(store_dir // chain_store chain_id) in
+  let cemented_blocks_dir = Naming.(chain_dir // cemented_blocks_directory) in
+  Cemented_block_store.load_table ~cemented_blocks_dir
+  >>|? Array.to_list
+  >>=? fun cemented_cycles ->
+  let rec find last_missing = function
+    | [] ->
+        return last_missing
+    | ({Cemented_block_store.end_level; _} as file) :: tl -> (
+      match cemented_metadata_status cemented_block_store file with
+      | Not_stored ->
+          find end_level tl
+      | Partial n ->
+          return n
+      | Complete ->
+          return last_missing )
   in
-  (* FIXME keep the array *)
-  let cemented_cycles = Array.to_list cemented_cycles |> List.rev in
-  let lcl =
-    try
-      let ({start_level; _} : Cemented_block_store.cemented_blocks_file) =
-        List.nth
-          cemented_cycles
-          (min (offset - 1) (List.length cemented_cycles - 1))
-      in
-      start_level
-    with _ -> 0l
-  in
-  Store.Block.read_block_by_level chain_store lcl
+  Store.Chain.genesis_block chain_store
+  >>= fun genesis_block ->
+  find (Store.Block.level genesis_block) cemented_cycles
+  >>=? fun lcl -> Store.Block.read_block_by_level chain_store lcl
 
-let default_starting_block chain_store offset =
-  get_lowest_cemented_block_with_metadata chain_store offset
-  >>=? fun lcb ->
-  let lcb_level = Store.Block.level lcb in
+let default_target_block chain_store =
+  get_lowest_cemented_block_with_metadata chain_store
+  >>=? fun lcbwm ->
+  let lcbwm_level = Store.Block.level lcbwm in
   Store.Chain.current_head chain_store
   >>= fun current_head ->
   Store.Block.get_block_metadata chain_store current_head
@@ -511,7 +444,7 @@ let default_starting_block chain_store offset =
       (* Happens when the storage was imported from a snapshot recently and the
          savepoint was not updated yet *)
       head_lafl
-    else lcb_level
+    else lcbwm_level
   in
   Store.Block.read_block_by_level chain_store starting_level
 
@@ -526,8 +459,8 @@ let restore_constants chain_store genesis_block =
     chain_store
     ~head:new_head
     ~checkpoint
-    ~savepoint:(genesis_block, 0l)
-    ~caboose:(genesis_block, 0l)
+    ~savepoint:(Store.Block.descriptor genesis_block)
+    ~caboose:(Store.Block.descriptor genesis_block)
 
 let reconstruct ?patch_context ~store_root ~context_root ~(genesis : Genesis.t)
     ~user_activated_upgrades ~user_activated_protocol_overrides =
@@ -540,17 +473,17 @@ let reconstruct ?patch_context ~store_root ~context_root ~(genesis : Genesis.t)
   >>=? fun store ->
   let context_index = Store.context_index store in
   let chain_store = Store.main_chain_store store in
+  Store.Chain.genesis_block chain_store
+  >>= fun genesis_block ->
   check_history_mode_compatibility chain_store
-  >>=? fun full_offset ->
-  default_starting_block chain_store full_offset
-  >>=? fun starting_block ->
+  >>=? fun () ->
+  default_target_block chain_store
+  >>=? fun target_block ->
   fail_when
-    (Store.Block.level starting_block = 0l)
+    (Store.Block.level target_block = Store.Block.level genesis_block)
     (Reconstruction_failure Nothing_to_reconstruct)
   >>=? fun () ->
-  lwt_emit
-    (Reconstruct_start_default
-       (Store.Block.hash starting_block, Store.Block.level starting_block))
+  lwt_emit (Reconstruct_start_default (Store.Block.descriptor target_block))
   >>= fun () ->
   lwt_emit Reconstruct_enum
   >>= fun () ->
@@ -567,7 +500,6 @@ let reconstruct ?patch_context ~store_root ~context_root ~(genesis : Genesis.t)
     ~user_activated_upgrades
     ~user_activated_protocol_overrides
   >>=? fun () ->
-  restore_constants chain_store genesis.block
+  restore_constants chain_store genesis_block
   >>=? fun () ->
-  lwt_emit Reconstruct_success
-  >>= fun () -> Store.close_store store >>=? fun () -> return_unit
+  lwt_emit Reconstruct_success >>= fun () -> Store.close_store store
