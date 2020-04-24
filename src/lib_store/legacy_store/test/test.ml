@@ -24,4 +24,6 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-let () = Alcotest.run "tezos-legacy-store" [("raw_store", Test_raw_store.tests)]
+let () =
+  Lwt_main.run
+    (Alcotest_lwt.run "tezos-legacy-store" [("raw_store", Test_raw_store.tests)])

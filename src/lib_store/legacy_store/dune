@@ -3,6 +3,7 @@
  (public_name tezos-legacy-store)
  (libraries tezos-base
             tezos-shell-services
+            tezos-stdlib-unix
             tezos-lmdb)
  (flags (:standard -open Tezos_shell_services
                    -open Tezos_base
