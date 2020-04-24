@@ -63,6 +63,41 @@ let equal_block ?msg st1 st2 =
   in
   equal ?msg ~prn ~eq st1 st2
 
+let equal_metadata ?msg m1 m2 =
+  let eq m1 m2 =
+    match (m1, m2) with
+    | (None, None) ->
+        true
+    | (Some m1, Some m2) ->
+        m1 = m2
+    | _ ->
+        false
+  in
+  let prn (md : Store.Block.metadata option) =
+    Format.asprintf
+      "%a"
+      (Option.pp
+         ?default:None
+         (fun fmt
+              ({ message;
+                 max_operations_ttl;
+                 last_allowed_fork_level;
+                 block_metadata = _;
+                 operations_metadata = _ } :
+                Store.Block.metadata)
+              ->
+           Format.fprintf
+             fmt
+             "message: %a@.max_operations_ttl: %d@. last_allowed_fork_level: \
+              %ld@."
+             (Option.pp ?default:None (fun fmt s -> Format.fprintf fmt "%s" s))
+             message
+             max_operations_ttl
+             last_allowed_fork_level))
+      md
+  in
+  equal ?msg ~prn ~eq m1 m2
+
 let make_equal_list eq prn ?(msg = "") x y =
   let rec iter i x y =
     match (x, y) with
@@ -128,21 +163,12 @@ let is_false ?(msg = "") x = if x then fail "false" "true" msg
 
 let is_true ?(msg = "") x = if not x then fail "true" "false" msg
 
-let equal_checkpoint ?msg cp1 cp2 =
-  let eq cp1 cp2 =
-    match (cp1, cp2) with
-    | (None, None) ->
-        true
-    | (Some (x, bh1), Some (y, bh2)) ->
-        Int32.equal x y && Block_hash.equal bh1 bh2
-    | _ ->
-        false
-  in
-  let prn = function
-    | None ->
-        "none"
-    | Some (_x, bh) ->
-        (*let s = Printf.sprintf "%s" x in*)
-        Block_hash.to_b58check bh
-  in
-  equal ?msg ~prn ~eq cp1 cp2
+let equal_block_descriptor ?msg bd1 bd2 =
+  let eq (l1, h1) (l2, h2) = Int32.equal l1 l2 && Block_hash.equal h1 h2 in
+  let prn (l, h) = Format.asprintf "(%ld, %a)" l Block_hash.pp h in
+  equal ?msg ~prn ~eq bd1 bd2
+
+let equal_history_mode ?msg hm1 hm2 =
+  let eq hm1 hm2 = hm1 = hm2 in
+  let prn = Format.asprintf "%a" History_mode.pp in
+  equal ?msg ~prn ~eq hm1 hm2

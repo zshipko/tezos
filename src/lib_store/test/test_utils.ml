@@ -406,7 +406,7 @@ let assert_presence_in_store ?(with_metadata = false) chain_store blocks =
             >>= fun b_metadata ->
             Store.Block.get_block_metadata_opt chain_store b'
             >>= fun b'_metadata ->
-            Assert.equal
+            Assert.equal_metadata
               b_metadata
               b'_metadata
               ~msg:"assert_presence: different metadata" ;
