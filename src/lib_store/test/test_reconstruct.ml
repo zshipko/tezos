@@ -34,6 +34,8 @@ let test_from_bootstrapped ~descr (store_root, context_root) store
   >>= fun genesis_block ->
   Alpha_utils.bake_n chain_store nb_blocks_to_bake genesis_block
   >>=? fun (baked_blocks, last) ->
+  Store.Chain.savepoint chain_store
+  >>= fun savepoint ->
   Store.close_store store
   >>= fun () ->
   Error_monad.protect
@@ -49,8 +51,8 @@ let test_from_bootstrapped ~descr (store_root, context_root) store
     ~on_error:(function
       | [Reconstruction_errors.(Reconstruction_failure Nothing_to_reconstruct)]
         as e ->
-          if Store.Block.level last <= Int32.of_int ((8 * 5) + (2 * 8)) then
-            (* It is expected as nothing was reconstructed *)
+          if Compare.Int32.(snd savepoint = 0l) then
+            (* It is expected as nothing was pruned *)
             return_true
           else (
             Format.printf "@\nTest failed:@\n%a@." Error_monad.pp_print_error e ;

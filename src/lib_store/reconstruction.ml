@@ -257,8 +257,8 @@ let reconstruct_partial_chunk chain_store context_index
   in
   aux start_level []
 
-let reconstruct_chunks ~notify chain_store context_index
-    ~user_activated_upgrades ~user_activated_protocol_overrides =
+let reconstruct_chunks chain_store context_index ~user_activated_upgrades
+    ~user_activated_protocol_overrides =
   let block_store = Store.unsafe_get_block_store chain_store in
   let cemented_block_store = Block_store.cemented_block_store block_store in
   let chain_id = Store.Chain.chain_id chain_store in
@@ -268,59 +268,60 @@ let reconstruct_chunks ~notify chain_store context_index
   Cemented_block_store.load_table ~cemented_blocks_dir
   >>|? Array.to_list
   >>=? fun cemented_cycles ->
-  let rec aux = function
-    | [] ->
-        (* Should not happend *)
-        return_unit
-    | ({Cemented_block_store.start_level; end_level; _} as file) :: tl -> (
-      match cemented_metadata_status cemented_block_store file with
-      | Complete ->
-          (* Should not happen: we should have stopped or not started *)
-          return_unit
-      | Partial limit ->
-          (* Reconstruct it partially and the stop *)
-          (* As the block at level = limit contains metadata the sub chunk
+  Lwt_utils_unix.display_progress
+    ~pp_print_step:(fun ppf i ->
+      Format.fprintf ppf "Reconstructing cemented blocks: %i cycles rebuilt" i)
+    (fun notify ->
+      let rec aux = function
+        | [] ->
+            (* Should not happend *)
+            return_unit
+        | ({Cemented_block_store.start_level; end_level; _} as file) :: tl -> (
+          match cemented_metadata_status cemented_block_store file with
+          | Complete ->
+              (* Should not happen: we should have stopped or not started *)
+              return_unit
+          | Partial limit ->
+              (* Reconstruct it partially and the stop *)
+              (* As the block at level = limit contains metadata the sub chunk
              stops before. Then, we gather the stored metadata at limit (incl.) *)
-          reconstruct_partial_chunk
-            chain_store
-            context_index
-            ~user_activated_upgrades
-            ~user_activated_protocol_overrides
-            ~start_level:1l
-            ~end_level:Int32.(pred limit)
-          >>=? fun chunk ->
-          gather_available_metadata chain_store ~start_level:limit ~end_level
-          >>=? fun read ->
-          store_chunk cemented_block_store (List.append chunk read)
-          >>=? fun () -> notify () >>= fun () -> return_unit
-      | Not_stored ->
-          (* Reconstruct it and continue *)
-          reconstruct_complete_chunk
-            chain_store
-            context_index
-            ~user_activated_upgrades
-            ~user_activated_protocol_overrides
-            ~start_level
-            ~end_level
-          >>=? fun () -> notify () >>= fun () -> aux tl )
-  in
-  aux cemented_cycles
+              reconstruct_partial_chunk
+                chain_store
+                context_index
+                ~user_activated_upgrades
+                ~user_activated_protocol_overrides
+                ~start_level:1l
+                ~end_level:Int32.(pred limit)
+              >>=? fun chunk ->
+              gather_available_metadata
+                chain_store
+                ~start_level:limit
+                ~end_level
+              >>=? fun read ->
+              store_chunk cemented_block_store (List.append chunk read)
+              >>=? fun () -> notify () >>= fun () -> return_unit
+          | Not_stored ->
+              (* Reconstruct it and continue *)
+              reconstruct_complete_chunk
+                chain_store
+                context_index
+                ~user_activated_upgrades
+                ~user_activated_protocol_overrides
+                ~start_level
+                ~end_level
+              >>=? fun () -> notify () >>= fun () -> aux tl )
+      in
+      aux cemented_cycles)
 
 (* Reconstruct the storage without checking if the context is already populated.
  We assume that commiting an exsisting context is a nop. *)
 let reconstruct_cemented chain_store context_index ~user_activated_upgrades
     ~user_activated_protocol_overrides =
-  Lwt_utils_unix.display_progress
-    ~pp_print_step:(fun ppf i ->
-      Format.fprintf ppf "Reconstructing cemented blocks: %i/%i..." i 0)
-    (fun notify ->
-      reconstruct_chunks
-        ~notify
-        chain_store
-        context_index
-        ~user_activated_upgrades
-        ~user_activated_protocol_overrides)
-  >>=? fun () -> return_unit
+  reconstruct_chunks
+    chain_store
+    context_index
+    ~user_activated_upgrades
+    ~user_activated_protocol_overrides
 
 let reconstruct_floating chain_store context_index ~user_activated_upgrades
     ~user_activated_protocol_overrides =
@@ -401,53 +402,6 @@ let check_history_mode_compatibility chain_store =
   | _ as history_mode ->
       fail (Cannot_reconstruct history_mode)
 
-let get_lowest_cemented_block_with_metadata chain_store =
-  let block_store = Store.unsafe_get_block_store chain_store in
-  let cemented_block_store = Block_store.cemented_block_store block_store in
-  let chain_id = Store.Chain.chain_id chain_store in
-  let store_dir = Store.(directory (Chain.global_store chain_store)) in
-  let chain_dir = Naming.(store_dir // chain_store chain_id) in
-  let cemented_blocks_dir = Naming.(chain_dir // cemented_blocks_directory) in
-  Cemented_block_store.load_table ~cemented_blocks_dir
-  >>|? Array.to_list
-  >>=? fun cemented_cycles ->
-  let rec find last_missing = function
-    | [] ->
-        return last_missing
-    | ({Cemented_block_store.end_level; _} as file) :: tl -> (
-      match cemented_metadata_status cemented_block_store file with
-      | Not_stored ->
-          find end_level tl
-      | Partial n ->
-          return n
-      | Complete ->
-          return last_missing )
-  in
-  Store.Chain.genesis_block chain_store
-  >>= fun genesis_block ->
-  find (Store.Block.level genesis_block) cemented_cycles
-  >>=? fun lcl -> Store.Block.read_block_by_level chain_store lcl
-
-let default_target_block chain_store =
-  get_lowest_cemented_block_with_metadata chain_store
-  >>=? fun lcbwm ->
-  let lcbwm_level = Store.Block.level lcbwm in
-  Store.Chain.current_head chain_store
-  >>= fun current_head ->
-  Store.Block.get_block_metadata chain_store current_head
-  >>=? fun head_metadata ->
-  let head_lafl = Store.Block.last_allowed_fork_level head_metadata in
-  Store.Chain.savepoint chain_store
-  >>= fun (_, savepoint_level) ->
-  let starting_level =
-    if head_lafl < savepoint_level then
-      (* Happens when the storage was imported from a snapshot recently and the
-         savepoint was not updated yet *)
-      head_lafl
-    else lcbwm_level
-  in
-  Store.Block.read_block_by_level chain_store starting_level
-
 let restore_constants chain_store genesis_block =
   Store.Chain.set_history_mode chain_store History_mode.Archive
   >>=? fun () ->
@@ -481,14 +435,13 @@ let reconstruct ?patch_context ~store_root ~context_root ~(genesis : Genesis.t)
       >>= fun genesis_block ->
       check_history_mode_compatibility chain_store
       >>=? fun () ->
-      default_target_block chain_store
-      >>=? fun target_block ->
+      Store.Chain.savepoint chain_store
+      >>= fun savepoint ->
       fail_when
-        (Store.Block.level target_block = Store.Block.level genesis_block)
+        (snd savepoint = Store.Block.level genesis_block)
         (Reconstruction_failure Nothing_to_reconstruct)
       >>=? fun () ->
-      lwt_emit
-        (Reconstruct_start_default (Store.Block.descriptor target_block))
+      lwt_emit (Reconstruct_start_default savepoint)
       >>= fun () ->
       lwt_emit Reconstruct_enum
       >>= fun () ->
