@@ -185,7 +185,7 @@ let store_chunk cemented_store raw_chunk =
 let reconstruct_complete_chunk chain_store context_index
     ~user_activated_upgrades ~user_activated_protocol_overrides ~start_level
     ~end_level =
-  let block_store = Store.unsafe_get_block_store chain_store in
+  let block_store = Store.Unsafe.get_block_store chain_store in
   let chain_id = Store.Chain.chain_id chain_store in
   let cemented_block_store = Block_store.cemented_block_store block_store in
   let rec aux level acc =
@@ -215,7 +215,9 @@ let reconstruct_complete_chunk chain_store context_index
           ~user_activated_protocol_overrides
           block )
       >>=? fun metadata ->
-      aux (Int32.succ level) (Store.Block.(repr block, metadata) :: acc)
+      aux
+        (Int32.succ level)
+        (Store.Unsafe.(repr_of_block block, metadata) :: acc)
   in
   aux start_level []
 
@@ -227,7 +229,9 @@ let gather_available_metadata chain_store ~start_level ~end_level =
       >>=? fun block ->
       Store.Block.get_block_metadata chain_store block
       >>=? fun metadata ->
-      aux (Int32.succ level) (Store.Block.(repr block, metadata) :: acc)
+      aux
+        (Int32.succ level)
+        ((Store.Unsafe.repr_of_block block, metadata) :: acc)
   in
   aux start_level []
 
@@ -253,13 +257,15 @@ let reconstruct_partial_chunk chain_store context_index
           ~user_activated_protocol_overrides
           block )
       >>=? fun metadata ->
-      aux (Int32.succ level) (Store.Block.(repr block, metadata) :: acc)
+      aux
+        (Int32.succ level)
+        ((Store.Unsafe.repr_of_block block, metadata) :: acc)
   in
   aux start_level []
 
 let reconstruct_chunks chain_store context_index ~user_activated_upgrades
     ~user_activated_protocol_overrides =
-  let block_store = Store.unsafe_get_block_store chain_store in
+  let block_store = Store.Unsafe.get_block_store chain_store in
   let cemented_block_store = Block_store.cemented_block_store block_store in
   let chain_id = Store.Chain.chain_id chain_store in
   let store_dir = Store.(directory (Chain.global_store chain_store)) in
@@ -326,7 +332,7 @@ let reconstruct_cemented chain_store context_index ~user_activated_upgrades
 let reconstruct_floating chain_store context_index ~user_activated_upgrades
     ~user_activated_protocol_overrides =
   let chain_id = Store.Chain.chain_id chain_store in
-  let block_store = Store.unsafe_get_block_store chain_store in
+  let block_store = Store.Unsafe.get_block_store chain_store in
   let chain_dir = Store.Chain.chain_dir chain_store in
   Floating_block_store.init ~chain_dir ~readonly:false RO_TMP
   >>= fun new_ro_store ->
@@ -358,16 +364,16 @@ let reconstruct_floating chain_store context_index ~user_activated_upgrades
                 match metadata_opt with
                 | None ->
                     (* When the metadata is not available in the
-                      cemented_block_store, it means that the block
-                      (in floating) was not cemented yet. It is thus needed to
-                      recompute its metadata + context *)
+                       cemented_block_store, it means that the block
+                       (in floating) was not cemented yet. It is thus needed to
+                       recompute its metadata + context *)
                     apply_context
                       chain_store
                       context_index
                       chain_id
                       ~user_activated_upgrades
                       ~user_activated_protocol_overrides
-                      (Store.Block.of_repr block)
+                      (Store.Unsafe.block_of_repr block)
                 | Some m ->
                     return m )
               >>=? fun metadata ->
@@ -403,18 +409,19 @@ let check_history_mode_compatibility chain_store =
       fail (Cannot_reconstruct history_mode)
 
 let restore_constants chain_store genesis_block =
-  Store.Chain.set_history_mode chain_store History_mode.Archive
+  Store.Unsafe.set_history_mode chain_store History_mode.Archive
   >>=? fun () ->
   Store.Chain.current_head chain_store
   >>= fun new_head ->
   Store.Chain.checkpoint chain_store
   >>= fun checkpoint ->
-  Store.Chain.re_store
-    chain_store
-    ~head:new_head
-    ~checkpoint
-    ~savepoint:(Store.Block.descriptor genesis_block)
-    ~caboose:(Store.Block.descriptor genesis_block)
+  Store.Unsafe.set_head chain_store new_head
+  >>=? fun () ->
+  Store.Unsafe.set_checkpoint chain_store checkpoint
+  >>=? fun () ->
+  let genesis = Store.Block.descriptor genesis_block in
+  Store.Unsafe.set_savepoint chain_store genesis
+  >>=? fun () -> Store.Unsafe.set_caboose chain_store genesis
 
 let reconstruct ?patch_context ~store_root ~context_root ~(genesis : Genesis.t)
     ~user_activated_upgrades ~user_activated_protocol_overrides =

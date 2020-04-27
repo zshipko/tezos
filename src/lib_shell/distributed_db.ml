@@ -341,7 +341,7 @@ let inject_operation chain_db h op =
     op
 
 let commit_protocol db h p =
-  Store.Protocol.store_protocol db.disk h p
+  Store.Protocol.store db.disk h p
   >>= fun res ->
   Distributed_db_requester.Raw_protocol.clear_or_cancel db.protocol_db h ;
   return (res <> None)

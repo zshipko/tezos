@@ -181,10 +181,6 @@ module Block = struct
     operations_metadata : Bytes.t list list;
   }
 
-  let repr b = b
-
-  let of_repr b = b
-
   let equal b b' = Block_hash.equal (Block_repr.hash b) (Block_repr.hash b')
 
   let descriptor blk = (Block_repr.hash blk, Block_repr.level blk)
@@ -403,6 +399,19 @@ module Block = struct
     let context_index = chain_store.global_store.context_index in
     Context.exists context_index (Block_repr.context block)
 
+  let testchain_status chain_store block =
+    context_exn chain_store block
+    >>= fun context ->
+    Context.get_test_chain context
+    >>= fun status ->
+    match status with
+    | Running {genesis; _} ->
+        Lwt.return (status, Some genesis)
+    | Forking _ ->
+        Lwt.return (status, Some (Block_repr.hash block))
+    | Not_running ->
+        Lwt.return (status, None)
+
   let protocol_hash chain_store block =
     Shared.use chain_store.chain_state (fun {protocol_levels; _} ->
         Stored_data.read protocol_levels
@@ -570,18 +579,16 @@ module Chain_traversal = struct
     common_ancestor chain_store from_block to_block
     >>= function
     | None ->
-        (* TODO *)
         assert false
     | Some ancestor -> (
         path chain_store ancestor to_block
         >>= function
         | None ->
-            (* TODO *)
-            assert false
+            Lwt.return (ancestor, [])
         | Some path ->
             Lwt.return (ancestor, path) )
 
-  (* FIXME replace that with a proper cache *)
+  (* TODO improve the computation by caching previous results. *)
   let live_blocks chain_store ~block n =
     let rec loop bacc oacc block_head n =
       let hashes = Block.all_operation_hashes block_head in
@@ -636,6 +643,8 @@ module Chain = struct
   type nonrec chain_store = chain_store
 
   type t = chain_store
+
+  type nonrec testchain = testchain
 
   let global_store {global_store; _} = global_store
 
@@ -991,53 +1000,6 @@ module Chain = struct
       ()
     >>= fun () -> return (checkpoint, savepoint, caboose, to_block)
 
-  let re_store (chain_store : t) ~head:new_head ~checkpoint:new_checkpoint
-      ~savepoint:new_savepoint ~caboose:new_caboose =
-    (* (\* If not provided, we assume that the checkpoint is the
-     *  highest cemented block *\)
-     * ( match checkpoint with
-     * | Some c ->
-     *     return c
-     * | None -> (
-     *   match get_highest_cemented_level chain_store with
-     *   | Some l ->
-     *       Block.read_block_by_level chain_store l
-     *       >>=? fun b -> return (Block.hash b, l)
-     *   | None ->
-     *       failwith "Failed to find a suitable checkpoint" ) )
-     * >>=? fun new_checkpoint ->
-     * (\* If not provided, we assume that the savepoint is the
-     *  successor of the new_checkpoint *\)
-     * ( match savepoint with
-     * | Some s ->
-     *     return s
-     * | None ->
-     *     let l = Int32.add (snd new_checkpoint) 1l in
-     *     Block.read_block_by_level chain_store l
-     *     >>=? fun b -> return (Block.hash b, l) )
-     * >>=? fun new_savepoint -> *)
-    Shared.update_with
-      chain_store.chain_state
-      (fun ({current_head; _} as chain_state) ->
-        Stored_data.write current_head new_head
-        >>= fun () ->
-        Stored_data.write chain_state.checkpoint_data new_checkpoint
-        >>= fun () ->
-        Stored_data.write chain_state.savepoint_data new_savepoint
-        >>= fun () ->
-        Stored_data.write chain_state.caboose_data new_caboose
-        >>= fun () ->
-        return
-          ( Some
-              {
-                chain_state with
-                checkpoint = new_checkpoint;
-                savepoint = new_savepoint;
-                caboose = new_caboose;
-              },
-            () ))
-    >>=? fun () -> return_unit
-
   let set_head chain_store (new_head : Block.t) : Block.t tzresult Lwt.t =
     Shared.update_with
       chain_store.chain_state
@@ -1076,7 +1038,7 @@ module Chain = struct
             Block.last_allowed_fork_level prev_head_metadata
           in
           (* Should we trigger a merge ? i.e. has the last allowed
-               fork level changed and do we have enough blocks ? *)
+             fork level changed and do we have enough blocks ? *)
           let has_lafl_changed =
             Compare.Int32.(
               new_head_last_allowed_fork_level
@@ -1203,6 +1165,7 @@ module Chain = struct
         locked_is_acceptable_block chain_store chain_state block_descr)
 
   let best_known_head_for_checkpoint chain_store ~checkpoint =
+    (* TODO: is this really correct ? check legacy *)
     let (_, checkpoint_level) = checkpoint in
     current_head chain_store
     >>= fun current_head ->
@@ -1587,19 +1550,6 @@ module Chain = struct
 
   (* Test chain *)
 
-  let testchain_status chain_store block =
-    Block.context_exn chain_store block
-    >>= fun context ->
-    Context.get_test_chain context
-    >>= fun status ->
-    match status with
-    | Running {genesis; _} ->
-        Lwt.return (status, Some genesis)
-    | Forking _ ->
-        Lwt.return (status, Some (Block.hash block))
-    | Not_running ->
-        Lwt.return (status, None)
-
   let testchain chain_store =
     Shared.use chain_store.chain_state (fun {active_testchain; _} ->
         Lwt.return active_testchain)
@@ -1735,7 +1685,7 @@ module Chain = struct
         get_commit_info index block
         >>=? fun commit_info -> return_some commit_info)
 
-  let set_protocol_level chain_store protocol_level (block, protocol_hash) =
+  let set_protocol_level chain_store ~protocol_level (block, protocol_hash) =
     Shared.locked_use chain_store.chain_state (fun {protocol_levels; _} ->
         compute_commit_info chain_store (Block.header block)
         >>=? fun commit_info_opt ->
@@ -1752,28 +1702,28 @@ module Chain = struct
                   protocol_levels))
         >>= fun () -> return_unit)
 
-  let find_activation_block chain_store ~proto_level =
+  let find_activation_block chain_store ~protocol_level =
     Shared.use chain_store.chain_state (fun {protocol_levels; _} ->
         Stored_data.read protocol_levels
         >>= fun protocol_levels ->
-        Lwt.return (Protocol_levels.find_opt proto_level protocol_levels))
+        Lwt.return (Protocol_levels.find_opt protocol_level protocol_levels))
 
-  let find_protocol chain_store ~proto_level =
-    find_activation_block chain_store ~proto_level
+  let find_protocol chain_store ~protocol_level =
+    find_activation_block chain_store ~protocol_level
     >>= function
     | None ->
         Lwt.return_none
     | Some {Protocol_levels.protocol; _} ->
         Lwt.return_some protocol
 
-  let may_update_protocol_level chain_store proto_level (block, protocol_hash)
-      =
-    find_activation_block chain_store ~proto_level
+  let may_update_protocol_level chain_store ~protocol_level
+      (block, protocol_hash) =
+    find_activation_block chain_store ~protocol_level
     >>= function
     | Some _ ->
         return_unit
     | None ->
-        set_protocol_level chain_store proto_level (block, protocol_hash)
+        set_protocol_level chain_store ~protocol_level (block, protocol_hash)
 
   let all_protocol_levels chain_store =
     Shared.use chain_store.chain_state (fun {protocol_levels; _} ->
@@ -1794,7 +1744,7 @@ module Chain = struct
         ( if Compare.Int32.(Block.level pred < save_point_level) then
           find_activation_block
             chain_store
-            ~proto_level:(Block.proto_level pred)
+            ~protocol_level:(Block.proto_level pred)
           >>= function
           | Some {Protocol_levels.protocol; _} ->
               Lwt.return protocol
@@ -1830,11 +1780,9 @@ module Chain = struct
 end
 
 module Protocol = struct
-  let all_stored_protocols {protocol_store; _} =
-    Protocol_store.all protocol_store
+  let all {protocol_store; _} = Protocol_store.all protocol_store
 
-  let store_protocol {protocol_store; protocol_watcher; _} protocol_hash
-      protocol =
+  let store {protocol_store; protocol_watcher; _} protocol_hash protocol =
     Protocol_store.store protocol_store protocol_hash protocol
     >>= function
     | None ->
@@ -1843,7 +1791,7 @@ module Protocol = struct
         Lwt_watcher.notify protocol_watcher protocol_hash ;
         Lwt.return p
 
-  let store_raw_protocol {protocol_store; protocol_watcher; _} protocol_hash
+  let store_raw {protocol_store; protocol_watcher; _} protocol_hash
       raw_protocol =
     Protocol_store.raw_store protocol_store protocol_hash raw_protocol
     >>= function
@@ -1853,10 +1801,10 @@ module Protocol = struct
         Lwt_watcher.notify protocol_watcher protocol_hash ;
         Lwt.return p
 
-  let read_protocol {protocol_store; _} protocol_hash =
+  let read {protocol_store; _} protocol_hash =
     Protocol_store.read protocol_store protocol_hash
 
-  let is_protocol_stored {protocol_store; _} protocol_hash =
+  let mem {protocol_store; _} protocol_hash =
     Protocol_store.mem protocol_store protocol_hash
 
   let protocol_watcher {protocol_watcher; _} =
@@ -2102,6 +2050,7 @@ let init ?patch_context ?commit_genesis ?history_mode ?(readonly = false)
       Lwt.return (context_index, commit_genesis) )
   >>= fun (context_index, commit_genesis) ->
   let chain_dir = Naming.(store_dir // chain_store chain_id) in
+  (* FIXME check that only one chain_dir exists *)
   if Sys.file_exists chain_dir && Sys.is_directory chain_dir then
     load_store
       ?history_mode
@@ -2133,349 +2082,6 @@ let close_store global_store =
   in
   Chain.close_chain_store main_chain_store
   >>= fun () -> Context.close global_store.context_index
-
-let open_for_snapshot_export ~store_dir ~context_dir genesis
-    ~(locked_f : chain_store * Context.index -> 'a tzresult Lwt.t) =
-  let chain_id = Chain_id.of_block_hash genesis.Genesis.block in
-  Context.init ~readonly:true context_dir
-  >>= fun context_index ->
-  load_store
-    ~store_dir
-    ~context_index
-    ~chain_id
-    ~allow_testchains:false
-    ~readonly:true
-    ()
-  >>=? fun store ->
-  let chain_store = main_chain_store store in
-  lock_for_read chain_store.lockfile
-  >>= fun () ->
-  Error_monad.protect
-    ~on_error:(fun err ->
-      close_store store >>= fun () -> Lwt.return (Error err))
-    (fun () ->
-      locked_f (chain_store, context_index)
-      >>=? fun res -> close_store store >>= fun () -> return res)
-
-let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
-    ~context_index ~genesis ~genesis_context_hash ~floating_blocks_stream
-    ~new_head_with_metadata ~protocol_levels ~history_mode =
-  let chain_id = Chain_id.of_block_hash genesis.Genesis.block in
-  let chain_dir = Naming.(store_dir // chain_store chain_id) in
-  let genesis_block =
-    Chain.create_genesis_block ~genesis genesis_context_hash
-  in
-  let new_head_descr =
-    ( Block_repr.hash new_head_with_metadata,
-      Block_repr.level new_head_with_metadata )
-  in
-  (* Write consistent stored data *)
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.protocol_levels)
-    Protocol_levels.encoding
-    protocol_levels
-  >>= fun () ->
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.current_head)
-    Block_repr.encoding
-    new_head_with_metadata
-  >>= fun () ->
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.alternate_heads)
-    (Block_hash.Map.encoding Data_encoding.int32)
-    Block_hash.Map.empty
-  >>= fun () ->
-  (* Checkpoint is the new head *)
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.checkpoint)
-    Data_encoding.(tup2 Block_hash.encoding int32)
-    new_head_descr
-  >>= fun () ->
-  (* Savepoint is the head *)
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.savepoint)
-    Data_encoding.(tup2 Block_hash.encoding int32)
-    new_head_descr
-  >>= fun () ->
-  (* Depending on the history mode, set the caboose properly *)
-  ( match history_mode with
-  | History_mode.Archive | Full _ ->
-      return (Block_repr.hash genesis_block, Block_repr.level genesis_block)
-  | Rolling _ -> (
-      Lwt_stream.peek floating_blocks_stream
-      >>= function
-      | None ->
-          (* FIXME what happens when cemented ? *)
-          failwith
-            "Store.restore_from_snapshot: could not find the caboose for \
-             rolling"
-      | Some caboose -> (
-        match Block_repr.metadata new_head_with_metadata with
-        | None ->
-            assert false
-        | Some metadata ->
-            if
-              Int32.sub
-                (Block_repr.level new_head_with_metadata)
-                (Int32.of_int metadata.max_operations_ttl)
-              <= 0l
-            then return (genesis.block, 0l)
-            else return (Block_repr.hash caboose, Block_repr.level caboose) ) )
-  )
-  >>=? fun caboose_descr ->
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.caboose)
-    Data_encoding.(tup2 Block_hash.encoding int32)
-    caboose_descr
-  >>= fun () ->
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Naming.Chain_data.invalid_blocks)
-    (Block_hash.Map.encoding invalid_block_encoding)
-    Block_hash.Map.empty
-  >>= fun () ->
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.forked_chains)
-    (Chain_id.Map.encoding Block_hash.encoding)
-    Chain_id.Map.empty
-  >>= fun () ->
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.genesis)
-    Block_repr.encoding
-    genesis_block
-  >>= fun () ->
-  (* Load the store (containing the cemented if relevant) *)
-  Block_store.load ~chain_dir ~genesis_block ~readonly:false
-  >>=? fun block_store ->
-  (* Store the floating *)
-  Lwt_stream.iter_s
-    (fun block ->
-      Block_store.store_block block_store block >>= fun () -> notify ())
-    floating_blocks_stream
-  >>= fun () ->
-  (* Store the head *)
-  Block_store.store_block block_store new_head_with_metadata
-  >>= fun () ->
-  notify ()
-  >>= fun () ->
-  (* Check correctness of protocol transition blocks *)
-  let open Protocol_levels in
-  iter_s
-    (fun (_, {block = (bh, _); protocol; commit_info = commit_info_opt}) ->
-      Block_store.read_block block_store ~read_metadata:false (Block (bh, 0))
-      >>= fun block_opt ->
-      match (block_opt, commit_info_opt) with
-      | (None, _) ->
-          (* Ignore unknown blocks *)
-          return_unit
-      | (Some _block, None) ->
-          (* TODO no commit info : raise a warning *)
-          return_unit
-      | (Some block, Some commit_info) ->
-          Context.check_protocol_commit_consistency
-            context_index
-            ~expected_context_hash:(Block.context_hash block)
-            ~given_protocol_hash:protocol
-            ~author:commit_info.author
-            ~message:commit_info.message
-            ~timestamp:(Block.timestamp block)
-            ~test_chain_status:commit_info.test_chain_status
-            ~data_merkle_root:commit_info.data_merkle_root
-            ~parents_contexts:commit_info.parents_contexts
-          >>= fun is_consistent ->
-          fail_unless
-            (is_consistent || Compare.Int32.(equal (Block_repr.level block) 0l))
-            (Exn
-               (Failure
-                  (Format.asprintf
-                     "restore_from_snapshot: Inconsistent commit hash found \
-                      for transition block %a activating protocol %a"
-                     Block_hash.pp
-                     (Block.hash block)
-                     Protocol_hash.pp
-                     protocol))))
-    (Protocol_levels.bindings protocol_levels)
-  >>=? fun () ->
-  Block_store.close block_store
-  >>= fun () ->
-  let chain_config = {Chain_config.history_mode; genesis; expiration = None} in
-  Chain_config.write ~chain_dir chain_config >>=? fun () -> return_unit
-
-let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
-    ~store_dir ~context_index ~genesis ~genesis_context_hash
-    ~floating_blocks_stream ~new_head_with_metadata ~partial_protocol_levels
-    ~history_mode =
-  let chain_id = Chain_id.of_block_hash genesis.Genesis.block in
-  let chain_dir = Naming.(store_dir // chain_store chain_id) in
-  let genesis_block =
-    Chain.create_genesis_block ~genesis genesis_context_hash
-  in
-  let new_head_descr =
-    ( Block_repr.hash new_head_with_metadata,
-      Block_repr.level new_head_with_metadata )
-  in
-  (* Write consistent stored data *)
-  (* We will write protocol levels when we have access to blocks to
-     retrieve necessary infos *)
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.current_head)
-    Block_repr.encoding
-    new_head_with_metadata
-  >>= fun () ->
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.alternate_heads)
-    (Block_hash.Map.encoding Data_encoding.int32)
-    Block_hash.Map.empty
-  >>= fun () ->
-  (* Checkpoint is the new head *)
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.checkpoint)
-    Data_encoding.(tup2 Block_hash.encoding int32)
-    new_head_descr
-  >>= fun () ->
-  (* Savepoint is the head *)
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.savepoint)
-    Data_encoding.(tup2 Block_hash.encoding int32)
-    new_head_descr
-  >>= fun () ->
-  (* Depending on the history mode, set the caboose properly *)
-  ( match history_mode with
-  | History_mode.Archive | Full _ ->
-      return (Block_repr.hash genesis_block, Block_repr.level genesis_block)
-  | Rolling _ -> (
-      Lwt_stream.peek floating_blocks_stream
-      >>= function
-      | None ->
-          (* FIXME what happens when cemented ? *)
-          failwith
-            "Store.restore_from_snapshot: could not find the caboose for \
-             rolling"
-      | Some caboose ->
-          return (Block_repr.hash caboose, Block_repr.level caboose) ) )
-  >>=? fun caboose_descr ->
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.caboose)
-    Data_encoding.(tup2 Block_hash.encoding int32)
-    caboose_descr
-  >>= fun () ->
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Naming.Chain_data.invalid_blocks)
-    (Block_hash.Map.encoding invalid_block_encoding)
-    Block_hash.Map.empty
-  >>= fun () ->
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.forked_chains)
-    (Chain_id.Map.encoding Block_hash.encoding)
-    Chain_id.Map.empty
-  >>= fun () ->
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.genesis)
-    Block_repr.encoding
-    genesis_block
-  >>= fun () ->
-  (* Load the store (containing the cemented if relevant) *)
-  Block_store.load ~chain_dir ~genesis_block ~readonly:false
-  >>=? fun block_store ->
-  (* Store the floating *)
-  Lwt_stream.iter_s
-    (fun block ->
-      Block_store.store_block block_store block >>= fun () -> notify ())
-    floating_blocks_stream
-  >>= fun () ->
-  (* Store the head *)
-  Block_store.store_block block_store new_head_with_metadata
-  >>= fun () ->
-  notify ()
-  >>= fun () ->
-  (* We also need to store the genesis' protocol transition *)
-  Chain.get_commit_info context_index (Block.header genesis_block)
-  >>=? fun genesis_commit_info ->
-  let initial_protocol_levels =
-    Protocol_levels.(
-      add
-        (Block.proto_level genesis_block)
-        {
-          block = Block.descriptor genesis_block;
-          protocol = genesis.protocol;
-          commit_info = Some genesis_commit_info;
-        }
-        empty)
-  in
-  (* Compute correct protocol levels and check their correctness *)
-  fold_left_s
-    (fun proto_levels (transition_level, protocol_hash, commit_info_opt) ->
-      let distance =
-        Int32.(
-          to_int
-            (sub (Block_repr.level new_head_with_metadata) transition_level))
-      in
-      (* FIXME? what happens when the snapshot does not contain the block ? (i.e. rolling) *)
-      Block_store.read_block
-        block_store
-        ~read_metadata:false
-        (Block (Block_repr.hash new_head_with_metadata, distance))
-      >>= fun block_opt ->
-      match (block_opt, commit_info_opt) with
-      | (None, _) ->
-          (* Ignore unknown blocks *)
-          return proto_levels
-      | (Some block, None) ->
-          (* TODO no commit info : raise a warning *)
-          return
-            Protocol_levels.(
-              add
-                (Block_repr.proto_level block)
-                {
-                  block = Block.descriptor block;
-                  protocol = protocol_hash;
-                  commit_info = commit_info_opt;
-                }
-                proto_levels)
-      | (Some block, Some commit_info) ->
-          let open Protocol_levels in
-          Context.check_protocol_commit_consistency
-            context_index
-            ~expected_context_hash:(Block.context_hash block)
-            ~given_protocol_hash:protocol_hash
-            ~author:commit_info.author
-            ~message:commit_info.message
-            ~timestamp:(Block.timestamp block)
-            ~test_chain_status:commit_info.test_chain_status
-            ~data_merkle_root:commit_info.data_merkle_root
-            ~parents_contexts:commit_info.parents_contexts
-          >>= fun is_consistent ->
-          if is_consistent || Compare.Int32.(equal (Block_repr.level block) 0l)
-          then
-            return
-              Protocol_levels.(
-                add
-                  (Block_repr.proto_level block)
-                  {
-                    block = Block.descriptor block;
-                    protocol = protocol_hash;
-                    commit_info = commit_info_opt;
-                  }
-                  proto_levels)
-          else
-            failwith
-              "restore_from_snapshot: Inconsistent commit hash found for \
-               transition block %a activating protocol %a"
-              Block_hash.pp
-              (Block.hash block)
-              Protocol_hash.pp
-              protocol_hash)
-    initial_protocol_levels
-    partial_protocol_levels
-  >>=? fun protocol_levels ->
-  Stored_data.write_file
-    ~file:Naming.(chain_dir // Chain_data.protocol_levels)
-    Protocol_levels.encoding
-    protocol_levels
-  >>= fun () ->
-  Block_store.close block_store
-  >>= fun () ->
-  let chain_config = {Chain_config.history_mode; genesis; expiration = None} in
-  Chain_config.write ~chain_dir chain_config >>=? fun () -> return_unit
 
 let get_chain_store store chain_id =
   let chain_store = main_chain_store store in
@@ -2519,13 +2125,382 @@ let allow_testchains {allow_testchains; _} = allow_testchains
 let global_block_watcher {global_block_watcher; _} =
   Lwt_watcher.create_stream global_block_watcher
 
-let cement_blocks_chunk ~check_consistency chain_store blocks ~write_metadata =
-  Block_store.cement_blocks
-    ~check_consistency
-    ~write_metadata
-    chain_store.block_store
-    blocks
-
 (****************** For testing purposes only *****************)
+module Unsafe = struct
+  let repr_of_block b = b
 
-let unsafe_get_block_store chain_store = chain_store.block_store
+  let block_of_repr b = b
+
+  let get_block_store chain_store = chain_store.block_store
+
+  let set_head chain_store new_head =
+    Shared.update_with chain_store.chain_state (fun chain_state ->
+        Stored_data.write chain_state.current_head new_head
+        >>= fun () ->
+        return
+          (Some {chain_state with current_head = chain_state.current_head}, ()))
+
+  let set_checkpoint chain_store new_checkpoint =
+    Shared.update_with chain_store.chain_state (fun chain_state ->
+        Stored_data.write chain_state.checkpoint_data new_checkpoint
+        >>= fun () ->
+        return (Some {chain_state with checkpoint = new_checkpoint}, ()))
+
+  let set_history_mode = Chain.set_history_mode
+
+  let set_savepoint = Chain.set_savepoint
+
+  let set_caboose = Chain.set_caboose
+
+  let load_testchain = Chain.load_testchain
+
+  let open_for_snapshot_export ~store_dir ~context_dir genesis
+      ~(locked_f : chain_store * Context.index -> 'a tzresult Lwt.t) =
+    let chain_id = Chain_id.of_block_hash genesis.Genesis.block in
+    Context.init ~readonly:true context_dir
+    >>= fun context_index ->
+    load_store
+      ~store_dir
+      ~context_index
+      ~chain_id
+      ~allow_testchains:false
+      ~readonly:true
+      ()
+    >>=? fun store ->
+    let chain_store = main_chain_store store in
+    lock_for_read chain_store.lockfile
+    >>= fun () ->
+    Error_monad.protect
+      ~on_error:(fun err ->
+        close_store store >>= fun () -> Lwt.return (Error err))
+      (fun () ->
+        locked_f (chain_store, context_index)
+        >>=? fun res -> close_store store >>= fun () -> return res)
+
+  let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
+      ~context_index ~genesis ~genesis_context_hash ~floating_blocks_stream
+      ~new_head_with_metadata ~protocol_levels ~history_mode =
+    let chain_id = Chain_id.of_block_hash genesis.Genesis.block in
+    let chain_dir = Naming.(store_dir // chain_store chain_id) in
+    let genesis_block =
+      Chain.create_genesis_block ~genesis genesis_context_hash
+    in
+    let new_head_descr =
+      ( Block_repr.hash new_head_with_metadata,
+        Block_repr.level new_head_with_metadata )
+    in
+    (* Write consistent stored data *)
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.protocol_levels)
+      Protocol_levels.encoding
+      protocol_levels
+    >>= fun () ->
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.current_head)
+      Block_repr.encoding
+      new_head_with_metadata
+    >>= fun () ->
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.alternate_heads)
+      (Block_hash.Map.encoding Data_encoding.int32)
+      Block_hash.Map.empty
+    >>= fun () ->
+    (* Checkpoint is the new head *)
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.checkpoint)
+      Data_encoding.(tup2 Block_hash.encoding int32)
+      new_head_descr
+    >>= fun () ->
+    (* Savepoint is the head *)
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.savepoint)
+      Data_encoding.(tup2 Block_hash.encoding int32)
+      new_head_descr
+    >>= fun () ->
+    (* Depending on the history mode, set the caboose properly *)
+    ( match history_mode with
+    | History_mode.Archive | Full _ ->
+        return (Block_repr.hash genesis_block, Block_repr.level genesis_block)
+    | Rolling _ -> (
+        Lwt_stream.peek floating_blocks_stream
+        >>= function
+        | None ->
+            (* FIXME what happens when cemented ? *)
+            failwith
+              "Store.restore_from_snapshot: could not find the caboose for \
+               rolling"
+        | Some caboose -> (
+          match Block_repr.metadata new_head_with_metadata with
+          | None ->
+              assert false
+          | Some metadata ->
+              if
+                Int32.sub
+                  (Block_repr.level new_head_with_metadata)
+                  (Int32.of_int metadata.max_operations_ttl)
+                <= 0l
+              then return (genesis.block, 0l)
+              else return (Block_repr.hash caboose, Block_repr.level caboose) )
+        ) )
+    >>=? fun caboose_descr ->
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.caboose)
+      Data_encoding.(tup2 Block_hash.encoding int32)
+      caboose_descr
+    >>= fun () ->
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Naming.Chain_data.invalid_blocks)
+      (Block_hash.Map.encoding invalid_block_encoding)
+      Block_hash.Map.empty
+    >>= fun () ->
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.forked_chains)
+      (Chain_id.Map.encoding Block_hash.encoding)
+      Chain_id.Map.empty
+    >>= fun () ->
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.genesis)
+      Block_repr.encoding
+      genesis_block
+    >>= fun () ->
+    (* Load the store (containing the cemented if relevant) *)
+    Block_store.load ~chain_dir ~genesis_block ~readonly:false
+    >>=? fun block_store ->
+    (* Store the floating *)
+    Lwt_stream.iter_s
+      (fun block ->
+        Block_store.store_block block_store block >>= fun () -> notify ())
+      floating_blocks_stream
+    >>= fun () ->
+    (* Store the head *)
+    Block_store.store_block block_store new_head_with_metadata
+    >>= fun () ->
+    notify ()
+    >>= fun () ->
+    (* Check correctness of protocol transition blocks *)
+    let open Protocol_levels in
+    iter_s
+      (fun (_, {block = (bh, _); protocol; commit_info = commit_info_opt}) ->
+        Block_store.read_block block_store ~read_metadata:false (Block (bh, 0))
+        >>= fun block_opt ->
+        match (block_opt, commit_info_opt) with
+        | (None, _) ->
+            (* Ignore unknown blocks *)
+            return_unit
+        | (Some _block, None) ->
+            (* TODO no commit info : raise a warning *)
+            return_unit
+        | (Some block, Some commit_info) ->
+            Context.check_protocol_commit_consistency
+              context_index
+              ~expected_context_hash:(Block.context_hash block)
+              ~given_protocol_hash:protocol
+              ~author:commit_info.author
+              ~message:commit_info.message
+              ~timestamp:(Block.timestamp block)
+              ~test_chain_status:commit_info.test_chain_status
+              ~data_merkle_root:commit_info.data_merkle_root
+              ~parents_contexts:commit_info.parents_contexts
+            >>= fun is_consistent ->
+            fail_unless
+              ( is_consistent
+              || Compare.Int32.(equal (Block_repr.level block) 0l) )
+              (Exn
+                 (Failure
+                    (Format.asprintf
+                       "restore_from_snapshot: Inconsistent commit hash found \
+                        for transition block %a activating protocol %a"
+                       Block_hash.pp
+                       (Block.hash block)
+                       Protocol_hash.pp
+                       protocol))))
+      (Protocol_levels.bindings protocol_levels)
+    >>=? fun () ->
+    Block_store.close block_store
+    >>= fun () ->
+    let chain_config =
+      {Chain_config.history_mode; genesis; expiration = None}
+    in
+    Chain_config.write ~chain_dir chain_config >>=? fun () -> return_unit
+
+  let restore_from_legacy_snapshot ?(notify = fun () -> Lwt.return_unit)
+      ~store_dir ~context_index ~genesis ~genesis_context_hash
+      ~floating_blocks_stream ~new_head_with_metadata ~partial_protocol_levels
+      ~history_mode =
+    let chain_id = Chain_id.of_block_hash genesis.Genesis.block in
+    let chain_dir = Naming.(store_dir // chain_store chain_id) in
+    let genesis_block =
+      Chain.create_genesis_block ~genesis genesis_context_hash
+    in
+    let new_head_descr =
+      ( Block_repr.hash new_head_with_metadata,
+        Block_repr.level new_head_with_metadata )
+    in
+    (* Write consistent stored data *)
+    (* We will write protocol levels when we have access to blocks to
+     retrieve necessary infos *)
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.current_head)
+      Block_repr.encoding
+      new_head_with_metadata
+    >>= fun () ->
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.alternate_heads)
+      (Block_hash.Map.encoding Data_encoding.int32)
+      Block_hash.Map.empty
+    >>= fun () ->
+    (* Checkpoint is the new head *)
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.checkpoint)
+      Data_encoding.(tup2 Block_hash.encoding int32)
+      new_head_descr
+    >>= fun () ->
+    (* Savepoint is the head *)
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.savepoint)
+      Data_encoding.(tup2 Block_hash.encoding int32)
+      new_head_descr
+    >>= fun () ->
+    (* Depending on the history mode, set the caboose properly *)
+    ( match history_mode with
+    | History_mode.Archive | Full _ ->
+        return (Block_repr.hash genesis_block, Block_repr.level genesis_block)
+    | Rolling _ -> (
+        Lwt_stream.peek floating_blocks_stream
+        >>= function
+        | None ->
+            (* FIXME what happens when cemented ? *)
+            failwith
+              "Store.restore_from_snapshot: could not find the caboose for \
+               rolling"
+        | Some caboose ->
+            return (Block_repr.hash caboose, Block_repr.level caboose) ) )
+    >>=? fun caboose_descr ->
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.caboose)
+      Data_encoding.(tup2 Block_hash.encoding int32)
+      caboose_descr
+    >>= fun () ->
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Naming.Chain_data.invalid_blocks)
+      (Block_hash.Map.encoding invalid_block_encoding)
+      Block_hash.Map.empty
+    >>= fun () ->
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.forked_chains)
+      (Chain_id.Map.encoding Block_hash.encoding)
+      Chain_id.Map.empty
+    >>= fun () ->
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.genesis)
+      Block_repr.encoding
+      genesis_block
+    >>= fun () ->
+    (* Load the store (containing the cemented if relevant) *)
+    Block_store.load ~chain_dir ~genesis_block ~readonly:false
+    >>=? fun block_store ->
+    (* Store the floating *)
+    Lwt_stream.iter_s
+      (fun block ->
+        Block_store.store_block block_store block >>= fun () -> notify ())
+      floating_blocks_stream
+    >>= fun () ->
+    (* Store the head *)
+    Block_store.store_block block_store new_head_with_metadata
+    >>= fun () ->
+    notify ()
+    >>= fun () ->
+    (* We also need to store the genesis' protocol transition *)
+    Chain.get_commit_info context_index (Block.header genesis_block)
+    >>=? fun genesis_commit_info ->
+    let initial_protocol_levels =
+      Protocol_levels.(
+        add
+          (Block.proto_level genesis_block)
+          {
+            block = Block.descriptor genesis_block;
+            protocol = genesis.protocol;
+            commit_info = Some genesis_commit_info;
+          }
+          empty)
+    in
+    (* Compute correct protocol levels and check their correctness *)
+    fold_left_s
+      (fun proto_levels (transition_level, protocol_hash, commit_info_opt) ->
+        let distance =
+          Int32.(
+            to_int
+              (sub (Block_repr.level new_head_with_metadata) transition_level))
+        in
+        (* FIXME? what happens when the snapshot does not contain the block ? (i.e. rolling) *)
+        Block_store.read_block
+          block_store
+          ~read_metadata:false
+          (Block (Block_repr.hash new_head_with_metadata, distance))
+        >>= fun block_opt ->
+        match (block_opt, commit_info_opt) with
+        | (None, _) ->
+            (* Ignore unknown blocks *)
+            return proto_levels
+        | (Some block, None) ->
+            (* TODO no commit info : raise a warning *)
+            return
+              Protocol_levels.(
+                add
+                  (Block_repr.proto_level block)
+                  {
+                    block = Block.descriptor block;
+                    protocol = protocol_hash;
+                    commit_info = commit_info_opt;
+                  }
+                  proto_levels)
+        | (Some block, Some commit_info) ->
+            let open Protocol_levels in
+            Context.check_protocol_commit_consistency
+              context_index
+              ~expected_context_hash:(Block.context_hash block)
+              ~given_protocol_hash:protocol_hash
+              ~author:commit_info.author
+              ~message:commit_info.message
+              ~timestamp:(Block.timestamp block)
+              ~test_chain_status:commit_info.test_chain_status
+              ~data_merkle_root:commit_info.data_merkle_root
+              ~parents_contexts:commit_info.parents_contexts
+            >>= fun is_consistent ->
+            if
+              is_consistent
+              || Compare.Int32.(equal (Block_repr.level block) 0l)
+            then
+              return
+                Protocol_levels.(
+                  add
+                    (Block_repr.proto_level block)
+                    {
+                      block = Block.descriptor block;
+                      protocol = protocol_hash;
+                      commit_info = commit_info_opt;
+                    }
+                    proto_levels)
+            else
+              failwith
+                "restore_from_snapshot: Inconsistent commit hash found for \
+                 transition block %a activating protocol %a"
+                Block_hash.pp
+                (Block.hash block)
+                Protocol_hash.pp
+                protocol_hash)
+      initial_protocol_levels
+      partial_protocol_levels
+    >>=? fun protocol_levels ->
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.protocol_levels)
+      Protocol_levels.encoding
+      protocol_levels
+    >>= fun () ->
+    Block_store.close block_store
+    >>= fun () ->
+    let chain_config =
+      {Chain_config.history_mode; genesis; expiration = None}
+    in
+    Chain_config.write ~chain_dir chain_config >>=? fun () -> return_unit
+end

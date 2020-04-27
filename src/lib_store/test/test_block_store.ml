@@ -346,7 +346,7 @@ let test_rolling_2_merge block_store =
 let wrap_test ?keep_dir (name, g) =
   let f _ store =
     let chain_store = Store.main_chain_store store in
-    let block_store = Store.unsafe_get_block_store chain_store in
+    let block_store = Store.Unsafe.get_block_store chain_store in
     g block_store
   in
   wrap_test ?keep_dir (name, f)

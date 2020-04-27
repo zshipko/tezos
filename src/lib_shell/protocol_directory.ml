@@ -32,7 +32,7 @@ let build_rpc_directory block_validator store =
     dir := RPC_directory.register !dir s (fun ((), a) p q -> f a p q)
   in
   gen_register0 Protocol_services.S.list (fun () () ->
-      let set = Store.Protocol.all_stored_protocols store in
+      let set = Store.Protocol.all store in
       let protocols =
         List.fold_left
           (fun acc x -> Protocol_hash.Set.add x acc)
@@ -45,7 +45,7 @@ let build_rpc_directory block_validator store =
       | Some p ->
           return p
       | None -> (
-          Store.Protocol.read_protocol store hash
+          Store.Protocol.read store hash
           >>= function
           | None ->
               Lwt.return (Error_monad.error_exn Not_found)
@@ -56,7 +56,7 @@ let build_rpc_directory block_validator store =
       | Some p ->
           return p.expected_env
       | None -> (
-          Store.Protocol.read_protocol store hash
+          Store.Protocol.read store hash
           >>= function
           | None ->
               Lwt.return (Error_monad.error_exn Not_found)

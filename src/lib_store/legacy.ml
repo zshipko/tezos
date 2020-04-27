@@ -168,17 +168,17 @@ let may_update_protocol_table lmdb_block_store chain_store prev_block
           : Legacy_store.Chain.Protocol_info.value =
       List.assoc (Block_repr.proto_level prev_block) protocol_table
     in
-    Store.Chain.set_protocol_level
+    Store.Chain.may_update_protocol_level
       chain_store
-      (Block_repr.proto_level prev_block)
-      (Store.Block.of_repr prev_block, proto_hash)
+      ~protocol_level:(Block_repr.proto_level prev_block)
+      (Store.Unsafe.block_of_repr prev_block, proto_hash)
   else return_unit
 
 let import_floating lmdb_block_store chain_store ?(read_metadata = true)
     ?(write_metadata = read_metadata) block_hash limit =
   (* TODO: Make it tail rec ? if yes, we must be able to store a block
    without searching for its predecessors*)
-  let block_store = Store.unsafe_get_block_store chain_store in
+  let block_store = Store.Unsafe.get_block_store chain_store in
   make_block_repr ~read_metadata ~write_metadata lmdb_block_store block_hash
   >>=? fun block ->
   let nb_floating_blocks =
@@ -269,9 +269,10 @@ let import_cemented ?(display_msg = "") lmdb_chain_store chain_store
               lmdb_chain_store
               (Block_repr.predecessor block)
             >>=? fun genesis ->
-            Store.cement_blocks_chunk
+            let block_store = Store.Unsafe.get_block_store chain_store in
+            Block_store.cement_blocks
               ~check_consistency:false
-              chain_store
+              block_store
               [genesis; block]
               ~write_metadata:with_metadata
             >>=? fun () -> notify () >>= fun () -> return_unit )
@@ -281,9 +282,10 @@ let import_cemented ?(display_msg = "") lmdb_chain_store chain_store
         else if
           Hardcoded.may_update_checkpoint ~cycle_length (List.length new_acc)
         then
-          Store.cement_blocks_chunk
+          let block_store = Store.Unsafe.get_block_store chain_store in
+          Block_store.cement_blocks
             ~check_consistency:false
-            chain_store
+            block_store
             new_acc
             ~write_metadata:with_metadata
           >>=? fun () ->
@@ -537,7 +539,7 @@ let import_protocols history_mode lmdb_store lmdb_chain_store store =
       >>= fun proto_list ->
       Error_monad.iter_s
         (fun (h, p) ->
-          Store.Protocol.store_protocol store h p
+          Store.Protocol.store store h p
           >>= function
           | Some expected_hash ->
               fail_unless
@@ -570,23 +572,23 @@ let import_protocols history_mode lmdb_store lmdb_chain_store store =
         lmdb_chain_store
         transition_hash
       >>=? fun transition_block ->
-      Store.Chain.set_protocol_level
+      Store.Chain.may_update_protocol_level
         chain_store
-        protocol_level
-        (Store.Block.of_repr transition_block, protocol_hash)
+        ~protocol_level
+        (Store.Unsafe.block_of_repr transition_block, protocol_hash)
 
 let update_stored_data lmdb_chain_data chain_store ~new_checkpoint
     ~new_savepoint ~new_caboose =
   Legacy_store.Chain_data.Current_head.read lmdb_chain_data
-  >>=? fun current_head ->
-  Store.Block.read_block chain_store current_head
-  >>=? fun current_head ->
-  Store.Chain.re_store
-    chain_store
-    ~head:current_head
-    ~checkpoint:new_checkpoint
-    ~savepoint:new_savepoint
-    ~caboose:new_caboose
+  >>=? fun lmdb_head ->
+  Store.Block.read_block chain_store lmdb_head
+  >>=? fun new_head ->
+  Store.Unsafe.set_head chain_store new_head
+  >>=? fun () ->
+  Store.Unsafe.set_checkpoint chain_store new_checkpoint
+  >>=? fun () ->
+  Store.Unsafe.set_savepoint chain_store new_savepoint
+  >>=? fun () -> Store.Unsafe.set_caboose chain_store new_caboose
 
 let new_store_name = "store"
 

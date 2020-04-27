@@ -100,7 +100,7 @@ let export_import ~test_descr (store_dir, context_dir) chain_store
   let snapshot_dir = store_dir // "snapshot.full" in
   (* No lockfile on the same process, we must enforce waiting the
      merging thread to finish *)
-  let block_store = Store.unsafe_get_block_store chain_store in
+  let block_store = Store.Unsafe.get_block_store chain_store in
   Block_store.await_merging block_store
   >>=? fun () ->
   let block = Option.map ~f:Block_hash.to_b58check exported_block_hash in

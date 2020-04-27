@@ -160,7 +160,7 @@ let fetch_and_compile_protocols pv ?peer ?timeout (block : Store.Block.t) =
         >>=? fun _p ->
         Store.Chain.may_update_protocol_level
           chain_store
-          protocol_level
+          ~protocol_level
           (block, protocol_hash)
       and test_protocol =
         Context.get_test_chain context
@@ -180,7 +180,7 @@ let fetch_and_compile_protocols pv ?peer ?timeout (block : Store.Block.t) =
                 in
                 Store.Chain.may_update_protocol_level
                   test_chain_store
-                  protocol_level
+                  ~protocol_level
                   (block, protocol)
                 >>=? fun () -> return_unit )
       in

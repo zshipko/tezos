@@ -140,7 +140,7 @@ let test_shutdown store =
       | Some _ ->
           Assert.fail_msg "test chain still initialized"
       | None -> (
-          Store.Chain.load_testchain chain_store ~chain_id:testchain_id
+          Store.Unsafe.load_testchain chain_store ~chain_id:testchain_id
           >>=? function
           | None ->
               Assert.fail_msg "failed to load the existing test chain"

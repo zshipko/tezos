@@ -88,7 +88,7 @@ let build_raw_header_rpc_directory (module Proto : Block_services.PROTO) =
   register0 S.protocols (fun (chain_store, _hash, header) () () ->
       Store.Chain.find_protocol
         chain_store
-        ~proto_level:header.shell.proto_level
+        ~protocol_level:header.shell.proto_level
       >>= fun next_proto ->
       let next_protocol_hash = Option.unopt_exn Not_found next_proto in
       Store.Block.read_block_opt chain_store header.shell.predecessor
@@ -104,7 +104,7 @@ let build_raw_header_rpc_directory (module Proto : Block_services.PROTO) =
           let pred_header = Store.Block.header pred_block in
           Store.Chain.find_protocol
             chain_store
-            ~proto_level:pred_header.shell.proto_level
+            ~protocol_level:pred_header.shell.proto_level
           >>= fun current_protocol ->
           let protocol_hash = Option.unopt_exn Not_found current_protocol in
           return
@@ -153,7 +153,7 @@ let build_raw_rpc_directory ~user_activated_upgrades
         Proto.block_header_metadata_encoding
         (Store.Block.block_metadata metadata)
     in
-    Store.Chain.testchain_status chain_store block
+    Store.Block.testchain_status chain_store block
     >>= fun (test_chain_status, _) ->
     let max_operations_ttl = Store.Block.max_operations_ttl metadata in
     return
@@ -416,7 +416,7 @@ let get_directory ~user_activated_upgrades ~user_activated_protocol_overrides
                   then
                     Store.Chain.find_protocol
                       chain_store
-                      ~proto_level:(Store.Block.proto_level pred)
+                      ~protocol_level:(Store.Block.proto_level pred)
                     >>= fun predecessor_protocol ->
                     let protocol_hash =
                       Option.unopt_exn Not_found predecessor_protocol

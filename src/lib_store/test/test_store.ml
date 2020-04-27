@@ -432,7 +432,7 @@ let test_acceptable_block chain_store table =
   >>= fun _prev_head ->
   Store.Chain.set_checkpoint chain_store (block_hash, level)
   >>=? fun () ->
-  let block_store = Store.unsafe_get_block_store chain_store in
+  let block_store = Store.Unsafe.get_block_store chain_store in
   Block_store.await_merging block_store
   >>=? fun () ->
   (* it is accepted if the new head is greater than the checkpoint *)
@@ -454,7 +454,6 @@ let test_acceptable_block chain_store table =
    is the block still valid for a given checkpoint ? *)
 
 let test_is_valid_checkpoint chain_store table =
-  (*TODO: fix inconsistent hash for 1/2 runs … *)
   let block = vblock table "A2" in
   let block_hash = Store.Block.hash block in
   let level = Store.Block.level block in

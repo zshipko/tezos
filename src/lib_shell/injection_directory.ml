@@ -62,7 +62,7 @@ let inject_protocol store proto =
     | false ->
         failwith "Compilation failed (%a)" Protocol_hash.pp_short hash
     | true -> (
-        Store.Protocol.store_protocol store hash proto
+        Store.Protocol.store store hash proto
         >>= function
         | None ->
             failwith

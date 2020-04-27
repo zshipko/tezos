@@ -206,7 +206,7 @@ let store_known_protocols store =
   let embedded_protocols = Registered_protocol.list_embedded () in
   Lwt_list.iter_s
     (fun protocol_hash ->
-      match Store.Protocol.is_protocol_stored store protocol_hash with
+      match Store.Protocol.mem store protocol_hash with
       | true ->
           lwt_log_info
             Tag.DSL.(
@@ -233,7 +233,7 @@ let store_known_protocols store =
                     -% a Protocol_hash.Logging.tag protocol_hash
                     -% t event "embedded_protocol_inconsistent_hash")
             else
-              Store.Protocol.store_protocol store hash protocol
+              Store.Protocol.store store hash protocol
               >>= function
               | Some _ ->
                   lwt_log_info

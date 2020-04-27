@@ -364,7 +364,7 @@ let may_switch_test_chain w active_chains spawn_child block =
             nv.child <- Some child ;
             return_unit
   in
-  Store.Chain.testchain_status nv.parameters.chain_store block
+  Store.Block.testchain_status nv.parameters.chain_store block
   >>= (function
         | (Not_running, _) ->
             shutdown_child nv active_chains >>= fun () -> return_unit

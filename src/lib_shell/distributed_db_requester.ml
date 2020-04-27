@@ -372,9 +372,9 @@ module Protocol_storage = struct
 
   type value = Protocol.t
 
-  let known store ph = Lwt.return (Store.Protocol.is_protocol_stored store ph)
+  let known store ph = Lwt.return (Store.Protocol.mem store ph)
 
-  let read_opt store ph = Store.Protocol.read_protocol store ph
+  let read_opt store ph = Store.Protocol.read store ph
 
   let read store ph =
     read_opt store ph

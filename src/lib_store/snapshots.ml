@@ -757,7 +757,8 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
     let floating_block_stream =
       Lwt_stream.of_list
         (List.filter_map
-           (fun b -> Some {(Store.Block.repr b) with metadata = None})
+           (fun b ->
+             Some {(Store.Unsafe.repr_of_block b) with metadata = None})
            floating_blocks)
     in
     (* We need to dump the context while locking the store, the
@@ -775,7 +776,7 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
         written_context_elements,
         (return_unit, floating_block_stream) )
   in
-  Store.open_for_snapshot_export
+  Store.Unsafe.open_for_snapshot_export
     ~store_dir
     ~context_dir
     genesis
@@ -830,7 +831,7 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
         >>= fun () ->
         Lwt_utils_unix.safe_close rw_fd >>= fun () -> Lwt.fail exn)
   in
-  Store.open_for_snapshot_export
+  Store.Unsafe.open_for_snapshot_export
     ~store_dir
     ~context_dir
     genesis
@@ -854,7 +855,8 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
       >>= fun () ->
       return
         ( return_unit,
-          Lwt_stream.of_list (List.map Store.Block.repr floating_blocks) )
+          Lwt_stream.of_list
+            (List.map Store.Unsafe.repr_of_block floating_blocks) )
   | None ->
       (* The export block is in the floating stores, copy all the
          floating stores until the block is reached *)
@@ -1247,7 +1249,7 @@ let import ?patch_context ?block:expected_block ~snapshot_dir ~dst_store_dir
     ~pp_print_step:(fun fmt i ->
       Format.fprintf fmt "Storing floating blocks: %d blocks wrote" i)
     (fun notify ->
-      Store.restore_from_snapshot
+      Store.Unsafe.restore_from_snapshot
         ~notify
         ~store_dir:dst_store_dir
         ~context_index
@@ -1385,7 +1387,7 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
            ~check_consistency:false
            cemented_store
            ~write_metadata:false
-           [Store.Block.repr genesis_block; block]
+           [Store.Unsafe.repr_of_block genesis_block; block]
      | level ->
          (* 4 cases :
              - in future floating blocks => after the cementing part
@@ -1519,7 +1521,7 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
     ~pp_print_step:(fun fmt i ->
       Format.fprintf fmt "Storing floating blocks: %d blocks wrote" i)
     (fun notify ->
-      Store.restore_from_legacy_snapshot
+      Store.Unsafe.restore_from_legacy_snapshot
         ~notify
         ~store_dir:dst_store_dir
         ~context_index

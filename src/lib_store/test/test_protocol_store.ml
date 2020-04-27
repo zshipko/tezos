@@ -36,19 +36,17 @@ let test_protocol_store _ store =
     Tezos_embedded_protocol_demo_noops.Registerer.Registered.hash
   in
   Lwt_list.iter_s
-    (fun (h, p) ->
-      Store.Protocol.store_protocol store h p >>= fun _ -> Lwt.return_unit)
+    (fun (h, p) -> Store.Protocol.store store h p >>= fun _ -> Lwt.return_unit)
     protocols_to_register
   >>= fun () ->
   assert (
     List.for_all
-      (fun (h, _p) -> Store.Protocol.is_protocol_stored store h)
+      (fun (h, _p) -> Store.Protocol.mem store h)
       protocols_to_register ) ;
-  assert (
-    not (Store.Protocol.is_protocol_stored store non_stored_protocol_hash) ) ;
+  assert (not (Store.Protocol.mem store non_stored_protocol_hash)) ;
   Lwt_list.iter_s
     (fun (h, p) ->
-      Store.Protocol.read_protocol store h
+      Store.Protocol.read store h
       >>= function
       | None ->
           Lwt.fail Alcotest.Test_error
@@ -57,7 +55,7 @@ let test_protocol_store _ store =
           Lwt.return_unit)
     protocols_to_register
   >>= fun () ->
-  Store.Protocol.read_protocol store non_stored_protocol_hash
+  Store.Protocol.read store non_stored_protocol_hash
   >>= function None -> return_unit | Some _ -> Lwt.fail Alcotest.Test_error
 
 let tests =
