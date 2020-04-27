@@ -178,10 +178,8 @@ val commit_block :
   chain_db ->
   Block_hash.t ->
   Block_header.t ->
-  Bytes.t ->
   Operation.t list list ->
-  Bytes.t list list ->
-  Block_validation.validation_store ->
+  Block_validation.result ->
   Store.Block.t option tzresult Lwt.t
 
 (** Store on disk all the data associated to an invalid block. *)

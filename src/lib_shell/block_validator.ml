@@ -180,26 +180,13 @@ let on_request : type r. t -> r Request.t -> r tzresult Lwt.t =
                             operations
                       | Error _ as x ->
                           Lwt.return x)
-                  >>=? fun {validation_store; block_metadata; ops_metadata; _} ->
-                  let validation_store =
-                    ( {
-                        context_hash = validation_store.context_hash;
-                        message = validation_store.message;
-                        max_operations_ttl =
-                          validation_store.max_operations_ttl;
-                        last_allowed_fork_level =
-                          validation_store.last_allowed_fork_level;
-                      }
-                      : Block_validation.validation_store )
-                  in
+                  >>=? fun result ->
                   Distributed_db.commit_block
                     chain_db
                     hash
                     header
-                    block_metadata
                     operations
-                    ops_metadata
-                    validation_store
+                    result
                   >>=? function
                   | None ->
                       (* This case can be reached if the block was

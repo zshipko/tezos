@@ -310,9 +310,13 @@ module Block = struct
     locked_read_block_by_level_opt chain_store current_head level
 
   (* TODO use proper errors *)
-  let store_block chain_store ~block_header ~block_header_metadata ~operations
-      ~operations_metadata ~context_hash ~message ~max_operations_ttl
-      ~last_allowed_fork_level =
+  let store_block chain_store ~block_header ~operations validation_result =
+    let { Block_validation.validation_store =
+            {context_hash; message; max_operations_ttl; last_allowed_fork_level};
+          block_metadata;
+          ops_metadata } =
+      validation_result
+    in
     let bytes = Block_header.to_bytes block_header in
     let hash = Block_header.hash_raw bytes in
     fail_unless
@@ -320,14 +324,14 @@ module Block = struct
       (failure "Store.Block.store_block: invalid operations length")
     >>=? fun () ->
     fail_unless
-      (block_header.shell.validation_passes = List.length operations_metadata)
+      (block_header.shell.validation_passes = List.length ops_metadata)
       (failure "Store.Block.store_block: invalid operations_data length")
     >>=? fun () ->
     fail_unless
       (List.for_all2
          (fun l1 l2 -> List.length l1 = List.length l2)
          operations
-         operations_metadata)
+         ops_metadata)
       (failure
          "Store.Block.store_block: inconsistent operations and operations_data")
     >>=? fun () ->
@@ -362,8 +366,8 @@ module Block = struct
             Block_repr.message;
             max_operations_ttl;
             last_allowed_fork_level;
-            block_metadata = block_header_metadata;
-            operations_metadata;
+            block_metadata;
+            operations_metadata = ops_metadata;
           }
       in
       let block = {Block_repr.hash; contents; metadata} in

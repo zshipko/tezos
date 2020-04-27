@@ -453,16 +453,24 @@ let apply_and_store chain_store ?policy ?(operations = []) pred =
   apply ctxt chain_id ~policy ~operations pred
   >>=? fun (block_header, block_header_metadata, validation) ->
   let context_hash = block_header.shell.context in
+  let validation_result =
+    {
+      Tezos_validation.Block_validation.validation_store =
+        {
+          context_hash;
+          message = validation.Environment_context.message;
+          max_operations_ttl = validation.max_operations_ttl;
+          last_allowed_fork_level = validation.last_allowed_fork_level;
+        };
+      block_metadata = block_header_metadata;
+      ops_metadata = List.init 4 (fun _ -> []);
+    }
+  in
   Store.Block.store_block
     chain_store
     ~block_header
-    ~block_header_metadata
     ~operations:(List.init 4 (fun _ -> []))
-    ~operations_metadata:(List.init 4 (fun _ -> []))
-    ~context_hash
-    ~message:validation.Environment_context.message
-    ~max_operations_ttl:validation.max_operations_ttl
-    ~last_allowed_fork_level:validation.last_allowed_fork_level
+    validation_result
   >>=? function
   | Some b ->
       Store.Chain.set_head chain_store b >>=? fun _ -> return b

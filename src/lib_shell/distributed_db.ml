@@ -298,37 +298,26 @@ let clear_block chain_db hash n =
     chain_db.reader_chain_db.block_header_db
     hash
 
-let commit_block chain_db hash block_header block_header_metadata operations
-    operations_data result =
+let commit_block chain_db hash block_header operations result =
   assert (Block_hash.equal hash (Block_header.hash block_header)) ;
   assert (List.length operations = block_header.shell.validation_passes) ;
   let context_index =
     Store.context_index
       (Store.Chain.global_store chain_db.reader_chain_db.chain_store)
   in
-  Context.exists context_index result.Block_validation.context_hash
+  Context.exists
+    context_index
+    result.Block_validation.validation_store.context_hash
   >>= fun context_commited ->
   fail_unless
     context_commited
     (failure "Distributed_db: context commit not found in context")
   >>=? fun () ->
-  let { Block_validation.context_hash;
-        message;
-        max_operations_ttl;
-        last_allowed_fork_level;
-        _ } =
-    result
-  in
   Store.Block.store_block
     chain_db.reader_chain_db.chain_store
     ~block_header
-    ~block_header_metadata
     ~operations
-    ~operations_metadata:operations_data
-    ~context_hash
-    ~message
-    ~max_operations_ttl
-    ~last_allowed_fork_level
+    result
   >>=? fun res ->
   clear_block chain_db hash block_header.shell.validation_passes ;
   return res

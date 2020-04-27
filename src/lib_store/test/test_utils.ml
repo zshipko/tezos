@@ -297,16 +297,24 @@ let store_raw_block chain_store (raw_block : Block_repr.t) =
   let metadata =
     Option.unopt_assert ~loc:__POS__ (Block_repr.metadata raw_block)
   in
+  let validation_result =
+    {
+      Tezos_validation.Block_validation.validation_store =
+        {
+          context_hash = Block_repr.context raw_block;
+          message = Block_repr.message metadata;
+          max_operations_ttl = Block_repr.max_operations_ttl metadata;
+          last_allowed_fork_level = Block_repr.last_allowed_fork_level metadata;
+        };
+      block_metadata = Block_repr.block_metadata metadata;
+      ops_metadata = Block_repr.operations_metadata metadata;
+    }
+  in
   Store.Block.store_block
     chain_store
     ~block_header:(Block_repr.header raw_block)
-    ~block_header_metadata:(Block_repr.block_metadata metadata)
     ~operations:(Block_repr.operations raw_block)
-    ~operations_metadata:(Block_repr.operations_metadata metadata)
-    ~context_hash:(Block_repr.context raw_block)
-    ~message:(Block_repr.message metadata)
-    ~max_operations_ttl:(Block_repr.max_operations_ttl metadata)
-    ~last_allowed_fork_level:(Block_repr.last_allowed_fork_level metadata)
+    validation_result
   >>= function
   | Ok (Some block) ->
       return block

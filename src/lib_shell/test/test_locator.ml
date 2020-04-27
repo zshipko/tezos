@@ -135,16 +135,24 @@ let make_empty_chain chain_store n : Block_hash.t Lwt.t =
             {header.shell with predecessor = pred; level = Int32.of_int lvl};
         }
       in
+      let result =
+        {
+          Block_validation.validation_store =
+            {
+              context_hash;
+              message;
+              max_operations_ttl;
+              last_allowed_fork_level;
+            };
+          block_metadata = zero;
+          ops_metadata = [];
+        }
+      in
       Store.Block.store_block
         chain_store
         ~block_header:header
-        ~block_header_metadata:zero
         ~operations:[]
-        ~operations_metadata:[]
-        ~context_hash
-        ~message
-        ~max_operations_ttl
-        ~last_allowed_fork_level
+        result
       >>=? fun _ -> loop (lvl + 1) (Block_header.hash header)
   in
   loop 1 genesis_hash

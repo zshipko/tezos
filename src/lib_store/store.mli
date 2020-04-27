@@ -169,13 +169,8 @@ module Block : sig
   val store_block :
     chain_store ->
     block_header:Block_header.t ->
-    block_header_metadata:bytes ->
     operations:Operation.t list list ->
-    operations_metadata:bytes list list ->
-    context_hash:Context_hash.t ->
-    message:string option ->
-    max_operations_ttl:int ->
-    last_allowed_fork_level:Int32.t ->
+    Block_validation.result ->
     block option tzresult Lwt.t
 
   val context_exn : chain_store -> block -> Context.t Lwt.t
