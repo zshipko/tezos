@@ -2,6 +2,7 @@
  (names test)
  (libraries tezos-base
             tezos-store
+	    tezos-legacy-store
             tezos-stdlib-unix
             tezos-embedded-protocol-genesis
             tezos-embedded-protocol-demo-noops
@@ -10,6 +11,7 @@
             alcotest-lwt)
  (flags (:standard -open Tezos_base__TzPervasives
                    -open Tezos_store
+		   -open Tezos_legacy_store
                    -open Tezos_shell_services
                    -open Tezos_stdlib_unix
                    -open Tezos_protocol_alpha_parameters)))
