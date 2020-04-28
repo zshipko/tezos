@@ -358,7 +358,8 @@ let default_genesis_parameters =
   let open Tezos_protocol_alpha_parameters in
   Default_parameters.(parameters_of_constants constants_sandbox)
 
-let patch_context ?(genesis_parameters = default_genesis_parameters) ctxt =
+let patch_context ?(genesis_parameters = default_genesis_parameters)
+    ?(accounts = Account.generate_accounts 5) ctxt =
   let shell =
     Forge.make_shell
       ~level:0l
@@ -368,7 +369,6 @@ let patch_context ?(genesis_parameters = default_genesis_parameters) ctxt =
       ~operations_hash:Operation_list_list_hash.zero
   in
   let open Tezos_protocol_alpha_parameters in
-  let accounts = Account.generate_accounts 5 in
   let genesis_parameters =
     {
       genesis_parameters with
