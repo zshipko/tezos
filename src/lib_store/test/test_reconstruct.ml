@@ -26,7 +26,7 @@
 
 open Test_utils
 
-let test_from_bootstrapped ~descr (store_root, context_root) store
+let test_from_bootstrapped ~descr (store_dir, context_dir) store
     ~nb_blocks_to_bake ~patch_context =
   let chain_store = Store.main_chain_store store in
   let genesis = Store.Chain.genesis chain_store in
@@ -42,9 +42,9 @@ let test_from_bootstrapped ~descr (store_root, context_root) store
     (fun () ->
       Reconstruction.reconstruct
         ~patch_context
-        ~store_root
-        ~context_root
-        ~genesis
+        ~store_dir
+        ~context_dir
+        genesis
         ~user_activated_upgrades:[]
         ~user_activated_protocol_overrides:[]
       >>=? fun () -> return_false)
@@ -72,8 +72,8 @@ let test_from_bootstrapped ~descr (store_root, context_root) store
   else
     Store.init
       ~patch_context
-      ~store_dir:store_root
-      ~context_dir:context_root
+      ~store_dir
+      ~context_dir
       ~allow_testchains:false
       genesis
     >>=? fun store ->
@@ -105,16 +105,26 @@ let test_from_bootstrapped ~descr (store_root, context_root) store
     assert_presence_in_store ~with_metadata:true chain_store baked_blocks
     >>=? fun () -> Store.close_store store >>= fun () -> return_unit
 
-let make_tests genesis_parameters =
+let make_tests speed genesis_parameters =
   let history_modes =
-    History_mode.
-      [ Full {offset = 0};
-        Full {offset = 3};
-        Full {offset = default_offset}
-        (* Archive;
-         * Rolling {offset = default_offset} *) ]
+    match speed with
+    | `Slow ->
+        History_mode.
+          [ Full {offset = 0};
+            Full {offset = 3};
+            Full {offset = default_offset};
+            Archive;
+            Rolling {offset = default_offset} ]
+    | `Quick ->
+        History_mode.[Full {offset = 0}; Full {offset = default_offset}]
   in
-  let nb_blocks_to_bake = 1 -- 100 in
+  let nb_blocks_to_bake =
+    match speed with
+    | `Slow ->
+        1 -- 100
+    | `Quick ->
+        [0; 3; 8; 21; 42; 57; 89; 92; 101]
+  in
   let permutations = List.(product nb_blocks_to_bake history_modes) in
   List.map
     (fun (nb_blocks_to_bake, history_mode) ->
@@ -142,9 +152,10 @@ let make_tests genesis_parameters =
               ~patch_context ))
     permutations
 
-let tests =
+let tests speed =
   let test_cases =
     make_tests
+      speed
       Tezos_protocol_alpha_parameters.Default_parameters.(
         parameters_of_constants constants_sandbox)
   in
