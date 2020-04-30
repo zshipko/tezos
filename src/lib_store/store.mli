@@ -939,4 +939,12 @@ module Unsafe : sig
                             list ->
     history_mode:History_mode.t ->
     unit tzresult Lwt.t
+
+  val restore_from_legacy_upgrade :
+    store_dir:string ->
+    genesis:Genesis.t ->
+    int32 Block_hash.Map.t ->
+    invalid_block Block_hash.Map.t ->
+    Block_hash.t Chain_id.Map.t ->
+    unit tzresult Lwt.t
 end

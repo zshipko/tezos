@@ -281,10 +281,10 @@ let test descr base_dir baking_store legacy_state ~nb_blocks_to_bake
         (fun () ->
           Legacy.raw_upgrade
             chain_name
-            chain_id
             ~new_store
             ~old_store
             history_mode
+            genesis
           >>=? fun () -> return_false)
         ~on_error:(function
           | [Legacy.Failed_to_upgrade s] when s = "Nothing to do" ->
@@ -336,6 +336,9 @@ let make_tests speed genesis_parameters =
         [0; 3; 8; 21; 42; 57; 89; 92; 101]
   in
   let permutations = List.(product nb_blocks_to_bake history_modes) in
+  let patch_context ctxt =
+    Alpha_utils.patch_context ~genesis_parameters ~accounts ctxt
+  in
   List.map
     (fun (nb_blocks_to_bake, (history_mode, legacy_history_mode)) ->
       let descr =
@@ -344,9 +347,6 @@ let make_tests speed genesis_parameters =
           History_mode.pp
           history_mode
           nb_blocks_to_bake
-      in
-      let patch_context ctxt =
-        Alpha_utils.patch_context ~genesis_parameters ~accounts ctxt
       in
       wrap_test_legacy
         ~keep_dir:true

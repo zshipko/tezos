@@ -2523,4 +2523,24 @@ module Unsafe = struct
       {Chain_config.history_mode; genesis; expiration = None}
     in
     Chain_config.write ~chain_dir chain_config >>=? fun () -> return_unit
+
+  let restore_from_legacy_upgrade ~store_dir ~genesis alternate_heads
+      invalid_blocks forked_chains =
+    let chain_id = Chain_id.of_block_hash genesis.Genesis.block in
+    let chain_dir = Naming.(store_dir // chain_store chain_id) in
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.alternate_heads)
+      (Block_hash.Map.encoding Data_encoding.int32)
+      alternate_heads
+    >>= fun () ->
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Naming.Chain_data.invalid_blocks)
+      (Block_hash.Map.encoding invalid_block_encoding)
+      invalid_blocks
+    >>= fun () ->
+    Stored_data.write_file
+      ~file:Naming.(chain_dir // Chain_data.forked_chains)
+      (Chain_id.Map.encoding Block_hash.encoding)
+      forked_chains
+    >>= fun () -> return_unit
 end
