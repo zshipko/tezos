@@ -55,6 +55,12 @@ let cemented_blocks_dir {cemented_blocks_dir; _} = cemented_blocks_dir
 
 let cemented_blocks_files {cemented_blocks_files; _} = cemented_blocks_files
 
+let cemented_block_level_index {cemented_block_level_index; _} =
+  cemented_block_level_index
+
+let cemented_block_hash_index {cemented_block_hash_index; _} =
+  cemented_block_hash_index
+
 let default_index_log_size = 100_000
 
 let default_compression_level = 9
@@ -69,11 +75,13 @@ let create ~cemented_blocks_dir =
   >>= fun () ->
   let cemented_block_level_index =
     Cemented_block_level_index.v
+      ~readonly:false
       ~log_size:default_index_log_size
       Naming.(cemented_blocks_dir // cemented_block_level_index_directory)
   in
   let cemented_block_hash_index =
     Cemented_block_hash_index.v
+      ~readonly:false
       ~log_size:default_index_log_size
       Naming.(cemented_blocks_dir // cemented_block_hash_index_directory)
   in
@@ -509,8 +517,12 @@ let cement_blocks ?(check_consistency = true) (cemented_store : t)
   Lwt_unix.rename file final_file
   >>= fun () ->
   (* Flush the indexes *)
-  Cemented_block_level_index.flush cemented_store.cemented_block_level_index ;
-  Cemented_block_hash_index.flush cemented_store.cemented_block_hash_index ;
+  Cemented_block_level_index.flush
+    ~with_fsync:true
+    cemented_store.cemented_block_level_index ;
+  Cemented_block_hash_index.flush
+    ~with_fsync:true
+    cemented_store.cemented_block_hash_index ;
   (* Update table *)
   let cemented_block_interval =
     {start_level = first_block_level; end_level = last_block_level; filename}

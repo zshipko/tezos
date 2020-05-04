@@ -92,6 +92,14 @@
    every chunk of block's metadata is indexed by their level encoded
    as string (present if relevent).  *)
 
+(** On-disk index of block's hash to level. *)
+module Cemented_block_level_index :
+  Index.S with type key = Block_key.t and type value = Block_level.t
+
+(** On-disk index of block's level to hash. *)
+module Cemented_block_hash_index :
+  Index.S with type key = Block_level.t and type value = Block_key.t
+
 (** The type of the cemented block store *)
 type t
 
@@ -120,6 +128,14 @@ val cemented_blocks_dir : t -> string
 (** [cemented_blocks_files cemented_store] returns the {b current}
     list of cemented blocks chunks files. *)
 val cemented_blocks_files : t -> cemented_blocks_file array
+
+(** [cemented_block_level_index block_store] returns the hash to level
+    index. *)
+val cemented_block_level_index : t -> Cemented_block_level_index.t
+
+(** [cemented_block_hash_index block_store] returns the level to hash
+    index. *)
+val cemented_block_hash_index : t -> Cemented_block_hash_index.t
 
 (** [load_table ~cemented_blocks_dir] read the [cemented_blocks_dir]
     directory and instanciate the cemented blocks chunks files. *)
