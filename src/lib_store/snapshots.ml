@@ -774,6 +774,85 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
     genesis
     ~locked_f:export_rolling_f
 
+(* Copy the cemented_store indexes while the lock is taken. *)
+let copy_cemented_indexes chain_store ~dst_cemented_dir =
+  let open Cemented_block_store in
+  let block_store = Store.Unsafe.get_block_store chain_store in
+  let cemented_store = Block_store.cemented_block_store block_store in
+  match Cemented_block_store.get_highest_cemented_level cemented_store with
+  | None ->
+      (* No cemented files: no index to export *)
+      return_unit
+  | Some highest_level ->
+      protect (fun () ->
+          Lwt_utils_unix.display_progress
+            ~every:1
+            ~pp_print_step:(fun fmt _i ->
+              Format.fprintf
+                fmt
+                "Copying %ld entries in cemented indexes"
+                highest_level)
+            (fun notify ->
+              let dst_level_dir =
+                Naming.(
+                  dst_cemented_dir // cemented_block_level_index_directory)
+              in
+              let fresh_level_index =
+                Cemented_block_level_index.v
+                  ~fresh:true
+                  ~readonly:false
+                  ~log_size:100_000
+                  dst_level_dir
+              in
+              let dst_hash_dir =
+                Naming.(
+                  dst_cemented_dir // cemented_block_hash_index_directory)
+              in
+              let fresh_hash_index =
+                Cemented_block_hash_index.v
+                  ~fresh:true
+                  ~readonly:false
+                  ~log_size:100_000
+                  dst_hash_dir
+              in
+              let level_index =
+                Cemented_block_store.cemented_block_level_index cemented_store
+              in
+              Cemented_block_level_index.iter
+                (fun hash level ->
+                  Cemented_block_level_index.replace
+                    fresh_level_index
+                    hash
+                    level ;
+                  Cemented_block_hash_index.replace fresh_hash_index level hash)
+                level_index ;
+              Cemented_block_level_index.close fresh_level_index ;
+              Cemented_block_hash_index.close fresh_hash_index ;
+              notify () >>= return))
+
+let filter_indexes ~dst_cemented_dir limit =
+  let open Cemented_block_store in
+  let fresh_level_index =
+    Cemented_block_level_index.v
+      ~fresh:false
+      ~readonly:false
+      ~log_size:100_000
+      Naming.(dst_cemented_dir // cemented_block_level_index_directory)
+  in
+  let fresh_hash_index =
+    Cemented_block_hash_index.v
+      ~fresh:false
+      ~readonly:false
+      ~log_size:100_00
+      Naming.(dst_cemented_dir // cemented_block_hash_index_directory)
+  in
+  Cemented_block_level_index.filter fresh_level_index (fun (_, level) ->
+      level <= limit) ;
+  Cemented_block_hash_index.filter fresh_hash_index (fun (level, _) ->
+      level <= limit) ;
+  Cemented_block_level_index.close fresh_level_index ;
+  Cemented_block_hash_index.close fresh_hash_index
+
 let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
     ~rolling genesis =
   let export_full_f (chain_store, context_index) =
@@ -804,12 +883,27 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
           ~src_cemented_dir
           ~export_block
         >>=? fun (cemented_table, extra_floating_blocks) ->
+        (* Copy the indexes *)
+        copy_cemented_indexes chain_store ~dst_cemented_dir
+        >>=? fun () ->
         Store.Chain.all_protocol_levels chain_store
         >>= fun protocol_levels ->
         (* Dump the context while the store is locked to avoid reading on
            pruning *)
         dump_context context_index ~snapshot_dir ~pred_block ~export_block
         >>=? fun written_context_elements ->
+        let block_store = Store.Unsafe.get_block_store chain_store in
+        let cemented_store = Block_store.cemented_block_store block_store in
+        let should_filter_indexes =
+          match
+            Cemented_block_store.get_highest_cemented_level cemented_store
+          with
+          | None ->
+              false
+          | Some max_cemented_level ->
+              Compare.Int32.(
+                max_cemented_level > Store.Block.level export_block)
+        in
         return
           ( export_mode,
             export_block,
@@ -817,7 +911,8 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
             written_context_elements,
             (src_cemented_dir, cemented_table),
             (ro_fd, rw_fd),
-            extra_floating_blocks ))
+            extra_floating_blocks,
+            should_filter_indexes ))
       (fun exn ->
         Lwt_utils_unix.safe_close ro_fd
         >>= fun () ->
@@ -834,13 +929,16 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
              written_context_elements,
              (src_cemented_dir, cemented_table),
              (floating_ro_fd, floating_rw_fd),
-             extra_floating_blocks ) ->
+             extra_floating_blocks,
+             should_filter_indexes ) ->
   let finalizer () =
     Lwt_utils_unix.safe_close floating_ro_fd
     >>= fun () -> Lwt_utils_unix.safe_close floating_rw_fd
   in
   copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir cemented_table
   >>=? fun () ->
+  if should_filter_indexes then
+    filter_indexes ~dst_cemented_dir (List.last_exn cemented_table).end_level ;
   ( match extra_floating_blocks with
   | Some floating_blocks ->
       finalizer ()
@@ -915,15 +1013,37 @@ let export ?(rolling = false) ~block ~store_dir ~context_dir ~chain_name
   >>= fun () ->
   lwt_emit (Export_success snapshot_dir) >>= fun () -> return_unit
 
-let copy_and_restore_cemented_blocks ~snapshot_cemented_dir ~dst_cemented_dir
-    ~genesis_hash =
+let copy_and_restore_cemented_blocks ?(check_consistency = true)
+    ~snapshot_cemented_dir ~dst_cemented_dir ~genesis_hash =
   (* Copy the cemented files *)
   let stream = Lwt_unix.files_of_directory snapshot_cemented_dir in
   Lwt_stream.to_list stream
   >>= fun files ->
+  let dst_level_dir =
+    Naming.(
+      snapshot_cemented_dir // Naming.cemented_block_level_index_directory)
+  in
+  let dst_hash_dir =
+    Naming.(
+      snapshot_cemented_dir // Naming.cemented_block_hash_index_directory)
+  in
+  ( if Sys.file_exists dst_level_dir && Sys.file_exists dst_hash_dir then
+    Lwt_utils_unix.copy_dir
+      dst_level_dir
+      Naming.(dst_cemented_dir // cemented_block_level_index_directory)
+    >>= fun () ->
+    Lwt_utils_unix.copy_dir
+      dst_hash_dir
+      Naming.(dst_cemented_dir // cemented_block_hash_index_directory)
+  else Lwt.return_unit )
+  >>= fun () ->
   filter_s
     (function
       | "." | ".." ->
+          return_false
+      | file
+        when file = Naming.cemented_block_hash_index_directory
+             || file = Naming.cemented_block_level_index_directory ->
           return_false
       | file ->
           let is_valid =
@@ -961,7 +1081,7 @@ let copy_and_restore_cemented_blocks ~snapshot_cemented_dir ~dst_cemented_dir
     ~cemented_blocks_dir:dst_cemented_dir
     ~readonly:false
   >>=? fun cemented_store ->
-  ( if nb_cemented_files > 0 then
+  ( if check_consistency && nb_cemented_files > 0 then
     iter_s
       (fun cemented_file ->
         if
@@ -983,7 +1103,7 @@ let copy_and_restore_cemented_blocks ~snapshot_cemented_dir ~dst_cemented_dir
           nb_cemented_files
           (100 * i / nb_cemented_files))
       (fun notify ->
-        Cemented_block_store.restore_indexes_consistency
+        Cemented_block_store.check_indexes_consistency
           ~post_step:notify
           ~genesis_hash
           cemented_store)
@@ -1154,8 +1274,8 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
 
 (* TODO parallelise in another process *)
 (* TODO? remove patch context *)
-let import ?patch_context ?block:expected_block ~snapshot_dir ~dst_store_dir
-    ~dst_context_dir ~user_activated_upgrades
+let import ?patch_context ?block:expected_block ?(check_consistency = true)
+    ~snapshot_dir ~dst_store_dir ~dst_context_dir ~user_activated_upgrades
     ~user_activated_protocol_overrides (genesis : Genesis.t) =
   let chain_id = Chain_id.of_block_hash genesis.block in
   read_snapshot_metadata Naming.(snapshot_dir // Snapshot.metadata)
@@ -1192,6 +1312,7 @@ let import ?patch_context ?block:expected_block ~snapshot_dir ~dst_store_dir
   >>=? fun protocol_levels ->
   (* Restore cemented dir *)
   copy_and_restore_cemented_blocks
+    ~check_consistency
     ~snapshot_cemented_dir:Naming.(snapshot_dir // Snapshot.cemented_blocks)
     ~dst_cemented_dir
     ~genesis_hash:genesis.block

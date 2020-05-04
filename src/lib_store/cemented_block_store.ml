@@ -601,7 +601,7 @@ let trigger_gc (cemented_store : t) = function
               (fun _exn -> Lwt.return_unit))
           files_to_remove
 
-let restore_indexes_consistency ?(post_step = fun () -> Lwt.return_unit)
+let check_indexes_consistency ?(post_step = fun () -> Lwt.return_unit)
     ?genesis_hash cemented_store =
   let table = cemented_store.cemented_blocks_files in
   let len = Array.length table in
@@ -675,15 +675,22 @@ let restore_indexes_consistency ?(post_step = fun () -> Lwt.return_unit)
           >>=? fun () ->
           let level = Block_repr.level block in
           let hash = Block_repr.hash block in
-          Cemented_block_level_index.replace
-            cemented_store.cemented_block_level_index
-            hash
-            level ;
-          Cemented_block_hash_index.replace
-            cemented_store.cemented_block_hash_index
-            level
-            hash ;
-          iter_blocks ~pred_block:block (succ n)
+          ( if
+            not
+              ( Cemented_block_level_index.mem
+                  cemented_store.cemented_block_level_index
+                  hash
+              && Cemented_block_hash_index.mem
+                   cemented_store.cemented_block_hash_index
+                   level )
+          then
+            failwith
+              "corrupted index in snapshot: %a is not found in the imported \
+               store."
+              Block_hash.pp
+              hash
+          else return_unit )
+          >>=? fun () -> iter_blocks ~pred_block:block (succ n)
       in
       Lwt.finalize
         (fun () ->

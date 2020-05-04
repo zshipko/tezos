@@ -68,6 +68,7 @@ val export :
 val import :
   ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->
   ?block:string ->
+  ?check_consistency:bool ->
   snapshot_dir:string ->
   dst_store_dir:string ->
   dst_context_dir:string ->

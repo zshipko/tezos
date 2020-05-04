@@ -55,7 +55,7 @@ end
 module Term = struct
   type subcommand = Export | Import | Info
 
-  let process subcommand args snapshot_path (block : string option) rolling
+  let process subcommand args snapshot_path block disable_check rolling
       reconstruct sandbox_file import_legacy =
     (* FIXME check snapshot format *)
     let run =
@@ -165,9 +165,11 @@ module Term = struct
                   ~snapshot_file:snapshot_path
                   genesis
               else
+                let check_consistency = not disable_check in
                 Snapshots.import
                   ~patch_context
                   ?block
+                  ~check_consistency
                   ~snapshot_dir:snapshot_path
                   ~dst_store_dir:store_root
                   ~dst_context_dir:context_root
@@ -242,6 +244,15 @@ module Term = struct
     & opt (some string) None
     & info ~docv:"<block_hash, level, alias>" ~doc ["block"]
 
+  let disable_check =
+    let open Cmdliner.Arg in
+    let doc =
+      "Setting this flag disable the consistency check after importing a \
+       full-mode snapshot. This improves performances but is strongly \
+       unrecommended as the snapshot could contain a corrupted chain."
+    in
+    value & flag & info ~doc ["no-check"]
+
   let export_rolling =
     let open Cmdliner in
     let doc =
@@ -292,7 +303,8 @@ module Term = struct
     let open Cmdliner.Term in
     ret
       ( const process $ subcommand_arg $ Node_shared_arg.Term.args $ file_arg
-      $ block $ export_rolling $ reconstruct $ sandbox $ import_legacy )
+      $ block $ disable_check $ export_rolling $ reconstruct $ sandbox
+      $ import_legacy )
 end
 
 module Manpage = struct

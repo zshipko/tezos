@@ -222,14 +222,13 @@ val cement_blocks :
     GC phase will be. *)
 val trigger_gc : t -> History_mode.t -> unit Lwt.t
 
-(** [restore_indexes_consistency ?post_step ?genesis_hash cemented_store history_mode]
-    iterate over a partially intialized [cemented_store] that contains
-    only chunks rebuilding their indexes while checking the consistency
-    : (hashes, predecessors, levels).  The hash is not checked for
-    [genesis_hash] and [post_step] is called after each chunk treated.
-    This is used for snapshots import.
- *)
-val restore_indexes_consistency :
+(** [check_indexes_consistency ?post_step ?genesis_hash cemented_store
+    history_mode] iterate over a partially intialized [cemented_store]
+    that contains chunks of blocks and both the index and check the
+    consistency of each block : (hashes, predecessors, levels). The
+    hash is not checked for [genesis_hash] and [post_step] is called
+    after each chunk treated.  This is used for snapshots import.  *)
+val check_indexes_consistency :
   ?post_step:(unit -> unit Lwt.t) ->
   ?genesis_hash:Block_hash.t ->
   t ->
