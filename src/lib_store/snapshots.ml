@@ -543,86 +543,78 @@ let check_export_block_validity chain_store block =
     (Invalid_export_block {block = Some block_hash; reason = `Not_enough_pred})
   >>=? fun () -> return (pred_block, minimum_level_needed)
 
-let get_default_block chain_store =
-  Store.Chain.current_head chain_store
-  >>= fun current_head ->
-  Store.Chain.checkpoint chain_store
-  >>= fun (checkpoint_hash, _) ->
-  Store.Block.read_block_opt chain_store checkpoint_hash
-  >>= function
-  | Some checkpoint_block ->
-      (* The checkpoint is known: we should have its context and caboose
-         should be low enough to retrieve enough blocks. *)
-      return checkpoint_block
-  | None ->
-      (* Checkpoint might be in the future: take the head's last allowed
-         fork level which we should know. *)
-      Store.Block.get_block_metadata chain_store current_head
-      >>=? fun head_metadata ->
-      let head_lafl = Store.Block.last_allowed_fork_level head_metadata in
-      Store.Block.read_block_by_level chain_store head_lafl
-
 let retrieve_export_block chain_store block =
   ( match block with
-  | None ->
-      get_default_block chain_store
-  | Some str -> (
-      ( match Block_services.parse_block str with
-      | Error msg ->
-          failwith "%s" msg
-      | Ok (`Hash (h, distance)) -> (
-          Store.Block.read_block_opt chain_store ~distance h
-          >>= function
-          | None ->
-              fail (Invalid_export_block {block = Some h; reason = `Unknown})
-          | Some block ->
-              return_some block )
-      | Ok (`Head distance) ->
+  | `Hash (h, distance) -> (
+      Store.Block.read_block_opt chain_store ~distance h
+      >>= function
+      | None ->
+          fail (Invalid_export_block {block = Some h; reason = `Unknown})
+      | Some block ->
+          return_some block )
+  | `Head distance ->
+      Store.Chain.current_head chain_store
+      >>= fun current_head ->
+      Store.Block.read_block_opt
+        chain_store
+        ~distance
+        (Store.Block.hash current_head)
+      >>= return
+  | `Level i ->
+      Store.Block.read_block_by_level_opt chain_store i >>= return
+  | `Genesis ->
+      fail
+        (Invalid_export_block
+           {
+             block = Some (Store.Chain.genesis chain_store).Genesis.block;
+             reason = `Genesis;
+           })
+  | `Alias (`Caboose, _) ->
+      Store.Chain.caboose chain_store
+      >>= fun (caboose_hash, _) ->
+      fail
+        (Invalid_export_block {block = Some caboose_hash; reason = `Caboose})
+  | `Alias (`Checkpoint, distance) -> (
+      Store.Chain.checkpoint chain_store
+      >>= fun (checkpoint_hash, _) ->
+      Store.Block.read_block_opt chain_store checkpoint_hash
+      >>= function
+      | Some checkpoint_block ->
+          (* The checkpoint is known: we should have its context and caboose
+             should be low enough to retrieve enough blocks. *)
+          if distance = 0 then return_some checkpoint_block
+          else
+            Store.Block.read_block_opt
+              chain_store
+              (Store.Block.hash checkpoint_block)
+              ~distance
+            >>= return
+      | None when distance = 0 ->
           Store.Chain.current_head chain_store
           >>= fun current_head ->
-          Store.Block.read_block_opt
-            chain_store
-            ~distance
-            (Store.Block.hash current_head)
-          >>= return
-      | Ok (`Level i) ->
-          Store.Block.read_block_by_level_opt chain_store i >>= return
-      | Ok `Genesis ->
-          fail
-            (Invalid_export_block
-               {
-                 block = Some (Store.Chain.genesis chain_store).Genesis.block;
-                 reason = `Genesis;
-               })
-      | Ok (`Alias (`Caboose, _)) ->
-          Store.Chain.caboose chain_store
-          >>= fun (caboose_hash, _) ->
-          fail
-            (Invalid_export_block
-               {block = Some caboose_hash; reason = `Caboose})
-      | Ok (`Alias (`Checkpoint, distance)) ->
-          Store.Chain.checkpoint chain_store
-          >>= fun (_, checkpoint_level) ->
-          Store.Block.read_block_by_level_opt
-            chain_store
-            Int32.(sub checkpoint_level (of_int distance))
-          >>= return
-      | Ok (`Alias (`Savepoint, distance)) ->
-          Store.Chain.savepoint chain_store
-          >>= fun (_, savepoint_level) ->
-          Store.Block.read_block_by_level_opt
-            chain_store
-            Int32.(sub savepoint_level (of_int distance))
-          >>= return )
-      >>=? function
+          (* Checkpoint might be in the future: take the head's last allowed
+             fork level which we should know. *)
+          Store.Block.get_block_metadata chain_store current_head
+          >>=? fun head_metadata ->
+          let head_lafl = Store.Block.last_allowed_fork_level head_metadata in
+          Store.Block.read_block_by_level chain_store head_lafl
+          >>=? return_some
       | None ->
-          fail (Invalid_export_block {block = None; reason = `Unknown})
-      | Some block ->
-          return block ) )
-  >>=? fun export_block ->
-  check_export_block_validity chain_store export_block
-  >>=? fun (pred_block, minimum_level_needed) ->
-  return (export_block, pred_block, minimum_level_needed)
+          return_none )
+  | `Alias (`Savepoint, distance) ->
+      Store.Chain.savepoint chain_store
+      >>= fun (_, savepoint_level) ->
+      Store.Block.read_block_by_level_opt
+        chain_store
+        Int32.(sub savepoint_level (of_int distance))
+      >>= return )
+  >>=? function
+  | None ->
+      fail (Invalid_export_block {block = None; reason = `Unknown})
+  | Some export_block ->
+      check_export_block_validity chain_store export_block
+      >>=? fun (pred_block, minimum_level_needed) ->
+      return (export_block, pred_block, minimum_level_needed)
 
 let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
     ~export_block =
@@ -872,7 +864,7 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
       written_context_elements,
       (reading_thread, floating_block_stream) )
 
-let export ?(rolling = false) ?block ~store_dir ~context_dir ~chain_name
+let export ?(rolling = false) ~block ~store_dir ~context_dir ~chain_name
     ~snapshot_dir genesis =
   create_snapshot_dir ~snapshot_dir
   >>=? fun (dst_cemented_dir, dst_protocol_dir) ->

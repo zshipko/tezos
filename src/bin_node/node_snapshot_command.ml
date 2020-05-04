@@ -55,8 +55,8 @@ end
 module Term = struct
   type subcommand = Export | Import | Info
 
-  let process subcommand args snapshot_path block rolling reconstruct
-      sandbox_file import_legacy =
+  let process subcommand args snapshot_path (block : string option) rolling
+      reconstruct sandbox_file import_legacy =
     (* FIXME check snapshot format *)
     let run =
       Internal_event_unix.init ()
@@ -88,6 +88,16 @@ module Term = struct
           >>=? fun () ->
           let context_dir = Node_data_version.context_dir data_dir in
           let store_dir = Node_data_version.store_dir data_dir in
+          Option.unopt_map
+            ~default:(return (`Alias (`Checkpoint, 0)))
+            ~f:(fun block ->
+              match Block_services.parse_block block with
+              | Error err ->
+                  failwith "%s: %s" block err
+              | Ok block ->
+                  return block)
+            block
+          >>=? fun block ->
           protect
             ~on_error:(fun err ->
               dir_cleaner () >>= fun () -> Lwt.return (Error err))
@@ -97,7 +107,7 @@ module Term = struct
                 ~store_dir
                 ~context_dir
                 ~chain_name
-                ?block
+                ~block
                 ~snapshot_dir:snapshot_path
                 genesis)
       | Import ->

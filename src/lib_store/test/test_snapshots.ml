@@ -103,10 +103,15 @@ let export_import ~test_descr (store_dir, context_dir) chain_store
   let block_store = Store.Unsafe.get_block_store chain_store in
   Block_store.await_merging block_store
   >>=? fun () ->
-  let block = Option.map ~f:Block_hash.to_b58check exported_block_hash in
+  let exported_block =
+    Option.unopt_map
+      ~default:(`Alias (`Checkpoint, 0))
+      ~f:(fun hash -> `Hash (hash, 0))
+      exported_block_hash
+  in
   Snapshots.export
     ~rolling
-    ?block
+    ~block:exported_block
     ~store_dir
     ~context_dir
     ~chain_name:(Distributed_db_version.Name.of_string "test")
@@ -116,6 +121,7 @@ let export_import ~test_descr (store_dir, context_dir) chain_store
   let dir = store_dir // "imported_store" in
   let dst_store_dir = dir // "store" in
   let dst_context_dir = dir // "context" in
+  let block = Option.map ~f:Block_hash.to_b58check exported_block_hash in
   Snapshots.import
     ?block
     ~snapshot_dir
@@ -477,7 +483,84 @@ let test_rolling genesis_parameters =
     let dst_context_dir = dst_dir // "context" in
     Snapshots.export
       ~rolling:true
-      ~block:(Block_hash.to_b58check (Store.Block.hash head))
+      ~block:(`Head 0)
+      ~store_dir
+      ~context_dir
+      ~chain_name:(Distributed_db_version.Name.of_string "test")
+      ~snapshot_dir
+      genesis
+    >>=? fun () ->
+    Snapshots.import
+      ~snapshot_dir
+      ~dst_store_dir
+      ~dst_context_dir
+      ~user_activated_upgrades:[]
+      ~user_activated_protocol_overrides:[]
+      genesis
+    >>=? fun () ->
+    Store.init
+      ~patch_context
+      ~history_mode:History_mode.default_rolling
+      ~readonly:false
+      ~store_dir:dst_store_dir
+      ~context_dir:dst_context_dir
+      ~allow_testchains:true
+      genesis
+    >>=? fun store' ->
+    let chain_store' = Store.main_chain_store store' in
+    let rec loop blk = function
+      | 0 ->
+          return blk
+      | n ->
+          Alpha_utils.bake_until_cycle_end chain_store' blk
+          >>=? fun (_, blk) -> loop blk (n - 1)
+    in
+    loop head 4
+    >>=? fun _head ->
+    Store.Chain.checkpoint chain_store'
+    >>= fun checkpoint ->
+    let prn i = Format.sprintf "%ld" i in
+    Store.Block.read_block chain_store' (fst checkpoint)
+    >>=? fun checkpoint_block ->
+    Store.Block.get_block_metadata chain_store' checkpoint_block
+    >>=? fun metadata ->
+    let max_op_ttl_cp =
+      Int32.(
+        sub (snd checkpoint) (of_int (Store.Block.max_operations_ttl metadata)))
+    in
+    Store.Chain.caboose chain_store'
+    >>= fun caboose ->
+    Assert.equal
+      ~prn
+      ~msg:__LOC__
+      ~eq:Compare.Int32.equal
+      max_op_ttl_cp
+      (snd caboose) ;
+    Store.close_store store' >>= fun () -> return_unit
+  in
+  wrap_test
+    ~keep_dir:false
+    ~history_mode:History_mode.default
+    ~patch_context
+    ("genesis consistency after rolling import", test)
+
+let test_bound genesis_parameters =
+  let patch_context ctxt =
+    Alpha_utils.patch_context ~genesis_parameters ctxt
+  in
+  let test (store_dir, context_dir) store =
+    let chain_store = Store.main_chain_store store in
+    Store.Chain.genesis_block chain_store
+    >>= fun genesis_block ->
+    Alpha_utils.bake_until_n_cycle_end chain_store 6 genesis_block
+    >>=? fun (_blocks, head) ->
+    let snapshot_dir = store_dir // "snapshot.full" in
+    let dst_dir = store_dir // "imported_store" in
+    let dst_store_dir = dst_dir // "store" in
+    let dst_context_dir = dst_dir // "context" in
+    Snapshots.export
+      ~rolling:true
+      ~block:(`Head 0)
       ~store_dir
       ~context_dir
       ~chain_name:(Distributed_db_version.Name.of_string "test")

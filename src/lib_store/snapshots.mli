@@ -57,7 +57,7 @@ type error +=
 
 val export :
   ?rolling:bool ->
-  ?block:string ->
+  block:Block_services.block ->
   store_dir:string ->
   context_dir:string ->
   chain_name:Distributed_db_version.Name.t ->
