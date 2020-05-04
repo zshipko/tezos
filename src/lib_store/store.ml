@@ -289,11 +289,19 @@ module Block = struct
 
   let locked_read_block_by_level chain_store head level =
     let distance = Int32.(to_int (sub (Block_repr.level head) level)) in
-    read_block chain_store ~distance (Block_repr.hash head)
+    if distance < 0 then
+      fail
+        (Store_errors.Bad_level
+           {
+             head_level = Block_repr.level head;
+             given_level = Int32.of_int distance;
+           })
+    else read_block chain_store ~distance (Block_repr.hash head)
 
   let locked_read_block_by_level_opt chain_store head level =
     let distance = Int32.(to_int (sub (Block_repr.level head) level)) in
-    read_block_opt chain_store ~distance (Block_repr.hash head)
+    if distance < 0 then Lwt.return_none
+    else read_block_opt chain_store ~distance (Block_repr.hash head)
 
   let read_block_by_level chain_store level =
     current_head chain_store

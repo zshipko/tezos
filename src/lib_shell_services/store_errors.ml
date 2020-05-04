@@ -25,6 +25,8 @@
 
 type error += Block_not_found of Block_hash.t
 
+type error += Bad_level of {head_level : Int32.t; given_level : Int32.t}
+
 type error += Block_metadata_not_found of Block_hash.t
 
 type error +=
@@ -52,6 +54,24 @@ let () =
     Data_encoding.(obj1 (req "block_not_found" @@ Block_hash.encoding))
     (function Block_not_found block_hash -> Some block_hash | _ -> None)
     (fun block_hash -> Block_not_found block_hash) ;
+  register_error_kind
+    `Permanent
+    ~id:"store.block.bad_level"
+    ~title:"Bad level"
+    ~description:"Read a block at level past our current head."
+    ~pp:(fun ppf (head_level, given_level) ->
+      Format.fprintf
+        ppf
+        "The block at level %ld is beyond our current head's level : %ld."
+        given_level
+        head_level)
+    Data_encoding.(obj2 (req "head_level" int32) (req "given_level" int32))
+    (function
+      | Bad_level {head_level; given_level} ->
+          Some (head_level, given_level)
+      | _ ->
+          None)
+    (fun (head_level, given_level) -> Bad_level {head_level; given_level}) ;
   register_error_kind
     `Permanent
     ~id:"store.block.metadata_not_found"
