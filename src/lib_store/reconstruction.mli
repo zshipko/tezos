@@ -24,11 +24,39 @@
 (*                                                                           *)
 (*****************************************************************************)
 
+(** Storage reconstruction
+
+    The storage reconstruct feature aims to re-compute the contexts
+    (ledger state) and the blocks metadata of a full mode storage, and
+    thus, migrate a storage from a full history mode to an archive
+    one.
+
+    To do so, it is needed to re-play the whole chain, by applying
+    (using the standard validation method:
+    [Lib_validation.Block_validation.apply]) all the blocks from the
+    genesis on empty context. As a storage running a full history mode
+    will not store all the ledger state but keeps all the blocks (and
+    operations), it is the only mode that can be reconstructed. The
+    operation is made of two major steps:
+    - Reconstruct the cemented block store: the context of each block
+    is restored and, for each cemented cycle, the associated metadatas
+    are restored.
+    - Reconstruct the floating blocks store: Optional as the floating
+    block store may also need to be reconstructed. Indeed, after a
+    snapshot import, the floating blocks (before the snapshot's block
+    target) are not associated with a stored context and its
+    associated metadata.
+ *)
+
+(** [reconstruct ?patch_context ~store_dir ~context_dir genesis uau
+    uapo] reconstructs the storage located in [store_dir] and
+    [context_dir]. The resulting storage will see its history mode
+    changed to archive. *)
 val reconstruct :
   ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->
-  store_root:string ->
-  context_root:string ->
-  genesis:Genesis.t ->
+  store_dir:string ->
+  context_dir:string ->
+  Genesis.t ->
   user_activated_upgrades:User_activated.upgrades ->
   user_activated_protocol_overrides:User_activated.protocol_overrides ->
   unit tzresult Lwt.t

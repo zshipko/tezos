@@ -185,9 +185,9 @@ module Term = struct
           if reconstruct then
             Reconstruction.reconstruct
               ~patch_context
-              ~store_root
-              ~context_root
-              ~genesis
+              ~store_dir:store_root
+              ~context_dir:context_root
+              genesis
               ~user_activated_upgrades:
                 node_config.blockchain_network.user_activated_upgrades
               ~user_activated_protocol_overrides:

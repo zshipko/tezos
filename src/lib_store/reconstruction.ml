@@ -423,12 +423,12 @@ let restore_constants chain_store genesis_block =
   Store.Unsafe.set_savepoint chain_store genesis
   >>=? fun () -> Store.Unsafe.set_caboose chain_store genesis
 
-let reconstruct ?patch_context ~store_root ~context_root ~(genesis : Genesis.t)
+let reconstruct ?patch_context ~store_dir ~context_dir genesis
     ~user_activated_upgrades ~user_activated_protocol_overrides =
   Store.init
     ?patch_context
-    ~store_dir:store_root
-    ~context_dir:context_root
+    ~store_dir
+    ~context_dir
     ~allow_testchains:false
     genesis
   >>=? fun store ->

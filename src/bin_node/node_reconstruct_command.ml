@@ -74,16 +74,16 @@ module Term = struct
       >>=? fun is_locked ->
       fail_when is_locked Locked_directory
       >>=? fun () ->
-      let context_root = Node_data_version.context_dir data_dir in
-      let store_root = Node_data_version.store_dir data_dir in
+      let context_dir = Node_data_version.context_dir data_dir in
+      let store_dir = Node_data_version.store_dir data_dir in
       let patch_context =
         Patch_context.patch_context genesis sandbox_parameters
       in
       Tezos_store.Reconstruction.reconstruct
         ~patch_context
-        ~store_root
-        ~context_root
-        ~genesis
+        ~store_dir
+        ~context_dir
+        genesis
         ~user_activated_upgrades:
           node_config.blockchain_network.user_activated_upgrades
         ~user_activated_protocol_overrides:
