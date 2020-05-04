@@ -155,6 +155,26 @@ let copy_file ~src ~dst =
           in
           loop ()))
 
+let copy_dir ?(perm = 0o755) src dst =
+  create_dir ~perm dst
+  >>= fun () ->
+  let rec copy_dir dir dst_dir =
+    let files = Lwt_unix.files_of_directory dir in
+    Lwt_stream.iter_s
+      (fun file ->
+        if file = "." || file = ".." then Lwt.return_unit
+        else
+          let file = Filename.concat dir file in
+          let basename = Filename.basename file in
+          if Sys.is_directory file then
+            let new_dir = Filename.concat dst_dir basename in
+            create_dir ~perm new_dir >>= fun () -> copy_dir file new_dir
+          else copy_file ~src:file ~dst:(Filename.concat dst_dir basename))
+      files
+  in
+  if Sys.file_exists src && Sys.is_directory src then copy_dir src dst
+  else Lwt.return_unit
+
 let safe_close fd =
   Lwt.catch (fun () -> Lwt_unix.close fd) (fun _ -> Lwt.return_unit)
 

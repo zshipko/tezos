@@ -53,6 +53,10 @@ val remove_dir : string -> unit Lwt.t
 
 val create_dir : ?perm:int -> string -> unit Lwt.t
 
+(** [copy_dir ?perm src dst] copies the content of directory [src] in
+    a fresh directory [dst] created with [perm] (0o755 by default). *)
+val copy_dir : ?perm:int -> string -> string -> unit Lwt.t
+
 val read_file : string -> string Lwt.t
 
 val copy_file : src:string -> dst:string -> unit Lwt.t
