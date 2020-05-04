@@ -962,7 +962,6 @@ module Chain = struct
         (* caboose = genesis *)
         return chain_state.caboose
     | Rolling {offset} ->
-        Format.printf "min level to preserve : %ld@." min_level_to_preserve ;
         (* If the caboose is above the min block to preserve, we leave it unchanged. *)
         if Compare.Int32.(snd chain_state.caboose >= min_level_to_preserve)
         then return chain_state.caboose
