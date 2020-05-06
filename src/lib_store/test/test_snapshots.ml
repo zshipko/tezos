@@ -475,7 +475,11 @@ let test_rolling genesis_parameters =
     let chain_store = Store.main_chain_store store in
     Store.Chain.genesis_block chain_store
     >>= fun genesis_block ->
-    Alpha_utils.bake_until_n_cycle_end chain_store 6 genesis_block
+    let nb_cycles_to_bake = 6 in
+    Alpha_utils.bake_until_n_cycle_end
+      chain_store
+      nb_cycles_to_bake
+      genesis_block
     >>=? fun (_blocks, head) ->
     let snapshot_dir = store_dir // "snapshot.full" in
     let dst_dir = store_dir // "imported_store" in
@@ -542,7 +546,12 @@ let test_rolling genesis_parameters =
     ~keep_dir:false
     ~history_mode:History_mode.default
     ~patch_context
-    ("genesis consistency after rolling import", test)
+    ( Format.asprintf
+        "genesis consistency after rolling import (blocks per cycle = %ld)"
+        Tezos_protocol_alpha.Protocol.(
+          genesis_parameters.Parameters_repr.constants
+            .Constants_repr.blocks_per_cycle),
+      test )
 
 (* TODO:
    export => import => export => import from full & rolling
