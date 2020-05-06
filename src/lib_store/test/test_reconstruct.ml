@@ -121,7 +121,7 @@ let test_from_bootstrapped ~descr (store_dir, context_dir) store
     Format.printf "closing@." ;
     Store.close_store store' >>= fun () -> return_unit
 
-let make_tests_bootstrapped speed genesis_parameters =
+let make_tests_bootstrapped speed patch_context =
   let history_modes =
     match speed with
     | `Slow ->
@@ -142,9 +142,6 @@ let make_tests_bootstrapped speed genesis_parameters =
         [0; 3; 8; 21; 42; 57; 89; 92; 101]
   in
   let permutations = List.(product nb_blocks_to_bake history_modes) in
-  let patch_context ctxt =
-    Alpha_utils.patch_context ~genesis_parameters ctxt
-  in
   List.map
     (fun (nb_blocks_to_bake, history_mode) ->
       let descr =
@@ -255,14 +252,13 @@ let test_from_snapshot ~descr:_ (store_dir, context_dir) store
       genesis
     >>=? fun store' ->
     Format.printf "CHECK FLAGS@." ;
-    let () = assert false in
     (* check_flags descr store' last
      * >>=? fun () -> *)
     let chain_store' = Store.main_chain_store store' in
     assert_presence_in_store ~with_metadata:true chain_store' baked_blocks
     >>=? fun () -> Store.close_store store' >>= fun () -> return_unit
 
-let make_tests_snapshoted speed genesis_parameters =
+let make_tests_snapshoted speed patch_context =
   let history_modes =
     match speed with
     | `Slow ->
@@ -282,10 +278,6 @@ let make_tests_snapshoted speed genesis_parameters =
         [0; 3; 8; 21; 42; 57; 89; 92; 101]
   in
   let permutations = List.(product nb_blocks_to_bake history_modes) in
-  let accounts = Alpha_utils.Account.generate_accounts 5 in
-  let patch_context ctxt =
-    Alpha_utils.patch_context ~genesis_parameters ~accounts ctxt
-  in
   List.map
     (fun (nb_blocks_to_bake, history_mode) ->
       let descr =
@@ -310,14 +302,15 @@ let make_tests_snapshoted speed genesis_parameters =
     permutations
 
 let tests speed =
-  let test_cases =
-    make_tests_bootstrapped
-      speed
-      Tezos_protocol_alpha_parameters.Default_parameters.(
-        parameters_of_constants constants_sandbox)
-    @ make_tests_snapshoted
-        speed
-        Tezos_protocol_alpha_parameters.Default_parameters.(
-          parameters_of_constants constants_sandbox)
+  let genesis_parameters =
+    Tezos_protocol_alpha_parameters.Default_parameters.(
+      parameters_of_constants constants_sandbox)
   in
-  ("reconstruct", test_cases)
+  let patch_context ctxt =
+    Alpha_utils.patch_context ~genesis_parameters ctxt
+  in
+  let test_cases_reconstruct = make_tests_bootstrapped speed patch_context in
+  let test_cases_reconstruct_snapshots =
+    make_tests_snapshoted speed patch_context
+  in
+  ("reconstruct", test_cases_reconstruct @ test_cases_reconstruct_snapshots)

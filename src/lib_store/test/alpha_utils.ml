@@ -96,24 +96,6 @@ module Account = struct
 
   let dummy_account = new_account ()
 
-  let generate_accounts ?(initial_balances = []) n : (t * Tez_repr.t) list =
-    Signature.Public_key_hash.Table.clear known_accounts ;
-    let default_amount = Tez_repr.of_mutez_exn 4_000_000_000_000L in
-    let amount i =
-      match List.nth_opt initial_balances i with
-      | None ->
-          default_amount
-      | Some a ->
-          Tez_repr.of_mutez_exn a
-    in
-    List.map
-      (fun i ->
-        let (pkh, pk, sk) = Signature.generate_key () in
-        let account = {pkh; pk; sk} in
-        Signature.Public_key_hash.Table.add known_accounts pkh account ;
-        (account, amount i))
-      (0 -- (n - 1))
-
   let account_to_bootstrap ({pkh; pk; _}, amount) =
     let open Parameters_repr in
     ({public_key_hash = pkh; public_key = Some pk; amount} : bootstrap_account)
@@ -358,8 +340,19 @@ let default_genesis_parameters =
   let open Tezos_protocol_alpha_parameters in
   Default_parameters.(parameters_of_constants constants_sandbox)
 
-let patch_context ?(genesis_parameters = default_genesis_parameters)
-    ?(accounts = Account.generate_accounts 5) ctxt =
+let default_accounts =
+  let n = 5 in
+  let open Account in
+  let default_amount = Tez_repr.of_mutez_exn 4_000_000_000_000L in
+  List.map
+    (fun _ ->
+      let (pkh, pk, sk) = Signature.generate_key () in
+      let account = {pkh; pk; sk} in
+      Signature.Public_key_hash.Table.add known_accounts pkh account ;
+      (account, default_amount))
+    (1 -- n)
+
+let patch_context ?(genesis_parameters = default_genesis_parameters) ctxt =
   let shell =
     Forge.make_shell
       ~level:0l
@@ -372,7 +365,8 @@ let patch_context ?(genesis_parameters = default_genesis_parameters)
   let genesis_parameters =
     {
       genesis_parameters with
-      bootstrap_accounts = List.map Account.account_to_bootstrap accounts;
+      bootstrap_accounts =
+        List.map Account.account_to_bootstrap default_accounts;
     }
   in
   let json = Default_parameters.json_of_parameters genesis_parameters in

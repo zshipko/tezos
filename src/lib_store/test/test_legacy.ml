@@ -310,7 +310,6 @@ let test descr base_dir baking_store legacy_state ~nb_blocks_to_bake
     (fun () -> Store.close_store new_store)
 
 let make_tests speed genesis_parameters =
-  let accounts = Alpha_utils.Account.generate_accounts 5 in
   let history_modes =
     match speed with
     | `Slow ->
@@ -337,7 +336,7 @@ let make_tests speed genesis_parameters =
   in
   let permutations = List.(product nb_blocks_to_bake history_modes) in
   let patch_context ctxt =
-    Alpha_utils.patch_context ~genesis_parameters ~accounts ctxt
+    Alpha_utils.patch_context ~genesis_parameters ctxt
   in
   List.map
     (fun (nb_blocks_to_bake, (history_mode, legacy_history_mode)) ->
