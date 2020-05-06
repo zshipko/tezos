@@ -26,21 +26,19 @@
 (** Legacy storage upgrade
 
     The legacy store upgrade aims to migrate a storage using the LMDB
-    backend (v0.0.4) to the new dedicated store representation
-    (v0.0.5). This migration is available for any store running v0.0.4
-    with any history mode. The upgrade procedure is going to retreive
-    each the block and its associated data available in the old store,
-    convert and store them in the new backend. It will preserve all
-    the invariants such as the current head, checkpoint, savepoint and
-    caboose.
- *)
+    backend (v0.0.4) to the new store representation (v0.0.5). This
+    migration is available for any store running v0.0.4 with any
+    history mode. The upgrade procedure is going to retrieve each the
+    block and its associated data available in the old store, convert
+    and store them in the new backend. It will preserve all the
+    information originally contained in the LMDB store such as the
+    current head, checkpoint, savepoint and caboose. *)
 
 (** Module for handling values needed by the legacy upgrade. It
     exposes the [cycle_length] to allow upgrading [supported_networks]
-    only. These values are mandatory as the new backend stores blocks
-    based on their belonging to a cycle, something which is not
-    available in the previous representation when the metadata of
-    blocks is not fully available.
+    only. These values are mandatory as the new backend regroup blocks
+    by cycles, something which was not available in the previous
+    representation when the metadata of blocks is not fully available.
 *)
 module Hardcoded : sig
   type network = {name : Distributed_db_version.Name.t; cycle_length : int}
@@ -60,7 +58,9 @@ type error += Failed_to_upgrade of string
 (** [raw_upgrade chain_name ~new_store ~old_store hm genesis] is the
     low level upgrade procedure which performs the store upgrade given
     the direct paths to the [new_store] and [old_store].
- *)
+
+    {b Warning} This function is unsafe and is exposed for testing
+    purposes. *)
 val raw_upgrade :
   Distributed_db_version.Name.t ->
   new_store:Store.t ->
@@ -73,11 +73,11 @@ val raw_upgrade :
     upgrades a store located in [data_dir] base on v.0.0.4 to a
     v0.0.5. It returns informatio regarding the actions to be done in
     order to cleanely complete the upgrade. Here this case, the user
-    must delete the old storage.
- *)
+    must delete the old storage. Returns the message to display to the
+    user. *)
 val upgrade_0_0_4 :
   data_dir:string ->
-  Genesis.t ->
-  (Context.t -> Context.t tzresult Lwt.t) option ->
+  patch_context:(Context.t -> Context.t tzresult Lwt.t) option ->
   chain_name:Distributed_db_version.Name.t ->
+  Genesis.t ->
   string tzresult Lwt.t

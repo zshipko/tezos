@@ -234,12 +234,12 @@ let import_floating ?(flex = false) lmdb_block_store chain_store ~read_metadata
         i
         nb_floating_blocks)
     (fun notify ->
-      let rec aux ~prev_block block =
+      let rec aux ~succ_block block =
         (* At protocol change, update the protocol_table *)
         may_update_protocol_table
           lmdb_block_store
           chain_store
-          prev_block
+          succ_block
           (Block_repr.proto_level block)
         >>=? fun () ->
         if Block_repr.level block = limit then
@@ -256,11 +256,11 @@ let import_floating ?(flex = false) lmdb_block_store chain_store ~read_metadata
             lmdb_block_store
             (Block_repr.predecessor block)
           >>=? fun predecessor_block ->
-          aux ~prev_block:block predecessor_block
+          aux ~succ_block:block predecessor_block
           >>=? fun () ->
           Block_store.store_block block_store block >>= fun () -> return_unit
       in
-      aux ~prev_block:block block)
+      aux ~succ_block:block block)
 
 (* Reads, from the legacy lmdb store, the blocks from [start_block] to
    [end_limit] and store them in the cemented block store *)
@@ -674,9 +674,10 @@ let update_stored_data lmdb_chain_store old_store new_store ~new_checkpoint
   >>=? fun () -> Store.Unsafe.set_caboose chain_store new_caboose
 
 let infer_checkpoint old_store chain_id _cycle_length =
-  (* When upgrading from a full or rolling node, the checkpoint may not be set
-   on a "protocol defined checkpoint". We substitute it by using, as a
-   checkpoint, the last allowed fork level of the current head.*)
+  (* When upgrading from a full or rolling node, the checkpoint may
+     not be set on a "protocol defined checkpoint". We substitute it
+     by using, as a checkpoint, the last allowed fork level of the
+     current head. *)
   let lmdb_chain_store = Legacy_store.Chain.get old_store chain_id in
   let lmdb_chain_data = Legacy_store.Chain_data.get lmdb_chain_store in
   Legacy_store.Chain_data.Current_head.read lmdb_chain_data
@@ -730,8 +731,8 @@ let raw_upgrade chain_name ~new_store ~old_store history_mode genesis =
     ~new_caboose
     genesis
 
-let upgrade_0_0_4 ~data_dir genesis patch_context
-    ~(chain_name : Distributed_db_version.Name.t) =
+let upgrade_0_0_4 ~data_dir ~patch_context
+    ~(chain_name : Distributed_db_version.Name.t) genesis =
   Hardcoded.check_network ~chain_name
   >>=? fun () ->
   let ( // ) = Filename.concat in
@@ -784,7 +785,7 @@ let upgrade_0_0_4 ~data_dir genesis patch_context
       | Ok () ->
           return
             (Format.sprintf
-               "You can now safely remove the old store located at: %s"
+               "you can now safely remove the old store located at: %s"
                new_lmdb_path)
       | Error errors ->
           upgrade_cleaner data_dir >>= fun () -> Lwt.return (Error errors))

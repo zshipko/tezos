@@ -62,7 +62,7 @@ let upgradable_data_version =
   [ ( "0.0.4",
       fun ~data_dir genesis ~chain_name ->
         let patch_context = Some (Patch_context.patch_context genesis None) in
-        Legacy.upgrade_0_0_4 ~data_dir genesis patch_context ~chain_name ) ]
+        Legacy.upgrade_0_0_4 ~data_dir ~patch_context ~chain_name genesis ) ]
 
 let version_encoding = Data_encoding.(obj1 (req "version" string))
 
