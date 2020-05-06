@@ -26,27 +26,25 @@
 
 (** Storage reconstruction
 
-    The storage reconstruct feature aims to re-compute the contexts
+    The storage reconstruction feature aims to re-compute the contexts
     (ledger state) and the blocks metadata of a full mode storage, and
     thus, migrate a storage from a full history mode to an archive
     one.
 
-    To do so, it is needed to re-play the whole chain, by applying
+    To do so, it is needed to re-validate the whole chain, by applying
     (using the standard validation method:
-    [Lib_validation.Block_validation.apply]) all the blocks from the
+    {!Tezos_validation.Block_validation.apply}) all the blocks from the
     genesis on empty context. As a storage running a full history mode
     will not store all the ledger state but keeps all the blocks (and
     operations), it is the only mode that can be reconstructed. The
-    operation is made of two major steps:
-    - Reconstruct the cemented block store: the context of each block
-    is restored and, for each cemented cycle, the associated metadatas
+    operation consist of two major steps:
+    - Reconstructing the cemented block store: for each cemented cycle,
+    the context of each block along with their associated metadatas
     are restored.
-    - Reconstruct the floating blocks store: Optional as the floating
-    block store may also need to be reconstructed. Indeed, after a
-    snapshot import, the floating blocks (before the snapshot's block
-    target) are not associated with a stored context and its
-    associated metadata.
- *)
+    - Reconstructing the floating block stores: this step is only
+    necessary if the store was recently imported from a snapshot as
+    some metadata will be missing.
+*)
 
 (** [reconstruct ?patch_context ~store_dir ~context_dir genesis uau
     uapo] reconstructs the storage located in [store_dir] and

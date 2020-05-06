@@ -267,9 +267,7 @@ let reconstruct_chunks chain_store context_index ~user_activated_upgrades
     ~user_activated_protocol_overrides =
   let block_store = Store.Unsafe.get_block_store chain_store in
   let cemented_block_store = Block_store.cemented_block_store block_store in
-  let chain_id = Store.Chain.chain_id chain_store in
-  let store_dir = Store.(directory (Chain.global_store chain_store)) in
-  let chain_dir = Naming.(store_dir // chain_store chain_id) in
+  let chain_dir = Store.Chain.chain_dir chain_store in
   let cemented_blocks_dir = Naming.(chain_dir // cemented_blocks_directory) in
   Cemented_block_store.load_table ~cemented_blocks_dir
   >>|? Array.to_list
@@ -280,7 +278,7 @@ let reconstruct_chunks chain_store context_index ~user_activated_upgrades
     (fun notify ->
       let rec aux = function
         | [] ->
-            (* Should not happend *)
+            (* Should not happen *)
             return_unit
         | ({Cemented_block_store.start_level; end_level; _} as file) :: tl -> (
           match cemented_metadata_status cemented_block_store file with
@@ -319,8 +317,9 @@ let reconstruct_chunks chain_store context_index ~user_activated_upgrades
       in
       aux cemented_cycles)
 
-(* Reconstruct the storage without checking if the context is already populated.
- We assume that commiting an exsisting context is a nop. *)
+(* Reconstruct the storage without checking if the context is already
+   populated. We assume that commiting an exsisting context is a
+   nop. *)
 let reconstruct_cemented chain_store context_index ~user_activated_upgrades
     ~user_activated_protocol_overrides =
   reconstruct_chunks
@@ -332,8 +331,8 @@ let reconstruct_cemented chain_store context_index ~user_activated_upgrades
 let reconstruct_floating chain_store context_index ~user_activated_upgrades
     ~user_activated_protocol_overrides =
   let chain_id = Store.Chain.chain_id chain_store in
-  let block_store = Store.Unsafe.get_block_store chain_store in
   let chain_dir = Store.Chain.chain_dir chain_store in
+  let block_store = Store.Unsafe.get_block_store chain_store in
   Floating_block_store.init ~chain_dir ~readonly:false RO_TMP
   >>= fun new_ro_store ->
   let floating_stores = Block_store.floating_block_stores block_store in
@@ -411,14 +410,6 @@ let check_history_mode_compatibility chain_store =
 let restore_constants chain_store genesis_block =
   Store.Unsafe.set_history_mode chain_store History_mode.Archive
   >>=? fun () ->
-  Store.Chain.current_head chain_store
-  >>= fun new_head ->
-  Store.Chain.checkpoint chain_store
-  >>= fun checkpoint ->
-  Store.Unsafe.set_head chain_store new_head
-  >>=? fun () ->
-  Store.Unsafe.set_checkpoint chain_store checkpoint
-  >>=? fun () ->
   let genesis = Store.Block.descriptor genesis_block in
   Store.Unsafe.set_savepoint chain_store genesis
   >>=? fun () -> Store.Unsafe.set_caboose chain_store genesis
@@ -467,5 +458,6 @@ let reconstruct ?patch_context ~store_dir ~context_dir genesis
       >>=? fun () ->
       restore_constants chain_store genesis_block
       >>=? fun () ->
+      (* TODO? add a global check *)
       lwt_emit Reconstruct_success
       >>= fun () -> Store.close_store store >>= return)
