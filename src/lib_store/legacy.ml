@@ -188,15 +188,12 @@ let rec make_block_repr ?(flex = false) ~read_metadata ~write_metadata
               hash
           else failwith "Failed to read pruned block: %a." Block_hash.pp hash )
 
-(* Note that the blocks are processed from head to genesis.
-   Thus, the proto levels are in an decreasing order *)
+(* Updates the protocol table. Inserts entry when the proto_level of
+   [prev_block] differs from [proto_level] (which is the protocole
+   level of the successor of [prev_block]). *)
 let may_update_protocol_table lmdb_block_store chain_store prev_block
     proto_level =
-  (* TODO fix me *)
-  if
-    (not (proto_level = Block_repr.proto_level prev_block))
-    || Block_repr.level prev_block = 2l
-  then
+  if not (proto_level = Block_repr.proto_level prev_block) then
     Legacy_store.Chain.Protocol_info.bindings lmdb_block_store
     >>= fun protocol_table ->
     let (proto_hash, _transition_level)
@@ -209,22 +206,62 @@ let may_update_protocol_table lmdb_block_store chain_store prev_block
       (Store.Unsafe.block_of_repr prev_block, proto_hash)
   else return_unit
 
+let read_i lmdb_store block_hash i =
+  Legacy_store.Block.Pruned_contents.known (lmdb_store, block_hash)
+  >>= fun below_savepoint ->
+  ( if below_savepoint then
+    Legacy_store.Block.Pruned_contents.read (lmdb_store, block_hash)
+    >>=? fun {header; _} -> return header
+  else
+    Legacy_store.Block.Contents.read (lmdb_store, block_hash)
+    >>=? fun {header; _} -> return header )
+  >>=? fun block ->
+  let target = Int32.(to_int (sub block.shell.level i)) in
+  Legacy_state.predecessor_n_raw lmdb_store block_hash target
+  >>= function
+  | Some h ->
+      Legacy_store.Block.Pruned_contents.known (lmdb_store, h)
+      >>= fun below_savepoint ->
+      if below_savepoint then
+        Legacy_store.Block.Pruned_contents.read (lmdb_store, h)
+        >>=? fun {header; _} -> return header
+      else
+        Legacy_store.Block.Contents.read (lmdb_store, h)
+        >>=? fun {header; _} -> return header
+  | None ->
+      failwith "Failed to find block at level %ld" i
+
 (* Reads, from the legacy lmdb store, the blocks from [block_hash] to [limit]
    and store them in the floating store *)
 let import_floating ?(flex = false) lmdb_block_store chain_store ~read_metadata
-    ~write_metadata block_hash limit =
-  (* TODO: Make it tail rec ? if yes, we must be able to store a block
-   without searching for its predecessors *)
+    ~write_metadata end_block_hash limit =
   let block_store = Store.Unsafe.get_block_store chain_store in
+  read_i lmdb_block_store end_block_hash limit
+  >>=? fun start_header ->
   make_block_repr
     ~flex
     ~read_metadata
     ~write_metadata
     lmdb_block_store
-    block_hash
-  >>=? fun block ->
+    (Block_header.hash start_header)
+  >>=? fun start_block ->
+  make_block_repr
+    ~flex
+    ~read_metadata
+    ~write_metadata
+    lmdb_block_store
+    start_header.shell.predecessor
+  >>=? fun pred_block ->
+  make_block_repr
+    ~flex
+    ~read_metadata
+    ~write_metadata
+    lmdb_block_store
+    end_block_hash
+  >>=? fun end_block ->
+  let end_limit = Block_repr.level end_block in
   let nb_floating_blocks =
-    Int32.(to_int (succ (sub (Block_repr.level block) limit)))
+    Int32.(to_int (succ (sub (Block_repr.level end_block) limit)))
   in
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun fmt i ->
@@ -234,33 +271,31 @@ let import_floating ?(flex = false) lmdb_block_store chain_store ~read_metadata
         i
         nb_floating_blocks)
     (fun notify ->
-      let rec aux ~succ_block block =
-        (* At protocol change, update the protocol_table *)
-        may_update_protocol_table
-          lmdb_block_store
-          chain_store
-          succ_block
-          (Block_repr.proto_level block)
-        >>=? fun () ->
-        if Block_repr.level block = limit then
-          notify ()
-          >>= fun () ->
-          Block_store.store_block block_store block >>= fun () -> return_unit
+      let rec aux ~pred_block block =
+        Block_store.store_block block_store block
+        >>= fun () ->
+        let level = Block_repr.level block in
+        if level >= end_limit then return_unit
         else
-          notify ()
-          >>= fun () ->
+          (* At protocol change, update the protocol_table *)
+          may_update_protocol_table
+            lmdb_block_store
+            chain_store
+            pred_block
+            (Block_repr.proto_level block)
+          >>=? fun () ->
+          read_i lmdb_block_store end_block_hash (Int32.succ level)
+          >>=? fun next_block ->
           make_block_repr
             ~flex
             ~read_metadata
             ~write_metadata
             lmdb_block_store
-            (Block_repr.predecessor block)
-          >>=? fun predecessor_block ->
-          aux ~succ_block:block predecessor_block
-          >>=? fun () ->
-          Block_store.store_block block_store block >>= fun () -> return_unit
+            (Block_header.hash next_block)
+          >>=? fun next_block_repr ->
+          notify () >>= fun () -> aux ~pred_block:block next_block_repr
       in
-      aux ~succ_block:block block)
+      aux ~pred_block start_block)
 
 (* Reads, from the legacy lmdb store, the blocks from [start_block] to
    [end_limit] and store them in the cemented block store *)
@@ -306,6 +341,12 @@ let import_cemented ?(display_msg = "") lmdb_chain_store chain_store
               lmdb_chain_store
               (Block_repr.predecessor block)
             >>=? fun genesis ->
+            may_update_protocol_table
+              lmdb_chain_store
+              chain_store
+              block
+              (Block_repr.proto_level genesis)
+            >>=? fun () ->
             let block_store = Store.Unsafe.get_block_store chain_store in
             Block_store.cement_blocks
               ~check_consistency:false
@@ -345,28 +386,6 @@ let import_cemented ?(display_msg = "") lmdb_chain_store chain_store
         (Block_repr.header start_block)
         [start_block]
         (Block_repr.predecessor start_block))
-
-(* Dirty utility to read a block at level [target_level] from the logacy lmdb
-   store. The search starts from hash. *)
-let dirty_read_i lmdb_chain_store hash target_level =
-  let rec aux hash =
-    Legacy_store.Block.Pruned_contents.read_opt (lmdb_chain_store, hash)
-    >>= (function
-          | Some {header} ->
-              return header
-          | None ->
-              Legacy_store.Block.Contents.read (lmdb_chain_store, hash)
-              >>=? fun {header; _} -> return header)
-    >>=? fun header ->
-    let level = header.Block_header.shell.level in
-    if level = target_level then return header
-    else if level = 0l then
-      failwith "Failed to find block at level %ld" target_level
-    else
-      let pred = header.shell.predecessor in
-      aux pred
-  in
-  aux hash
 
 let archive_import lmdb_chain_store chain_store cycle_length
     (checkpoint, checkpoint_level) current_head_hash =
@@ -511,10 +530,7 @@ let rolling_import lmdb_chain_store chain_store (checkpoint, checkpoint_level)
       current_head_hash
       (Int32.succ lmdb_savepoint_level) )
   >>=? fun () ->
-  dirty_read_i
-    lmdb_chain_store
-    current_head_hash
-    (Int32.succ lmdb_caboose_level)
+  read_i lmdb_chain_store current_head_hash (Int32.succ lmdb_caboose_level)
   >>=? fun new_caboose_header ->
   let new_caboose =
     if checkpoint_level = 0l then
@@ -581,10 +597,7 @@ let import_protocols history_mode lmdb_store lmdb_chain_store store chain_id =
          transition_header is the caboose.
        * In LMDB, caboose is not stored! Thus, new_caboose = succ lmdb_caboose*)
       let lmdb_chain_store = Legacy_store.Chain.get lmdb_store chain_id in
-      dirty_read_i
-        lmdb_chain_store
-        current_head_hash
-        (Int32.succ lmdb_caboose_level)
+      read_i lmdb_chain_store current_head_hash (Int32.succ lmdb_caboose_level)
       >>=? fun transition_header ->
       let protocol_level = current_head.header.shell.proto_level in
       Legacy_store.Chain.Protocol_info.read lmdb_chain_store protocol_level
@@ -689,7 +702,7 @@ let infer_checkpoint old_store chain_id _cycle_length =
     (Failed_to_upgrade "Nothing to do")
   >>=? fun () ->
   let lafl = head_contents.last_allowed_fork_level in
-  dirty_read_i lmdb_chain_store head_hash lafl
+  read_i lmdb_chain_store head_hash lafl
   >>=? fun lafl_header -> return (lafl_header, lafl)
 
 let new_store_name = "store"

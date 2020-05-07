@@ -324,6 +324,9 @@ val watcher : t -> Block.t Lwt_stream.t * Lwt_watcher.stopper
     which are compatible with the given checkpoint. *)
 val best_known_head_for_checkpoint : Chain.t -> Block_header.t -> Block.t Lwt.t
 
+val predecessor_n_raw :
+  Legacy_store.Chain.store -> Block_hash.t -> int -> Block_hash.t option Lwt.t
+
 val compute_locator :
   Chain.t ->
   ?size:int ->
