@@ -97,7 +97,7 @@ let export_import ~test_descr (store_dir, context_dir) chain_store
     ~previously_baked_blocks ?exported_block_hash ~rolling =
   check_invariants chain_store
   >>= fun () ->
-  let snapshot_dir = store_dir // "snapshot.full" in
+  let snapshot_name = store_dir // "snapshot.full" in
   (* No lockfile on the same process, we must enforce waiting the
      merging thread to finish *)
   let block_store = Store.Unsafe.get_block_store chain_store in
@@ -115,7 +115,7 @@ let export_import ~test_descr (store_dir, context_dir) chain_store
     ~store_dir
     ~context_dir
     ~chain_name:(Distributed_db_version.Name.of_string "test")
-    ~snapshot_dir
+    ~snapshot_file:snapshot_name
     genesis
   >>=? fun () ->
   let dir = store_dir // "imported_store" in
@@ -124,7 +124,7 @@ let export_import ~test_descr (store_dir, context_dir) chain_store
   let block = Option.map ~f:Block_hash.to_b58check exported_block_hash in
   Snapshots.import
     ?block
-    ~snapshot_dir
+    ~snapshot_file:snapshot_name
     ~dst_store_dir
     ~dst_context_dir
     ~user_activated_upgrades:[]
@@ -491,11 +491,11 @@ let test_rolling genesis_parameters =
       ~store_dir
       ~context_dir
       ~chain_name:(Distributed_db_version.Name.of_string "test")
-      ~snapshot_dir
+      ~snapshot_file:snapshot_dir
       genesis
     >>=? fun () ->
     Snapshots.import
-      ~snapshot_dir
+      ~snapshot_file:snapshot_dir
       ~dst_store_dir
       ~dst_context_dir
       ~user_activated_upgrades:[]

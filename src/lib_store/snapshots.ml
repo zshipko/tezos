@@ -41,7 +41,8 @@ type error +=
         | `Genesis
         | `Not_enough_pred ];
     }
-  | (* TODO *) Snapshot_import_failure of string
+  | Snapshot_file_not_found of string
+  | Snapshot_import_failure of string
   | Wrong_protocol_hash of Protocol_hash.t
   | Inconsistent_operation_hashes of
       (Operation_list_list_hash.t * Operation_list_list_hash.t)
@@ -125,6 +126,16 @@ let () =
       | _ ->
           None)
     (fun (block, reason) -> Invalid_export_block {block; reason}) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshots.snapshot_file_not_found"
+    ~title:"Snapshot file not found"
+    ~description:"The snapshot file cannot be found."
+    ~pp:(fun ppf given_file ->
+      Format.fprintf ppf "The snapshot file %s does not exists." given_file)
+    (obj1 (req "given_snapshot_file" string))
+    (function Snapshot_file_not_found file -> Some file | _ -> None)
+    (fun file -> Snapshot_file_not_found file) ;
   register_error_kind
     `Permanent
     ~id:"SnapshotImportFailure"
@@ -962,8 +973,83 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
       written_context_elements,
       (reading_thread, floating_block_stream) )
 
-let export ?(rolling = false) ~block ~store_dir ~context_dir ~chain_name
-    ~snapshot_dir genesis =
+let zip_snapshot dir out =
+  Lwt_utils_unix.display_progress
+    ~every:1
+    ~pp_print_step:(fun fmt i ->
+      Format.fprintf fmt "Compressing snapshot: %d files treated" i)
+    (fun notify ->
+      if not (Sys.file_exists dir && Sys.is_directory dir) then
+        Format.ksprintf invalid_arg "zip_directory: %s is not a directory" dir
+      else
+        let oc = Zip.open_out out in
+        Lwt.finalize
+          (fun () ->
+            let rec zip_dir pathacc dir =
+              let files = Lwt_unix.files_of_directory dir in
+              Lwt_stream.iter_s
+                (fun file ->
+                  if file = "." || file = ".." then Lwt.return_unit
+                  else
+                    let file = Filename.concat dir file in
+                    if Sys.is_directory file then (
+                      Zip.add_entry
+                        ""
+                        oc
+                        ( Filename.(concat pathacc (basename file))
+                        ^ Filename.dir_sep ) ;
+                      zip_dir Filename.(concat pathacc (basename file)) file )
+                    else (
+                      Zip.copy_file_to_entry
+                        file
+                        oc
+                        Filename.(concat pathacc (basename file)) ;
+                      notify () ))
+                files
+            in
+            zip_dir "" dir)
+          (fun () -> Zip.close_out oc ; Lwt.return_unit))
+
+let unzip_snapshot zipfile path =
+  if not (Sys.file_exists path && Sys.is_directory path) then
+    Format.ksprintf
+      invalid_arg
+      "unzip_directory: path %s is not a directory"
+      path
+  else
+    let ic = Zip.open_in zipfile in
+    Lwt.finalize
+      (fun () ->
+        let entries = Zip.entries ic in
+        let make_path path =
+          if Sys.file_exists path then Lwt.return_unit
+          else
+            String.split_path (Filename.dirname path)
+            |> Lwt_list.iter_s (fun s -> Lwt_utils_unix.create_dir s)
+        in
+        if not (List.length entries > 0) then
+          Lwt.fail_with "unzip_snapshot: invalid snapshot archive"
+        else
+          Lwt_list.iter_s
+            (fun entry ->
+              make_path (Filename.dirname entry.Zip.filename)
+              >>= fun () ->
+              if entry.Zip.is_directory then
+                Lwt_utils_unix.create_dir (Filename.concat path entry.filename)
+              else
+                Lwt.return
+                  (Zip.copy_entry_to_file
+                     ic
+                     entry
+                     (Filename.concat path entry.filename)))
+            entries)
+      (fun () -> Zip.close_in ic ; Lwt.return_unit)
+
+let export ?(rolling = false) ?(compress = true) ~block ~store_dir ~context_dir
+    ~chain_name ~snapshot_file genesis =
+  let snapshot_dir = Filename.temp_file (Filename.basename snapshot_file) "" in
+  Lwt_unix.unlink snapshot_dir
+  >>= fun () ->
   create_snapshot_dir ~snapshot_dir
   >>=? fun (dst_cemented_dir, dst_protocol_dir) ->
   ( if rolling then
@@ -1011,9 +1097,14 @@ let export ?(rolling = false) ~block ~store_dir ~context_dir ~chain_name
   in
   write_snapshot_metadata metadata Naming.(snapshot_dir // Snapshot.metadata)
   >>= fun () ->
-  lwt_emit (Export_success snapshot_dir) >>= fun () -> return_unit
+  ( if compress then
+    zip_snapshot snapshot_dir snapshot_file
+    >>= fun () -> Lwt_utils_unix.remove_dir snapshot_dir
+  else Lwt_unix.rename snapshot_dir snapshot_file )
+  >>= fun () ->
+  lwt_emit (Export_success snapshot_file) >>= fun () -> return_unit
 
-let copy_and_restore_cemented_blocks ?(check_consistency = true)
+let restore_cemented_blocks ?(check_consistency = true) ~should_rename
     ~snapshot_cemented_dir ~dst_cemented_dir ~genesis_hash =
   (* Copy the cemented files *)
   let stream = Lwt_unix.files_of_directory snapshot_cemented_dir in
@@ -1027,7 +1118,14 @@ let copy_and_restore_cemented_blocks ?(check_consistency = true)
     Naming.(
       snapshot_cemented_dir // Naming.cemented_block_hash_index_directory)
   in
-  ( if Sys.file_exists dst_level_dir && Sys.file_exists dst_hash_dir then
+  ( if should_rename then Lwt_unix.rename snapshot_cemented_dir dst_cemented_dir
+  else Lwt.return_unit )
+  >>= fun () ->
+  ( if
+    (not should_rename)
+    && Sys.file_exists dst_level_dir
+    && Sys.file_exists dst_hash_dir
+  then
     Lwt_utils_unix.copy_dir
       dst_level_dir
       Naming.(dst_cemented_dir // cemented_block_level_index_directory)
@@ -1059,7 +1157,8 @@ let copy_and_restore_cemented_blocks ?(check_consistency = true)
     files
   >>=? fun cemented_files ->
   let nb_cemented_files = List.length cemented_files in
-  ( if nb_cemented_files > 0 then
+  ( if (not should_rename) && nb_cemented_files > 0 then
+    (* Don't copy anything if it was just a renaming *)
     Lwt_utils_unix.display_progress
       ~pp_print_step:(fun fmt i ->
         Format.fprintf
@@ -1139,7 +1238,7 @@ let read_floating_blocks ~genesis_hash ~floating_blocks_file =
   in
   return (reading_thread, stream)
 
-let copy_protocols ~snapshot_protocol_dir ~dst_protocol_dir =
+let restore_protocols ~should_rename ~snapshot_protocol_dir ~dst_protocol_dir =
   (* Import protocol table *)
   let protocol_tbl_filename =
     Naming.(snapshot_protocol_dir // Snapshot.protocols_table)
@@ -1184,7 +1283,8 @@ let copy_protocols ~snapshot_protocol_dir ~dst_protocol_dir =
         >>= fun () ->
         let src = Naming.(snapshot_protocol_dir // protocol_filename) in
         let dst = Naming.(dst_protocol_dir // protocol_filename) in
-        Lwt_utils_unix.copy_file ~src ~dst
+        ( if should_rename then Lwt_unix.rename src dst
+        else Lwt_utils_unix.copy_file ~src ~dst )
         >>= fun () ->
         Lwt_utils_unix.read_file dst
         >>= fun protocol_sources ->
@@ -1275,9 +1375,40 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
 (* TODO parallelise in another process *)
 (* TODO? remove patch context *)
 let import ?patch_context ?block:expected_block ?(check_consistency = true)
-    ~snapshot_dir ~dst_store_dir ~dst_context_dir ~user_activated_upgrades
+    ~snapshot_file ~dst_store_dir ~dst_context_dir ~user_activated_upgrades
     ~user_activated_protocol_overrides (genesis : Genesis.t) =
+  if Sys.file_exists dst_store_dir then
+    (* TODO proper error *)
+    Format.ksprintf
+      invalid_arg
+      "import: target  %s already exists"
+      dst_store_dir ;
+  let dst_protocol_dir = Naming.(dst_store_dir // protocol_store_directory) in
   let chain_id = Chain_id.of_block_hash genesis.block in
+  let dst_chain_store_dir = Naming.(dst_store_dir // chain_store chain_id) in
+  let dst_cemented_dir =
+    Naming.(dst_chain_store_dir // cemented_blocks_directory)
+  in
+  Lwt_list.iter_s
+    (Lwt_utils_unix.create_dir ~perm:0o755)
+    [dst_store_dir; dst_protocol_dir; dst_chain_store_dir; dst_cemented_dir]
+  >>= fun () ->
+  fail_unless
+    (Sys.file_exists snapshot_file)
+    (Snapshot_file_not_found snapshot_file)
+  >>=? fun () ->
+  ( if Sys.is_directory snapshot_file then
+    (* Not compressed *)
+    return (false, snapshot_file)
+  else
+    let snapshot_dir =
+      Filename.concat dst_store_dir (Filename.basename snapshot_file)
+    in
+    Lwt_utils_unix.create_dir snapshot_dir
+    >>= fun () ->
+    protect (fun () -> unzip_snapshot snapshot_file snapshot_dir >>= return)
+    >>=? fun () -> return (true, snapshot_dir) )
+  >>=? fun (is_compressed, snapshot_dir) ->
   read_snapshot_metadata Naming.(snapshot_dir // Snapshot.metadata)
   >>= fun snapshot_metadata ->
   import_log_notice ~snapshot_metadata snapshot_dir expected_block
@@ -1295,23 +1426,16 @@ let import ?patch_context ?block:expected_block ?(check_consistency = true)
     genesis
     chain_id
   >>=? fun (block_data, genesis_context_hash, block_validation_result) ->
-  let dst_protocol_dir = Naming.(dst_store_dir // protocol_store_directory) in
-  let dst_chain_store_dir = Naming.(dst_store_dir // chain_store chain_id) in
-  let dst_cemented_dir =
-    Naming.(dst_chain_store_dir // cemented_blocks_directory)
-  in
-  Lwt_list.iter_s
-    (Lwt_utils_unix.create_dir ~perm:0o755)
-    [dst_store_dir; dst_protocol_dir; dst_chain_store_dir; dst_cemented_dir]
-  >>= fun () ->
   (* Restore store *)
   (* Restore protocols *)
-  copy_protocols
+  restore_protocols
+    ~should_rename:is_compressed
     ~snapshot_protocol_dir:Naming.(snapshot_dir // Snapshot.(protocols))
     ~dst_protocol_dir
   >>=? fun protocol_levels ->
   (* Restore cemented dir *)
-  copy_and_restore_cemented_blocks
+  restore_cemented_blocks
+    ~should_rename:is_compressed
     ~check_consistency
     ~snapshot_cemented_dir:Naming.(snapshot_dir // Snapshot.cemented_blocks)
     ~dst_cemented_dir
@@ -1377,13 +1501,41 @@ let import ?patch_context ?block:expected_block ?(check_consistency = true)
   >>=? fun () ->
   Context.close context_index
   >>= fun () ->
+  ( if is_compressed then Lwt_utils_unix.remove_dir snapshot_dir
+  else Lwt.return_unit )
+  >>= fun () ->
   lwt_emit (Import_success snapshot_dir) >>= fun () -> return_unit
 
-let snapshot_info ~snapshot_dir =
-  read_snapshot_metadata Naming.(snapshot_dir // Snapshot.metadata)
+let snapshot_info ~snapshot_file =
+  fail_unless
+    (Sys.file_exists snapshot_file)
+    (Snapshot_file_not_found snapshot_file)
+  >>=? fun () ->
+  ( if Sys.is_directory snapshot_file then
+    read_snapshot_metadata Naming.(snapshot_file // Snapshot.metadata)
+  else
+    let ic = Zip.open_in snapshot_file in
+    Lwt.finalize
+      (fun () ->
+        let metadata =
+          Zip.read_entry ic (Zip.find_entry ic Naming.Snapshot.metadata)
+        in
+        let json =
+          match Data_encoding.Json.from_string metadata with
+          | Error _ ->
+              Stdlib.failwith "invalid metadata in snapshot"
+          | Ok json ->
+              json
+        in
+        Lwt.return
+          Data_encoding.Json.(destruct Snapshot_version.metadata_encoding json))
+      (fun () -> Zip.close_in ic ; Lwt.return_unit) )
   >>= fun metadata ->
-  Format.printf "@[%a@]@." Snapshot_version.metadata_pp metadata ;
-  Lwt.return_unit
+  Format.printf
+    "@[<v 2>Snapshot information:@ %a@]@."
+    Snapshot_version.metadata_pp
+    metadata ;
+  return_unit
 
 (* Legacy import *)
 

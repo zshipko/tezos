@@ -55,8 +55,8 @@ end
 module Term = struct
   type subcommand = Export | Import | Info
 
-  let process subcommand args snapshot_path block disable_check rolling
-      reconstruct sandbox_file import_legacy =
+  let process subcommand args snapshot_path block disable_check
+      disable_compress rolling reconstruct sandbox_file import_legacy =
     (* FIXME check snapshot format *)
     let run =
       Internal_event_unix.init ()
@@ -102,13 +102,15 @@ module Term = struct
             ~on_error:(fun err ->
               dir_cleaner () >>= fun () -> Lwt.return (Error err))
             (fun () ->
+              let compress = not disable_compress in
               Snapshots.export
                 ~rolling
+                ~compress
                 ~store_dir
                 ~context_dir
                 ~chain_name
                 ~block
-                ~snapshot_dir:snapshot_path
+                ~snapshot_file:snapshot_path
                 genesis)
       | Import ->
           let dir_cleaner () =
@@ -170,7 +172,7 @@ module Term = struct
                   ~patch_context
                   ?block
                   ~check_consistency
-                  ~snapshot_dir:snapshot_path
+                  ~snapshot_file:snapshot_path
                   ~dst_store_dir:store_root
                   ~dst_context_dir:context_root
                   ~user_activated_upgrades:
@@ -193,8 +195,7 @@ module Term = struct
                   .user_activated_protocol_overrides
           else return_unit
       | Info ->
-          Snapshots.snapshot_info ~snapshot_dir:snapshot_path
-          >>= fun () -> return_unit
+          Snapshots.snapshot_info ~snapshot_file:snapshot_path
     in
     match Lwt_main.run run with
     | Ok () ->
@@ -253,6 +254,15 @@ module Term = struct
     in
     value & flag & info ~doc ["no-check"]
 
+  let disable_compress =
+    let open Cmdliner.Arg in
+    let doc =
+      "Setting this flag disable the snapshot compression. This slightly \
+       speeds up the export process but the snapshot will occupy more on-disk \
+       space."
+    in
+    value & flag & info ~doc ["no-compress"]
+
   let export_rolling =
     let open Cmdliner in
     let doc =
@@ -303,8 +313,8 @@ module Term = struct
     let open Cmdliner.Term in
     ret
       ( const process $ subcommand_arg $ Node_shared_arg.Term.args $ file_arg
-      $ block $ disable_check $ export_rolling $ reconstruct $ sandbox
-      $ import_legacy )
+      $ block $ disable_check $ disable_compress $ export_rolling $ reconstruct
+      $ sandbox $ import_legacy )
 end
 
 module Manpage = struct

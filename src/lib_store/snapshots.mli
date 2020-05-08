@@ -57,11 +57,12 @@ type error +=
 
 val export :
   ?rolling:bool ->
+  ?compress:bool ->
   block:Block_services.block ->
   store_dir:string ->
   context_dir:string ->
   chain_name:Distributed_db_version.Name.t ->
-  snapshot_dir:string ->
+  snapshot_file:string ->
   Genesis.t ->
   unit tzresult Lwt.t
 
@@ -69,7 +70,7 @@ val import :
   ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->
   ?block:string ->
   ?check_consistency:bool ->
-  snapshot_dir:string ->
+  snapshot_file:string ->
   dst_store_dir:string ->
   dst_context_dir:string ->
   user_activated_upgrades:User_activated.upgrades ->
@@ -77,7 +78,7 @@ val import :
   Genesis.t ->
   unit tzresult Lwt.t
 
-val snapshot_info : snapshot_dir:string -> unit Lwt.t
+val snapshot_info : snapshot_file:string -> unit tzresult Lwt.t
 
 val import_legacy :
   ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->

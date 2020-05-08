@@ -68,7 +68,7 @@ let version_encoding = Data_encoding.(obj1 (req "version" string))
 
 type error += Invalid_data_dir_version of t * t
 
-type error += Invalid_data_dir of string
+type error += Invalid_data_dir of {data_dir : string; msg : string option}
 
 type error += Could_not_read_data_dir_version of string
 
@@ -82,11 +82,17 @@ let () =
     ~id:"invalidDataDir"
     ~title:"Invalid data directory"
     ~description:"The data directory cannot be accessed or created"
-    ~pp:(fun ppf path ->
-      Format.fprintf ppf "Invalid data directory '%s'." path)
-    Data_encoding.(obj1 (req "datadir_path" string))
-    (function Invalid_data_dir path -> Some path | _ -> None)
-    (fun path -> Invalid_data_dir path) ;
+    ~pp:(fun ppf (dir, msg_opt) ->
+      Format.fprintf
+        ppf
+        "Invalid data directory '%s'%a"
+        dir
+        (Option.pp ~default:"." (fun fmt msg -> Format.fprintf fmt ": %s." msg))
+        msg_opt)
+    Data_encoding.(obj2 (req "datadir_path" string) (opt "message" string))
+    (function
+      | Invalid_data_dir {data_dir; msg} -> Some (data_dir, msg) | _ -> None)
+    (fun (data_dir, msg) -> Invalid_data_dir {data_dir; msg}) ;
   register_error_kind
     `Permanent
     ~id:"invalidDataDirVersion"
@@ -163,11 +169,15 @@ let version_file data_dir = Filename.concat data_dir version_file_name
 let clean_directory files =
   let to_delete =
     Format.asprintf
-      "@[<v>%a@]"
-      (Format.pp_print_list ~pp_sep:Format.pp_print_cut Format.pp_print_string)
+      "%a"
+      (Format.pp_print_list
+         ~pp_sep:(fun fmt () -> Format.fprintf fmt ", ")
+         Format.pp_print_string)
       files
   in
-  Format.sprintf "Please provide a clean directory by removing:@ %s" to_delete
+  Format.sprintf
+    "Please provide a clean directory by removing the following files: %s"
+    to_delete
 
 let write_version_file data_dir =
   let version_file = version_file data_dir in
@@ -196,7 +206,8 @@ let check_data_dir_version files data_dir =
   Lwt_unix.file_exists version_file
   >>= function
   | false ->
-      fail (Invalid_data_dir (clean_directory files))
+      let msg = Some (clean_directory files) in
+      fail (Invalid_data_dir {data_dir; msg})
   | true -> (
       read_version_file version_file
       >>=? fun version ->
@@ -231,7 +242,8 @@ let ensure_data_dir bare data_dir =
           | [] ->
               write_version ()
           | files when bare ->
-              fail (Invalid_data_dir (clean_directory files))
+              let msg = Some (clean_directory files) in
+              fail (Invalid_data_dir {data_dir; msg})
           | files ->
               check_data_dir_version files data_dir )
       | false ->
@@ -239,7 +251,7 @@ let ensure_data_dir bare data_dir =
           >>= fun () -> write_version ())
     (function
       | Unix.Unix_error _ ->
-          fail (Invalid_data_dir data_dir)
+          fail (Invalid_data_dir {data_dir; msg = None})
       | exc ->
           raise exc)
 
