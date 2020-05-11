@@ -311,13 +311,35 @@ let write_snapshot_metadata metadata file =
       Lwt.return_unit
 
 let read_snapshot_metadata file =
-  Lwt_utils_unix.Json.read_file file
-  >>= function
-  | Error err ->
-      Format.kasprintf Lwt.fail_with "%a" Error_monad.pp_print_error err
-  | Ok json ->
-      Lwt.return
-        (Data_encoding.Json.destruct Snapshot_version.metadata_encoding json)
+  let filename = Naming.(file // Snapshot.metadata) in
+  let read_config json =
+    return
+      (Data_encoding.Json.destruct Snapshot_version.metadata_encoding json)
+  in
+  if Sys.is_directory file then
+    Lwt_utils_unix.Json.read_file filename
+    >>= function
+    | Error err ->
+        failwith
+          "read_snapshot_metadata: cannot read snapshot's metadata - %a"
+          Error_monad.pp_print_error
+          err
+    | Ok json ->
+        read_config json
+  else
+    let ic = Zip.open_in file in
+    try
+      let entry = Zip.find_entry ic Naming.Snapshot.metadata in
+      let s = Zip.read_entry ic entry in
+      match Data_encoding.Json.from_string s with
+      | Ok json ->
+          read_config json
+      | Error err ->
+          failwith
+            "read_snapshot_metadata: cannot read snapshot's metadata - %s"
+            err
+    with _ ->
+      failwith "read_snapshot_metadata: cannot parse snapshot's metadata"
 
 let copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir
     (files : Cemented_block_store.cemented_blocks_file list) =
@@ -1397,6 +1419,10 @@ let import ?patch_context ?block:expected_block ?(check_consistency = true)
     (Sys.file_exists snapshot_file)
     (Snapshot_file_not_found snapshot_file)
   >>=? fun () ->
+  read_snapshot_metadata snapshot_file
+  >>=? fun snapshot_metadata ->
+  import_log_notice ~snapshot_metadata snapshot_file expected_block
+  >>= fun () ->
   ( if Sys.is_directory snapshot_file then
     (* Not compressed *)
     return (false, snapshot_file)
@@ -1409,10 +1435,6 @@ let import ?patch_context ?block:expected_block ?(check_consistency = true)
     protect (fun () -> unzip_snapshot snapshot_file snapshot_dir >>= return)
     >>=? fun () -> return (true, snapshot_dir) )
   >>=? fun (is_compressed, snapshot_dir) ->
-  read_snapshot_metadata Naming.(snapshot_dir // Snapshot.metadata)
-  >>= fun snapshot_metadata ->
-  import_log_notice ~snapshot_metadata snapshot_dir expected_block
-  >>= fun () ->
   Context.init ~readonly:false ?patch_context dst_context_dir
   >>= fun context_index ->
   (* Restore context *)
@@ -1511,26 +1533,8 @@ let snapshot_info ~snapshot_file =
     (Sys.file_exists snapshot_file)
     (Snapshot_file_not_found snapshot_file)
   >>=? fun () ->
-  ( if Sys.is_directory snapshot_file then
-    read_snapshot_metadata Naming.(snapshot_file // Snapshot.metadata)
-  else
-    let ic = Zip.open_in snapshot_file in
-    Lwt.finalize
-      (fun () ->
-        let metadata =
-          Zip.read_entry ic (Zip.find_entry ic Naming.Snapshot.metadata)
-        in
-        let json =
-          match Data_encoding.Json.from_string metadata with
-          | Error _ ->
-              Stdlib.failwith "invalid metadata in snapshot"
-          | Ok json ->
-              json
-        in
-        Lwt.return
-          Data_encoding.Json.(destruct Snapshot_version.metadata_encoding json))
-      (fun () -> Zip.close_in ic ; Lwt.return_unit) )
-  >>= fun metadata ->
+  read_snapshot_metadata snapshot_file
+  >>=? fun metadata ->
   Format.printf
     "@[<v 2>Snapshot information:@ %a@]@."
     Snapshot_version.metadata_pp
