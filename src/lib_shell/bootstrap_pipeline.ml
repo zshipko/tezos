@@ -138,12 +138,12 @@ let headers_fetch_worker_loop pipeline =
        Lwt.return_none
    | Full _ | Rolling _ ->
        Store.Chain.savepoint chain_store >>= Lwt.return_some )
-   >>= fun save_point ->
+   >>= fun savepoint ->
    (* In Full and Rolling mode, we do not want to receive blocks
          that are past our save point's level, otherwise we would
          start validating them again. *)
    let steps =
-     match save_point with
+     match savepoint with
      | None ->
          Block_locator.to_steps seed pipeline.locator
      | Some (savepoint_hash, savepoint_level) ->

@@ -201,7 +201,7 @@ module Block = struct
     >>= fun is_known ->
     if is_known then Lwt.return_true else is_known_invalid chain_store hash
 
-  let block_validity chain_store hash =
+  let validity chain_store hash =
     is_known chain_store hash
     >>= function
     | false ->
@@ -449,23 +449,6 @@ module Block = struct
       head.Block_repr.hash
       head.Block_repr.contents.header
       seed
-
-  (* TODO: should we consider level as well ? Rolling could have
-     difficulties boostrapping *)
-  let filter_known_suffix chain_store locator =
-    let history_mode = history_mode chain_store in
-    Block_locator.unknown_prefix ~is_known:(block_validity chain_store) locator
-    >>= function
-    | (Known_valid, prefix_locator) ->
-        Lwt.return_some prefix_locator
-    | (Known_invalid, _) ->
-        Lwt.return_none
-    | (Unknown, _) -> (
-      match history_mode with
-      | Archive ->
-          Lwt.return_none
-      | Rolling _ | Full _ ->
-          Lwt.return_some locator )
 
   (** Operations on invalid blocks *)
 

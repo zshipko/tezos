@@ -320,9 +320,24 @@ let may_validate_new_branch w distant_hash locator =
   assert_acceptable_head w (Block_header.hash distant_header) distant_header
   >>=? fun () ->
   let chain_store = Distributed_db.chain_store pv.parameters.chain_db in
-  Store.Block.filter_known_suffix chain_store locator
+  (* TODO: should we consider level as well ? Rolling could have
+     difficulties boostrapping. *)
+  Block_locator.unknown_prefix
+    ~is_known:(Store.Block.validity chain_store)
+    locator
   >>= function
-  | None ->
+  | (Known_valid, prefix_locator) ->
+      let (_, history) =
+        (prefix_locator : Block_locator.t :> Block_header.t * _)
+      in
+      if history <> [] then
+        bootstrap_new_branch w distant_header prefix_locator
+      else return_unit
+  | (Unknown, _) ->
+      (* May happen when:
+       - A locator from another chain is received;
+       - A rolling peer is too far ahead;
+         - In rolling mode when the step is too wide. *)
       debug
         w
         "ignoring branch %a without common ancestor from peer: %a."
@@ -331,13 +346,15 @@ let may_validate_new_branch w distant_hash locator =
         P2p_peer.Id.pp_short
         pv.peer_id ;
       fail Validation_errors.Unknown_ancestor
-  | Some unknown_prefix ->
-      let (_, history) =
-        (unknown_prefix : Block_locator.t :> Block_header.t * _)
-      in
-      if history <> [] then
-        bootstrap_new_branch w distant_header unknown_prefix
-      else return_unit
+  | (Known_invalid, _) ->
+      debug
+        w
+        "ignoring branch %a with invalid locator from peer: %a."
+        Block_hash.pp_short
+        distant_hash
+        P2p_peer.Id.pp_short
+        pv.peer_id ;
+      fail (Validation_errors.Invalid_locator (pv.peer_id, locator))
 
 let on_no_request w =
   let pv = Worker.state w in

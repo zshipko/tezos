@@ -282,11 +282,10 @@ module Block : sig
       the genesis initialized in [chain_store]. *)
   val is_genesis : chain_store -> Block_hash.t -> bool
 
-  (** [block_validity chain_store bh] computes the
+  (** [validity chain_store bh] computes the
       {Block_locator.validity} ([Unknown], [Known_valid] or
       [Known_invalid]) for the block [bh] in [chain_store].  *)
-  val block_validity :
-    chain_store -> Block_hash.t -> Block_locator.validity Lwt.t
+  val validity : chain_store -> Block_hash.t -> Block_locator.validity Lwt.t
 
   (** [read_block chain_store ?distance bh] tries to read in the
       [chain_store] the block [bh] or the predecessing block at the
@@ -410,22 +409,6 @@ module Block : sig
     block ->
     Block_locator.seed ->
     Block_locator.t Lwt.t
-
-  (** [filter_known_suffix chain_store locator] trims the locator by
-      removing steps that are already present in [chain_store].
-
-      It either returns:
-      - [Some (header, hist)] when we find a valid block, where [hist]
-        is the unknown prefix, ending with the first valid block found.
-      - [Some (header, hist)] when we don't find any block known valid nor invalid
-        and the node runs in full or rolling mode. In this case
-        [(h, hist)] is the given [locator].
-      - [None] when the node runs in archive history mode and
-        we find an invalid block or no valid block in the [locator].
-      - [None] when the node runs in full or rolling mode and we find
-        an invalid block in the [locator]. *)
-  val filter_known_suffix :
-    chain_store -> Block_locator.t -> Block_locator.t option Lwt.t
 
   (** [read_invalid_block_opt chain_store bh] reads in the
       [chain_store] the invalid block [bh] if it exists. *)
