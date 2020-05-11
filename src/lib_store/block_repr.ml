@@ -184,16 +184,12 @@ let read_next_block fd =
   let length_bytes = Bytes.create 4 in
   Lwt_utils_unix.read_bytes ~pos:0 ~len:4 fd length_bytes
   >>= fun () ->
-  let block_length =
-    Data_encoding.(Binary.of_bytes_opt int31 length_bytes)
-    |> Option.unopt_assert ~loc:__POS__
-  in
+  let block_length_int32 = Bytes.get_int32_be length_bytes 0 in
+  let block_length = Int32.to_int block_length_int32 in
   let block_bytes = Bytes.create (4 + block_length) in
-  (* Back to block position *)
-  Lwt_unix.lseek fd (-4) Unix.SEEK_CUR
-  >>= fun _ofs ->
-  Lwt_utils_unix.read_bytes ~pos:0 ~len:(4 + block_length) fd block_bytes
+  Lwt_utils_unix.read_bytes ~pos:4 ~len:block_length fd block_bytes
   >>= fun () ->
+  Bytes.set_int32_be block_bytes 0 block_length_int32 ;
   Lwt.return
     (Data_encoding.Binary.of_bytes_exn encoding block_bytes, 4 + block_length)
 
