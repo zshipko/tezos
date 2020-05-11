@@ -244,8 +244,9 @@ let linear_predecessor_n chain_store (bh : Block_hash.t) (distance : int) :
    requested *)
 let test_pred (base_dir : string) : unit tzresult Lwt.t =
   let size_chain = 1000 in
-  init_chain base_dir
-  >>= fun chain_store ->
+  Shell_test_helpers.init_chain base_dir
+  >>= fun store ->
+  let chain_store = Store.main_chain_store store in
   make_empty_chain chain_store size_chain
   >>= fun head ->
   let test_once distance =
@@ -338,8 +339,9 @@ let test_locator base_dir =
   (* size after which locator always reaches genesis *)
   let locator_limit = compute_size_locator size_chain in
   let _ = Printf.printf "#locator_limit %i\n" locator_limit in
-  init_chain base_dir
-  >>= fun chain_store ->
+  Shell_test_helpers.init_chain base_dir
+  >>= fun store ->
+  let chain_store = Store.main_chain_store store in
   time1 (fun () -> make_empty_chain chain_store size_chain)
   |> fun (res, t_chain) ->
   let _ =

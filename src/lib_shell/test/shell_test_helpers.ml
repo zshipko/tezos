@@ -77,9 +77,13 @@ let init_chain base_dir =
     ~context_dir
     ~history_mode:Archive
     ~allow_testchains:true
+    ~patch_context
     state_genesis_block
   >>= function
-  | Error _ -> Stdlib.failwith "read err" | Ok store -> Lwt.return store
+  | Error err ->
+      Format.kasprintf Lwt.fail_with "init error: %a" pp_print_error err
+  | Ok store ->
+      Lwt.return store
 
 (** [init_mock_p2p] initializes a mock p2p *)
 let init_mock_p2p chain_name =
