@@ -189,14 +189,14 @@ let test_from_snapshot ~descr:_ (store_dir, context_dir) store
   Error_monad.protect
     (fun () ->
       let last_hash = Store.Block.hash last in
-      let snapshot_dir = store_dir // "snapshot.full" in
+      let snapshot_file = store_dir // "snapshot.full" in
       Snapshots.export
         ~rolling:false
         ~block:(`Hash (last_hash, 0))
         ~store_dir
         ~context_dir
         ~chain_name:(Distributed_db_version.Name.of_string "test")
-        ~snapshot_dir
+        ~snapshot_file
         genesis
       >>=? fun () ->
       Format.printf "Export ok@." ;
@@ -204,7 +204,7 @@ let test_from_snapshot ~descr:_ (store_dir, context_dir) store
       Snapshots.import
         ~patch_context
         ?block
-        ~snapshot_dir
+        ~snapshot_file
         ~dst_store_dir
         ~dst_context_dir
         ~user_activated_upgrades:[]
