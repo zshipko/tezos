@@ -601,6 +601,40 @@ let trigger_gc (cemented_store : t) = function
               (fun _exn -> Lwt.return_unit))
           files_to_remove
 
+let iter_cemented_file ~cemented_block_dir f {filename; start_level; end_level}
+    =
+  Lwt_io.with_file
+    ~flags:[Unix.O_RDONLY]
+    ~mode:Lwt_io.Input
+    Naming.(cemented_block_dir // filename)
+    (fun channel ->
+      let nb_blocks = Int32.(succ (sub end_level start_level)) in
+      Lwt_io.BE.read_int channel
+      >>= fun first_block_offset ->
+      Lwt_io.set_position channel (Int64.of_int first_block_offset)
+      >>= fun () ->
+      let rec loop n =
+        if n = 0 then Lwt.return_unit
+        else
+          (* Read length *)
+          Lwt_io.BE.read_int channel
+          >>= fun length ->
+          let full_length = 4 (* int32 length *) + length in
+          let block_bytes = Bytes.create full_length in
+          Lwt_io.read_into_exactly channel block_bytes 4 length
+          >>= fun () ->
+          Bytes.set_int32_be block_bytes 0 (Int32.of_int length) ;
+          f (Data_encoding.Binary.of_bytes_exn Block_repr.encoding block_bytes)
+          >>= fun () -> loop (pred n)
+      in
+      Lwt.catch
+        (fun () -> loop (Int32.to_int nb_blocks))
+        (fun exn ->
+          Format.kasprintf
+            Lwt.fail_with
+            "iter_cemented_file: unexpected failure : %s"
+            (Printexc.to_string exn)))
+
 let check_indexes_consistency ?(post_step = fun () -> Lwt.return_unit)
     ?genesis_hash cemented_store =
   let table = cemented_store.cemented_blocks_files in

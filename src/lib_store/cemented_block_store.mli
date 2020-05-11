@@ -222,6 +222,15 @@ val cement_blocks :
     GC phase will be. *)
 val trigger_gc : t -> History_mode.t -> unit Lwt.t
 
+(** [iter_cemented_file ~cemented_block_dir f block_file] reads from
+    the cemented [block_file] located in [cemented_block_dir] and
+    applies [f] on every block. *)
+val iter_cemented_file :
+  cemented_block_dir:string ->
+  (Block_repr.block -> unit Lwt.t) ->
+  cemented_blocks_file ->
+  unit Lwt.t
+
 (** [check_indexes_consistency ?post_step ?genesis_hash cemented_store
     history_mode] iterate over a partially intialized [cemented_store]
     that contains chunks of blocks and both the index and check the
