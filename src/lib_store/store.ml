@@ -2284,8 +2284,6 @@ module Unsafe = struct
     (* Store the head *)
     Block_store.store_block block_store new_head_with_metadata
     >>= fun () ->
-    notify ()
-    >>= fun () ->
     (* Check correctness of protocol transition blocks *)
     let open Protocol_levels in
     iter_s

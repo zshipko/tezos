@@ -769,20 +769,24 @@ let check_history_mode chain_store ~rolling =
       fail (Incompatible_history_mode {stored; requested = Full {offset = 0}})
 
 let export_floating_block_stream ~snapshot_dir floating_block_stream =
-  Lwt_utils_unix.display_progress
-    ~every:10
-    ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Copying floating blocks: %d blocks copied" i)
-    (fun notify ->
-      (* The target block is in the middle of a cemented cycle, the
-         cycle prefix becomes the floating store. *)
-      let floating_file = Naming.(snapshot_dir // Snapshot.floating_blocks) in
-      Lwt_unix.openfile floating_file Unix.[O_CREAT; O_TRUNC; O_WRONLY] 0o444
-      >>= fun fd ->
-      Lwt_stream.iter_s
-        (fun b -> write_floating_block fd b >>= fun () -> notify ())
-        floating_block_stream
-      >>= fun () -> Lwt_utils_unix.safe_close fd >>= fun () -> return_unit)
+  Lwt_stream.is_empty floating_block_stream
+  >>= fun is_empty ->
+  if is_empty then return_unit
+  else
+    Lwt_utils_unix.display_progress
+      ~every:10
+      ~pp_print_step:(fun fmt i ->
+        Format.fprintf fmt "Copying floating blocks: %d blocks copied" i)
+      (fun notify ->
+        let floating_file =
+          Naming.(snapshot_dir // Snapshot.floating_blocks)
+        in
+        Lwt_unix.openfile floating_file Unix.[O_CREAT; O_TRUNC; O_WRONLY] 0o444
+        >>= fun fd ->
+        Lwt_stream.iter_s
+          (fun b -> write_floating_block fd b >>= fun () -> notify ())
+          floating_block_stream
+        >>= fun () -> Lwt_utils_unix.safe_close fd >>= fun () -> return_unit)
 
 let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
     genesis =
@@ -936,14 +940,14 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
              (floating_ro_fd, floating_rw_fd),
              extra_floating_blocks,
              should_filter_indexes ) ->
-  let finalizer () =
-    Lwt_utils_unix.safe_close floating_ro_fd
-    >>= fun () -> Lwt_utils_unix.safe_close floating_rw_fd
-  in
   copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir cemented_table
   >>=? fun () ->
   if should_filter_indexes then
     filter_indexes ~dst_cemented_dir (List.last_exn cemented_table).end_level ;
+  let finalizer () =
+    Lwt_utils_unix.safe_close floating_ro_fd
+    >>= fun () -> Lwt_utils_unix.safe_close floating_rw_fd
+  in
   ( match extra_floating_blocks with
   | Some floating_blocks ->
       finalizer ()
@@ -1011,33 +1015,39 @@ let unzip_snapshot zipfile path =
       "unzip_directory: path %s is not a directory"
       path
   else
-    let ic = Zip.open_in zipfile in
-    Lwt.finalize
-      (fun () ->
-        let entries = Zip.entries ic in
-        let make_path path =
-          if Sys.file_exists path then Lwt.return_unit
-          else
-            String.split_path (Filename.dirname path)
-            |> Lwt_list.iter_s (fun s -> Lwt_utils_unix.create_dir s)
-        in
-        if not (List.length entries > 0) then
-          Lwt.fail_with "unzip_snapshot: invalid snapshot archive"
-        else
-          Lwt_list.iter_s
-            (fun entry ->
-              make_path (Filename.dirname entry.Zip.filename)
-              >>= fun () ->
-              if entry.Zip.is_directory then
-                Lwt_utils_unix.create_dir (Filename.concat path entry.filename)
+    Lwt_utils_unix.display_progress
+      ~every:1
+      ~pp_print_step:(fun fmt i ->
+        Format.fprintf fmt "Inflating snapshot: %d files decompressed" i)
+      (fun notify ->
+        let ic = Zip.open_in zipfile in
+        Lwt.finalize
+          (fun () ->
+            let entries = Zip.entries ic in
+            let make_path path =
+              if Sys.file_exists path then Lwt.return_unit
               else
-                Lwt.return
-                  (Zip.copy_entry_to_file
-                     ic
-                     entry
-                     (Filename.concat path entry.filename)))
-            entries)
-      (fun () -> Zip.close_in ic ; Lwt.return_unit)
+                String.split_path (Filename.dirname path)
+                |> Lwt_list.iter_s (fun s -> Lwt_utils_unix.create_dir s)
+            in
+            if not (List.length entries > 0) then
+              Lwt.fail_with "unzip_snapshot: invalid snapshot archive"
+            else
+              Lwt_list.iter_s
+                (fun entry ->
+                  make_path (Filename.dirname entry.Zip.filename)
+                  >>= fun () ->
+                  if entry.Zip.is_directory then
+                    Lwt_utils_unix.create_dir
+                      (Filename.concat path entry.filename)
+                  else (
+                    Zip.copy_entry_to_file
+                      ic
+                      entry
+                      (Filename.concat path entry.filename) ;
+                    notify () ))
+                entries)
+          (fun () -> Zip.close_in ic ; Lwt.return_unit))
 
 let export ?(rolling = false) ?(compress = true) ~block ~store_dir ~context_dir
     ~chain_name ~snapshot_file genesis =
@@ -1152,12 +1162,13 @@ let restore_cemented_blocks ?(check_consistency = true) ~should_rename
   >>=? fun cemented_files ->
   let nb_cemented_files = List.length cemented_files in
   ( if (not should_rename) && nb_cemented_files > 0 then
-    (* Don't copy anything if it was just a renaming *)
+    (* Don't copy anything if it was just a renaming, the archive
+       inflating is enough. *)
     Lwt_utils_unix.display_progress
       ~pp_print_step:(fun fmt i ->
         Format.fprintf
           fmt
-          "Copying cycles: %d/%d (%d)"
+          "Copying cycles: %d/%d (%d%%)"
           i
           nb_cemented_files
           (100 * i / nb_cemented_files))
@@ -1191,7 +1202,7 @@ let restore_cemented_blocks ?(check_consistency = true) ~should_rename
       ~pp_print_step:(fun fmt i ->
         Format.fprintf
           fmt
-          "Restoring cycles consistency: %d/%d (%d)"
+          "Restoring cycles consistency: %d/%d (%d%%)"
           i
           nb_cemented_files
           (100 * i / nb_cemented_files))
@@ -1206,31 +1217,35 @@ let restore_cemented_blocks ?(check_consistency = true) ~should_rename
   return_unit
 
 let read_floating_blocks ~genesis_hash ~floating_blocks_file =
-  Lwt_unix.openfile floating_blocks_file Unix.[O_RDONLY] 0o444
-  >>= fun fd ->
-  let (stream, bounded_push) = Lwt_stream.create_bounded 1000 in
-  Lwt_unix.lseek fd 0 Unix.SEEK_END
-  >>= fun eof_offset ->
-  Lwt_unix.lseek fd 0 Unix.SEEK_SET
-  >>= fun _ ->
-  let rec loop ?pred_block nb_bytes_left =
-    if nb_bytes_left < 0 then failwith "read_floating_blocks: corrupted blocks"
-    else if nb_bytes_left = 0 then return_unit
-    else
-      Block_repr.read_next_block fd
-      >>= fun (block, len_read) ->
-      Block_repr.check_block_consistency ~genesis_hash ?pred_block block
-      >>=? fun () ->
-      bounded_push#push block >>= fun () -> loop (nb_bytes_left - len_read)
-  in
-  let reading_thread =
-    Lwt.finalize
-      (fun () -> loop eof_offset)
-      (fun () ->
-        bounded_push#close ;
-        Lwt_utils_unix.safe_close fd)
-  in
-  return (reading_thread, stream)
+  if not (Sys.file_exists floating_blocks_file) then
+    return (return_unit, Lwt_stream.of_list [])
+  else
+    Lwt_unix.openfile floating_blocks_file Unix.[O_RDONLY] 0o444
+    >>= fun fd ->
+    let (stream, bounded_push) = Lwt_stream.create_bounded 1000 in
+    Lwt_unix.lseek fd 0 Unix.SEEK_END
+    >>= fun eof_offset ->
+    Lwt_unix.lseek fd 0 Unix.SEEK_SET
+    >>= fun _ ->
+    let rec loop ?pred_block nb_bytes_left =
+      if nb_bytes_left < 0 then
+        failwith "read_floating_blocks: corrupted blocks"
+      else if nb_bytes_left = 0 then return_unit
+      else
+        Block_repr.read_next_block fd
+        >>= fun (block, len_read) ->
+        Block_repr.check_block_consistency ~genesis_hash ?pred_block block
+        >>=? fun () ->
+        bounded_push#push block >>= fun () -> loop (nb_bytes_left - len_read)
+    in
+    let reading_thread =
+      Lwt.finalize
+        (fun () -> loop eof_offset)
+        (fun () ->
+          bounded_push#close ;
+          Lwt_utils_unix.safe_close fd)
+    in
+    return (reading_thread, stream)
 
 let restore_protocols ~should_rename ~snapshot_protocol_dir ~dst_protocol_dir =
   (* Import protocol table *)
