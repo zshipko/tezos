@@ -1423,10 +1423,12 @@ module Chain = struct
 
   let get_commit_info index header =
     protect
-      ~on_error:(fun _ ->
+      ~on_error:(fun err ->
         failwith
-          "get_commit_info: could not retrieve the commit info. Is the \
-           context initialized?")
+          "get_commit_info: could not retrieve the commit info: %a.\n\
+          \ Is the context initialized?"
+          Error_monad.pp_print_error
+          err)
       (fun () ->
         Context.retrieve_commit_info index header
         >>=? fun ( _protocol_hash,
