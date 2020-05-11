@@ -146,7 +146,7 @@ let copy_file ~src ~dst =
   Lwt_io.with_file ~mode:Output dst (fun dst_ch ->
       Lwt_io.with_file src ~mode:Input (fun src_ch ->
           let rec loop () =
-            Lwt_io.read ~count:4096 src_ch
+            Lwt_io.read src_ch
             >>= function
             | "" ->
                 Lwt.return_unit
@@ -160,7 +160,7 @@ let copy_dir ?(perm = 0o755) src dst =
   >>= fun () ->
   let rec copy_dir dir dst_dir =
     let files = Lwt_unix.files_of_directory dir in
-    Lwt_stream.iter_s
+    Lwt_stream.iter_p
       (fun file ->
         if file = "." || file = ".." then Lwt.return_unit
         else
