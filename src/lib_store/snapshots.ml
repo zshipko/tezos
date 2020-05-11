@@ -345,24 +345,55 @@ let copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir
     (files : Cemented_block_store.cemented_blocks_file list) =
   let open Cemented_block_store in
   let nb_cycles = List.length files in
+  (* Rebuild fresh indexes: cannot cp because of concurrent accesses *)
+  let fresh_level_index =
+    Cemented_block_level_index.v
+      ~fresh:true
+      ~readonly:false
+      ~log_size:100_000
+      Naming.(dst_cemented_dir // cemented_block_level_index_directory)
+  in
+  let fresh_hash_index =
+    Cemented_block_hash_index.v
+      ~fresh:true
+      ~readonly:false
+      ~log_size:100_000
+      Naming.(dst_cemented_dir // cemented_block_hash_index_directory)
+  in
   protect (fun () ->
       Lwt_utils_unix.display_progress
         ~pp_print_step:(fun fmt i ->
           Format.fprintf
             fmt
-            "Copying cemented blocks: %d/%d cycles"
+            "Copying cemented blocks and populating indexes: %d/%d cycles"
             i
             nb_cycles)
         (fun notify ->
-          Lwt_list.iter_s
-            (fun {filename; _} ->
+          Lwt_list.iter_p
+            (fun ({filename; _} as file) ->
+              Cemented_block_store.iter_cemented_file
+                ~cemented_block_dir:src_cemented_dir
+                (fun block ->
+                  let hash = Block_repr.hash block in
+                  let level = Block_repr.level block in
+                  Cemented_block_level_index.replace
+                    fresh_level_index
+                    hash
+                    level ;
+                  Cemented_block_hash_index.replace fresh_hash_index level hash ;
+                  Lwt.return_unit)
+                file
+              >>= fun () ->
               let cycle = Naming.(src_cemented_dir // filename) in
               Lwt_utils_unix.copy_file
                 ~src:cycle
                 ~dst:Naming.(dst_cemented_dir // filename)
               >>= fun () -> notify ())
             files)
-      >>= fun () -> return_unit)
+      >>= fun () ->
+      Cemented_block_level_index.close fresh_level_index ;
+      Cemented_block_hash_index.close fresh_hash_index ;
+      return_unit)
 
 let write_floating_block fd (block : Block_repr.t) =
   let bytes = Data_encoding.Binary.to_bytes_exn Block_repr.encoding block in
@@ -807,62 +838,6 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
     genesis
     ~locked_f:export_rolling_f
 
-(* Copy the cemented_store indexes while the lock is taken. *)
-let copy_cemented_indexes chain_store ~dst_cemented_dir =
-  let open Cemented_block_store in
-  let block_store = Store.Unsafe.get_block_store chain_store in
-  let cemented_store = Block_store.cemented_block_store block_store in
-  match Cemented_block_store.get_highest_cemented_level cemented_store with
-  | None ->
-      (* No cemented files: no index to export *)
-      return_unit
-  | Some highest_level ->
-      protect (fun () ->
-          Lwt_utils_unix.display_progress
-            ~every:1
-            ~pp_print_step:(fun fmt _i ->
-              Format.fprintf
-                fmt
-                "Copying %ld entries in cemented indexes"
-                highest_level)
-            (fun notify ->
-              let dst_level_dir =
-                Naming.(
-                  dst_cemented_dir // cemented_block_level_index_directory)
-              in
-              let fresh_level_index =
-                Cemented_block_level_index.v
-                  ~fresh:true
-                  ~readonly:false
-                  ~log_size:100_000
-                  dst_level_dir
-              in
-              let dst_hash_dir =
-                Naming.(
-                  dst_cemented_dir // cemented_block_hash_index_directory)
-              in
-              let fresh_hash_index =
-                Cemented_block_hash_index.v
-                  ~fresh:true
-                  ~readonly:false
-                  ~log_size:100_000
-                  dst_hash_dir
-              in
-              let level_index =
-                Cemented_block_store.cemented_block_level_index cemented_store
-              in
-              Cemented_block_level_index.iter
-                (fun hash level ->
-                  Cemented_block_level_index.replace
-                    fresh_level_index
-                    hash
-                    level ;
-                  Cemented_block_hash_index.replace fresh_hash_index level hash)
-                level_index ;
-              Cemented_block_level_index.close fresh_level_index ;
-              Cemented_block_hash_index.close fresh_hash_index ;
-              notify () >>= return))
-
 let filter_indexes ~dst_cemented_dir limit =
   let open Cemented_block_store in
   let fresh_level_index =
@@ -916,9 +891,6 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
           ~src_cemented_dir
           ~export_block
         >>=? fun (cemented_table, extra_floating_blocks) ->
-        (* Copy the indexes *)
-        copy_cemented_indexes chain_store ~dst_cemented_dir
-        >>=? fun () ->
         Store.Chain.all_protocol_levels chain_store
         >>= fun protocol_levels ->
         (* Dump the context while the store is locked to avoid reading on
