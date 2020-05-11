@@ -23,8 +23,6 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-let ( // ) = Filename.concat
-
 (** Basic blocks *)
 
 let genesis_hash =
@@ -35,17 +33,6 @@ let genesis_protocol =
   Protocol_hash.of_b58check_exn
     "ProtoDemoNoopsDemoNoopsDemoNoopsDemoNoopsDemo6XBoYp"
 
-let genesis_time = Time.Protocol.of_seconds 0L
-
-let state_genesis_block =
-  {
-    Genesis.time = genesis_time;
-    block = genesis_hash;
-    protocol = genesis_protocol;
-  }
-
-let chain_id = Chain_id.of_block_hash genesis_hash
-
 let proto =
   match Registered_protocol.get genesis_protocol with
   | None ->
@@ -54,57 +41,6 @@ let proto =
       proto
 
 module Proto = (val proto)
-
-let incr_timestamp timestamp =
-  Time.Protocol.add timestamp (Int64.add 1L (Random.int64 10L))
-
-let incr_fitness fitness =
-  let new_fitness =
-    match fitness with
-    | [fitness] ->
-        Data_encoding.Binary.of_bytes_opt Data_encoding.int64 fitness
-        |> Option.unopt ~default:0L |> Int64.succ
-        |> Data_encoding.Binary.to_bytes_exn Data_encoding.int64
-    | _ ->
-        Data_encoding.Binary.to_bytes_exn Data_encoding.int64 1L
-  in
-  [new_fitness]
-
-(* returns a new state with a single block, genesis *)
-let init_chain base_dir : Store.chain_store Lwt.t =
-  let store_root = base_dir // "store" in
-  let context_root = base_dir // "context" in
-  Store.init
-    ~store_dir:store_root
-    ~context_dir:context_root
-    ~history_mode:Archive
-    ~allow_testchains:true
-    state_genesis_block
-  >>= function
-  | Error _ ->
-      Stdlib.failwith "read err"
-  | Ok store ->
-      Lwt.return (Store.main_chain_store store)
-
-let block_header ?(context = Context_hash.zero) (pred : Store.Block.t) :
-    Block_header.t =
-  let pred_header = Store.Block.shell_header pred in
-  let timestamp = incr_timestamp pred_header.timestamp in
-  let fitness = incr_fitness pred_header.fitness in
-  {
-    Block_header.shell =
-      {
-        level = Int32.add Int32.one (Store.Block.level pred);
-        proto_level = 0;
-        predecessor = Store.Block.hash pred;
-        timestamp;
-        validation_passes = 0;
-        operations_hash = Operation_list_list_hash.empty;
-        fitness;
-        context;
-      };
-    Block_header.protocol_data = Bytes.of_string "";
-  }
 
 let zero = Bytes.create 0
 
@@ -195,17 +131,6 @@ let rec repeat f n =
 
 (* ----------------------------------------------------- *)
 
-let print_block b =
-  Printf.printf
-    "%6i %s\n"
-    (Int32.to_int (Store.Block.level b))
-    (Block_hash.to_b58check (Store.Block.hash b))
-
-let print_block_h chain_store bh =
-  Store.Block.read_block_opt chain_store bh
-  >|= Option.unopt_assert ~loc:__POS__
-  >|= fun b -> print_block b
-
 (* returns the predecessor at distance one, reading the header *)
 let linear_predecessor chain_store (bh : Block_hash.t) :
     Block_hash.t option Lwt.t =
@@ -214,14 +139,6 @@ let linear_predecessor chain_store (bh : Block_hash.t) :
   >>= fun b ->
   Store.Block.read_predecessor_opt chain_store b
   >|= function None -> None | Some pred -> Some (Store.Block.hash pred)
-
-let print_chain chain bh =
-  let rec loop bh cnt =
-    let _ = print_block_h chain bh in
-    linear_predecessor chain bh
-    >>= function Some pred -> loop pred (cnt + 1) | None -> Lwt.return_unit
-  in
-  loop bh 0
 
 (* returns the predecessors at distance n, traversing all n intermediate blocks *)
 let linear_predecessor_n chain_store (bh : Block_hash.t) (distance : int) :
