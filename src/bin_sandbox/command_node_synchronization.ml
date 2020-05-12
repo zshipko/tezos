@@ -7,8 +7,24 @@ let starting_level = 10
 
 let number_of_lonely_bakes = 100
 
-let run state ~node_exec ~client_exec ~primary_history_mode
-    ~secondary_history_mode ~should_synch () =
+let hm_to_string = function
+  | `Archive ->
+      "archive"
+  | `Full i ->
+      sprintf "full%s" (if i <> 0 then " " ^ Int.to_string i else "")
+  | `Rolling i ->
+      sprintf "rolling%s" (if i <> 0 then " " ^ Int.to_string i else "")
+
+let cpt = ref 0
+
+let fresh_id () = Int.incr cpt ; !cpt
+
+let initial_port = ref 15000
+
+let fresh_port () = Int.incr initial_port ; !initial_port
+
+let run_test state ~node_exec ~client_exec ~primary_history_mode
+    ~secondary_history_mode ~should_sync =
   Helpers.clear_root state
   >>= fun () ->
   Interactive_test.Pauser.generic
@@ -26,27 +42,38 @@ let run state ~node_exec ~client_exec ~primary_history_mode
       time_between_blocks = [block_interval; 0];
     }
   in
+  let (p2p_primary_port, rpc_primary_port) = (fresh_port (), fresh_port ()) in
+  let (p2p_secondary_port, rpc_secondary_port) =
+    (fresh_port (), fresh_port ())
+  in
+  let id = fresh_id () in
+  Fmt.pr
+    "%d %d %d %d"
+    rpc_primary_port
+    p2p_primary_port
+    rpc_secondary_port
+    p2p_secondary_port ;
   let primary_node =
     Tezos_node.make
       ~protocol
       ~exec:node_exec
-      "primary_node"
+      ("primary_node_" ^ Int.to_string id)
       ~history_mode:primary_history_mode
       ~expected_connections:2
-      ~rpc_port:15001
-      ~p2p_port:15002
-      [15004]
+      ~rpc_port:rpc_primary_port
+      ~p2p_port:p2p_primary_port
+      [p2p_secondary_port]
   in
   let secondary_node =
     Tezos_node.make
       ~protocol
       ~exec:node_exec
       ~history_mode:secondary_history_mode
-      "secondary_node"
+      ("secondary_node_" ^ Int.to_string id)
       ~expected_connections:2
-      ~rpc_port:15003
-      ~p2p_port:15004
-      [15002]
+      ~rpc_port:rpc_secondary_port
+      ~p2p_port:p2p_secondary_port
+      [p2p_primary_port]
   in
   let all_nodes = [primary_node; secondary_node] in
   Helpers.dump_connections state all_nodes
@@ -57,23 +84,14 @@ let run state ~node_exec ~client_exec ~primary_history_mode
       all_defaults state ~nodes:all_nodes
       @ [secret_keys state ~protocol; Log_recorder.Operations.show_all state]) ;
   let primary_client = Tezos_client.of_node ~exec:client_exec primary_node in
-  let pp_hm = function
-    | Some `Archive ->
-        "archive"
-    | Some `Full ->
-        "full"
-    | Some `Rolling ->
-        "rolling"
-    | None ->
-        "full"
-  in
   Interactive_test.Pauser.generic
     state
     EF.
-      [ af "Starting primary node in %s" (pp_hm primary_node.history_mode);
-        af "Starting secondary node in %s" (pp_hm secondary_node.history_mode);
-        af "Expecting nodes to synch after lonely baking run: %b" should_synch
-      ]
+      [ af "Starting primary node in %s" (hm_to_string primary_history_mode);
+        af
+          "Starting secondary node in %s"
+          (hm_to_string secondary_history_mode);
+        af "Expecting nodes to sync after lonely baking run: %b" should_sync ]
   >>= fun () ->
   Test_scenario.Network.(start_up state ~client_exec (make all_nodes))
   >>= fun _ ->
@@ -116,15 +134,15 @@ let run state ~node_exec ~client_exec ~primary_history_mode
   ( match primary_history_mode with
   | `Archive ->
       return ()
-  | `Rolling ->
+  | `Rolling _ ->
       let caboose_level = Jqo.(get_int @@ field ~k:"caboose" json) in
       if not (caboose_level > starting_level) then
         fail
           (`Scenario_error
             "Caboose level is lower or equal to the starting level")
       else return ()
-  | `Full ->
-      let save_point_level = Jqo.(get_int @@ field ~k:"save_point" json) in
+  | `Full _ ->
+      let save_point_level = Jqo.(get_int @@ field ~k:"savepoint" json) in
       if not (save_point_level > starting_level) then
         fail
           (`Scenario_error
@@ -141,17 +159,17 @@ let run state ~node_exec ~client_exec ~primary_history_mode
        all_nodes
        (`Equal_to (starting_level + number_of_lonely_bakes)))
     (function
-      | {result = Ok _; _} when should_synch ->
+      | {result = Ok _; _} when should_sync ->
           return true
-      | {result = Error (`Waiting_for (_, `Time_out)); _} when not should_synch
+      | {result = Error (`Waiting_for (_, `Time_out)); _} when not should_sync
         ->
           return false
       | _ ->
           fail
             (`Scenario_error
               "Unexpected answer when waiting for nodes synchronization"))
-  >>= fun are_synch ->
-  ( match (should_synch, are_synch) with
+  >>= fun are_sync ->
+  ( match (should_sync, are_sync) with
   | (false, true) ->
       fail (`Scenario_error "Nodes are not expected to be synchronized")
   | (true, false) ->
@@ -184,7 +202,7 @@ let run state ~node_exec ~client_exec ~primary_history_mode
         String.equal primary_node_peer_id peer_id)
       connections_json
   in
-  ( match (should_synch, are_nodes_connected) with
+  ( match (should_sync, are_nodes_connected) with
   | (true, false) ->
       fail (`Scenario_error "Expecting nodes to be connected")
   | (false, true) ->
@@ -203,13 +221,44 @@ let run state ~node_exec ~client_exec ~primary_history_mode
   if is_banned then fail (`Scenario_error "Node should not be banned")
   else return ()
 
+let run state ~node_exec ~client_exec () =
+  let combinations =
+    [ (`Archive, `Full 0, true);
+      (`Archive, `Rolling 0, true);
+      (`Full 0, `Rolling 0, true);
+      (`Rolling 0, `Archive, false);
+      (`Rolling 0, `Full 0, false) ]
+  in
+  List_sequential.iter
+    ~f:(fun (primary_history_mode, secondary_history_mode, should_sync) ->
+      let test =
+        run_test
+          state
+          ~node_exec
+          ~client_exec
+          ~primary_history_mode
+          ~secondary_history_mode
+          ~should_sync
+      in
+      Asynchronous_result.transform_error
+        ~f:(function
+          | `Scenario_error msg ->
+              `Scenario_error
+                (Printf.sprintf
+                   "%s -> %s (expected_sync: %b): %s"
+                   (hm_to_string primary_history_mode)
+                   (hm_to_string secondary_history_mode)
+                   should_sync
+                   msg)
+          | err ->
+              err)
+        test)
+    combinations
+
 let cmd () =
   let open Cmdliner in
   let open Term in
   let pp_error = Test_command_line.Common_errors.pp in
-  let hm_arg =
-    Arg.enum [("archive", `Archive); ("full", `Full); ("rolling", `Rolling)]
-  in
   let base_state =
     Test_command_line.Command_making_state.make
       ~application_name:"Flextesa"
@@ -218,57 +267,14 @@ let cmd () =
   in
   Test_command_line.Run_command.make
     ~pp_error
-    ( pure
-        (fun node_exec
-             client_exec
-             primary_history_mode
-             secondary_history_mode
-             should_synch
-             state
-             ->
+    ( pure (fun node_exec client_exec state ->
           ( state,
             Interactive_test.Pauser.run_test
               ~pp_error
               state
-              (run
-                 state
-                 ~node_exec
-                 ~client_exec
-                 ~primary_history_mode
-                 ~secondary_history_mode
-                 ~should_synch) ))
+              (run state ~node_exec ~client_exec) ))
     $ Tezos_executable.cli_term base_state `Node "tezos"
     $ Tezos_executable.cli_term base_state `Client "tezos"
-    $ Arg.(
-        value
-        & opt hm_arg `Full
-        & info
-            ["primary-history-mode"]
-            ~docv:"STRING"
-            ~doc:
-              (sprintf
-                 "History mode of the primary node. This one lonely bakes %d \
-                  blocks."
-                 number_of_lonely_bakes))
-    $ Arg.(
-        value
-        & opt hm_arg `Full
-        & info
-            ["secondary-history-mode"]
-            ~docv:"STRING"
-            ~doc:
-              (sprintf
-                 "History mode of the secondary node. This one tries to \
-                  bootstrap after the primary node lonely bakes %d blocks."
-                 number_of_lonely_bakes))
-    $ Arg.(
-        value & opt bool true
-        & info
-            ["should-synch"]
-            ~docv:"BOOL"
-            ~doc:
-              "Specify if the nodes should be synchronized after the lonely \
-               baking run.")
     $ Test_command_line.cli_state ~name:"history_mode_synchronization" () )
     (let doc =
        sprintf
@@ -279,16 +285,9 @@ let cmd () =
      let man : Manpage.block list =
        [ `S "NODE SYNCHRONIZATION";
          `P
-           (sprintf
-              "This command builds a network of two interconnected nodes N1 \
-               and N2. The test first waits for synchronization of both nodes \
-               after N1 bakes %d blocks, it then kills N2, makes N1 lonely \
-               bake %d blocks and restarts N2. Finally, the test verifies if \
-               N2 is bootstrapped, and that N1 is not considered as a banned \
-               peer by N2. Depending on the specified history modes, N1 may \
-               or not bootstrap N2, the expected result is provided by the \
-               'should-synch' command argument."
-              starting_level
-              number_of_lonely_bakes) ]
+           "This command builds a combination of networks of two \
+            interconnected nodes. The first one solo-baking before connecting \
+            to the second and check that they may or may not bootstrap the \
+            second node depending the history mode on both of them." ]
      in
      info ~man ~doc "node-synchronization")
