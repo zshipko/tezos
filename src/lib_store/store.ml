@@ -2121,7 +2121,7 @@ let allow_testchains {allow_testchains; _} = allow_testchains
 let global_block_watcher {global_block_watcher; _} =
   Lwt_watcher.create_stream global_block_watcher
 
-(****************** For testing purposes only *****************)
+(************ For testing and internal purposes only **************)
 module Unsafe = struct
   let repr_of_block b = b
 

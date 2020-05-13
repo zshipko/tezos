@@ -888,6 +888,16 @@ module Unsafe : sig
 
   (** Snapshots utility functions *)
 
+  (** [open_for_snapshot_export ~store_dir ~context_dir genesis
+      ~locked_f] opens the store (resp. context) located in [store_dir]
+      (resp. [context_dir]) and gives the [chain_store] whose
+      [chain_id] is computed using [genesis] and gives it to
+      [lock_f]. [lock_f] starts by taking a lock (using a lockfile) on
+      the store to prevent merge from happening during this function.
+
+      {b Warning} [lock_f] must not perform long computations or
+      costly I/Os: if the store needs to perform a merge, it will be
+      locked while [lock_f] is running. *)
   val open_for_snapshot_export :
     store_dir:string ->
     context_dir:string ->
@@ -895,6 +905,11 @@ module Unsafe : sig
     locked_f:(chain_store * Context.index -> 'a tzresult Lwt.t) ->
     'a tzresult Lwt.t
 
+  (** [restore_from_snapshot ?notify ~store_dir ~context_index
+      ~genesis ~genesis_context_hash ~floating_blocks_stream
+      ~new_head_with_metadata ~protocol_levels ~history_mode]
+      initialises a coherent store in [store_dir] with all the given
+      info retrieved from a snapshot. *)
   val restore_from_snapshot :
     ?notify:(unit -> unit Lwt.t) ->
     store_dir:string ->
@@ -907,6 +922,9 @@ module Unsafe : sig
     history_mode:History_mode.t ->
     unit tzresult Lwt.t
 
+  (** [restore_from_snapshot_legacy ...] same as
+      [restore_from_snapshot] but slightly differs due to some
+      information missing from legacy snapshots. *)
   val restore_from_legacy_snapshot :
     ?notify:(unit -> unit Lwt.t) ->
     store_dir:string ->
