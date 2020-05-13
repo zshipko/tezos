@@ -1262,7 +1262,7 @@ module Chain = struct
             {
               block = Block.descriptor genesis_block;
               protocol = genesis_protocol;
-              commit_info = Some genesis_commit_info;
+              commit_info = genesis_commit_info;
             }
             empty)
     >>= fun protocol_levels ->
@@ -1430,6 +1430,10 @@ module Chain = struct
             parents_contexts;
           })
 
+  let get_commit_info_opt index header =
+    get_commit_info index header
+    >>= function Ok v -> Lwt.return_some v | Error _ -> Lwt.return_none
+
   let create_chain_store global_store ~chain_dir ~chain_id ?(expiration = None)
       ?genesis_block ~genesis ~genesis_context history_mode =
     (* Chain directory *)
@@ -1446,8 +1450,8 @@ module Chain = struct
     let chain_config = {Chain_config.history_mode; genesis; expiration} in
     Chain_config.write ~chain_dir chain_config
     >>=? fun () ->
-    get_commit_info global_store.context_index (Block.header genesis_block)
-    >>=? fun genesis_commit_info ->
+    get_commit_info_opt global_store.context_index (Block.header genesis_block)
+    >>= fun genesis_commit_info ->
     create_chain_state
       ~chain_dir
       ~genesis_block
