@@ -24,6 +24,7 @@
 (*****************************************************************************)
 
 open Store_types
+open Store_errors
 
 module Shared = struct
   type 'a t = {mutable data : 'a; lock : Lwt_idle_waiter.t}
@@ -226,7 +227,7 @@ module Block = struct
     >>= function
     | None ->
         (* TODO lift the error to block_store *)
-        fail (Store_errors.Block_not_found hash)
+        fail (Block_not_found hash)
     | Some block ->
         return block
 
@@ -257,7 +258,7 @@ module Block = struct
         block.metadata <- Some metadata ;
         return metadata
     | None ->
-        fail (Store_errors.Block_metadata_not_found (Block_repr.hash block))
+        fail (Block_metadata_not_found (Block_repr.hash block))
 
   let read_block_opt chain_store ?(distance = 0) hash =
     (* TODO: Make sure the checkpoint is still reachable *)
@@ -284,14 +285,13 @@ module Block = struct
 
   let read_predecessor_of_hash chain_store hash =
     read_predecessor_of_hash_opt chain_store hash
-    >>= function
-    | Some b -> return b | None -> fail (Store_errors.Block_not_found hash)
+    >>= function Some b -> return b | None -> fail (Block_not_found hash)
 
   let locked_read_block_by_level chain_store head level =
     let distance = Int32.(to_int (sub (Block_repr.level head) level)) in
     if distance < 0 then
       fail
-        (Store_errors.Bad_level
+        (Bad_level
            {
              head_level = Block_repr.level head;
              given_level = Int32.of_int distance;
@@ -773,8 +773,8 @@ module Chain = struct
               (* It's a known branch, update the alternate heads *)
               Lwt.return (Block_hash.Map.remove new_head_pred alternate_heads))
 
-  let update_savepoint locked_chain_store chain_state history_mode
-      ~min_level_to_preserve new_head =
+  let compute_new_savepoint locked_chain_store chain_state history_mode
+      ~min_level_to_preserve ~new_head =
     match history_mode with
     | History_mode.Archive ->
         (* new_savepoint = savepoint = genesis *)
@@ -838,17 +838,10 @@ module Chain = struct
               | Some savepoint ->
                   return (Block.descriptor savepoint) )
 
-  (* Hypothesis: new_head.last_allowed_fork_level > prev_head.last_allowed_fork_level *)
-  let trigger_merge chain_store chain_state ~prev_head_metadata ~new_head
-      ~new_head_metadata =
-    (* Lock the directories while the reordering store is happening *)
-    lock_for_write chain_store.lockfile
-    >>= fun () ->
-    (* Prevent snapshots from accessing the store while a merge is occuring *)
-    let history_mode = history_mode chain_store in
-    (* Determine the interval of blocks to cement [from_block ; to_block] *)
+  let compute_interval_to_cement locked_chain_store chain_state
+      ~prev_head_metadata ~new_head_metadata ~new_head =
     let prev_last_lafl = Block.last_allowed_fork_level prev_head_metadata in
-    ( match get_highest_cemented_level chain_store with
+    ( match get_highest_cemented_level locked_chain_store with
     | None ->
         (* First merge: first cementing, rolling 0 or recent snapshot
            import *)
@@ -860,7 +853,7 @@ module Chain = struct
         ( if is_first_cycle then return genesis
         else
           Block.locked_read_block_by_level
-            chain_store
+            locked_chain_store
             new_head
             (Int32.succ prev_last_lafl) )
         >>=? fun block -> return (Block.descriptor block)
@@ -868,7 +861,7 @@ module Chain = struct
         fail_unless
           Compare.Int32.(
             Block.last_allowed_fork_level prev_head_metadata = level)
-          (Store_errors.Inconsistent_store_state
+          (Inconsistent_store_state
              (Format.asprintf
                 "the most recent cemented block (%ld) is not the previous \
                  head's last allowed fork level (%ld)"
@@ -877,7 +870,7 @@ module Chain = struct
         >>=? fun () ->
         (* Retrieve (pred_head.last_allowed_fork_level + 1) *)
         Block.locked_read_block_by_level
-          chain_store
+          locked_chain_store
           new_head
           (Int32.succ level)
         >>=? fun from_block -> return (Block.descriptor from_block) )
@@ -886,62 +879,50 @@ module Chain = struct
      let distance =
        Int32.(to_int (sub (Block.level new_head) new_head_lafl))
      in
-     Block.read_ancestor_hash chain_store ~distance (Block.hash new_head)
+     Block.read_ancestor_hash
+       locked_chain_store
+       ~distance
+       (Block.hash new_head)
      >>= function
      | None ->
          fail
-           (Store_errors.Inconsistent_store_state
+           (Inconsistent_store_state
               "cannot retrieve head's last allowed fork level hash")
      | Some hash ->
          return (hash, new_head_lafl))
-    >>=? fun to_block ->
-    (* Determine the updated values for: checkpoint, savepoint, caboose *)
-    (* Checkpoint: *)
-    let checkpoint =
-      (* Only update the checkpoint when he falls behind the upper
-         bound to cement *)
-      if Compare.Int32.(snd chain_state.checkpoint < snd to_block) then
-        to_block
-      else chain_state.checkpoint
-    in
-    (* Try to preserve max_op_ttl predecessors of the upper-bound
-       (along with their metadata) so we can build snapshot from it *)
-    Block.read_block chain_store (fst to_block)
+    >>=? fun to_block -> return (from_block, to_block)
+
+  let compute_blocks_to_preserve locked_chain_store chain_state ~to_block =
+    (* Try to preserve [max_op_ttl] predecessors from the upper-bound
+       (along with their metadata) so a snapshot may always be
+       created. *)
+    Block.read_block locked_chain_store (fst to_block)
     >>=? fun to_block_b ->
-    Block.get_block_metadata_opt chain_store to_block_b
-    >>= (function
-          | Some metadata ->
-              let nb_blocks_to_preserve = Block.max_operations_ttl metadata in
-              let min_level_to_preserve =
-                Compare.Int32.max
-                  (snd chain_state.caboose)
-                  Int32.(sub (snd to_block) (of_int nb_blocks_to_preserve))
-              in
-              (* + 1, to_block + max_op_ttl(checkpoint) *)
-              Lwt.return (succ nb_blocks_to_preserve, min_level_to_preserve)
-          | None ->
-              (* If no metadata is found, keep the blocks until the caboose *)
-              let min_level_to_preserve = snd chain_state.caboose in
-              (* + 1, it's a size *)
-              let nb_blocks_to_preserve =
-                Int32.(
-                  to_int (succ (sub (snd to_block) min_level_to_preserve)))
-              in
-              Lwt.return (nb_blocks_to_preserve, min_level_to_preserve))
-    (* let head_level = Block.level new_head in *)
-    (* Lwt.return Int32.(to_int (sub (snd to_block) caboose_level))) *)
-    >>= fun (nb_blocks_to_preserve, min_level_to_preserve) ->
-    (* Savepoint: *)
-    update_savepoint
-      chain_store
-      chain_state
-      history_mode
-      ~min_level_to_preserve
-      new_head
-    >>=? fun savepoint ->
-    (* Caboose *)
-    ( match history_mode with
-    | Archive | Full _ ->
+    Block.get_block_metadata_opt locked_chain_store to_block_b
+    >>= function
+    | Some metadata ->
+        let nb_blocks_to_preserve = Block.max_operations_ttl metadata in
+        let min_level_to_preserve =
+          Compare.Int32.max
+            (snd chain_state.caboose)
+            Int32.(sub (snd to_block) (of_int nb_blocks_to_preserve))
+        in
+        (* + 1, to_block + max_op_ttl(checkpoint) *)
+        return (succ nb_blocks_to_preserve, min_level_to_preserve)
+    | None ->
+        (* If no metadata is found (e.g. may happen after a snapshot
+         import), keep the blocks until the caboose *)
+        let min_level_to_preserve = snd chain_state.caboose in
+        (* + 1, it's a size *)
+        let nb_blocks_to_preserve =
+          Int32.(to_int (succ (sub (snd to_block) min_level_to_preserve)))
+        in
+        return (nb_blocks_to_preserve, min_level_to_preserve)
+
+  let compute_new_caboose locked_chain_store chain_state history_mode
+      ~savepoint ~min_level_to_preserve ~from_block ~new_head =
+    match history_mode with
+    | History_mode.Archive | Full _ ->
         (* caboose = genesis *)
         return chain_state.caboose
     | Rolling {offset} ->
@@ -955,7 +936,7 @@ module Chain = struct
           Compare.Int32.(min_level_to_preserve < snd savepoint) || offset = 0
         then
           Block.locked_read_block_by_level
-            chain_store
+            locked_chain_store
             new_head
             min_level_to_preserve
           >>=? fun min_block_to_preserve ->
@@ -963,23 +944,71 @@ module Chain = struct
         else
           (* Else genesis = new savepoint except for the first
              cemented cycle which might be partial when cementing
-             after an import. *)
+             after a snapshot import. *)
           let table =
             Cemented_block_store.cemented_blocks_files
-              (Block_store.cemented_block_store chain_store.block_store)
+              (Block_store.cemented_block_store locked_chain_store.block_store)
           in
           let table_len = Array.length table in
-          if table_len = 0 then return from_block else return savepoint )
+          if table_len = 0 then return from_block else return savepoint
+
+  (* Hypothesis: new_head.last_allowed_fork_level > prev_head.last_allowed_fork_level *)
+  (* TODO: add a stack of merge callbacks in case the lock is taken *)
+  let trigger_merge chain_store chain_state ~prev_head_metadata
+      ~new_head_metadata ~new_head =
+    let history_mode = history_mode chain_store in
+    (* Determine the interval of blocks to cement [from_block ; to_block] *)
+    compute_interval_to_cement
+      chain_store
+      chain_state
+      ~prev_head_metadata
+      ~new_head_metadata
+      ~new_head
+    >>=? fun (from_block, to_block) ->
+    compute_blocks_to_preserve chain_store chain_state ~to_block
+    >>=? fun (nb_blocks_to_preserve, min_level_to_preserve) ->
+    (* Determine the new values for: checkpoint, savepoint, caboose *)
+    let checkpoint =
+      (* Only update the checkpoint when he falls behind the upper
+         bound to cement *)
+      if Compare.Int32.(snd chain_state.checkpoint < snd to_block) then
+        to_block
+      else chain_state.checkpoint
+    in
+    compute_new_savepoint
+      chain_store
+      chain_state
+      history_mode
+      ~min_level_to_preserve
+      ~new_head
+    >>=? fun savepoint ->
+    compute_new_caboose
+      chain_store
+      chain_state
+      history_mode
+      ~savepoint
+      ~min_level_to_preserve
+      ~from_block
+      ~new_head
     >>=? fun caboose ->
     let finalizer () =
-      (* Update the stored value after the merge *)
+      (* Update the *on-disk* stored values when the merge terminates. *)
       Stored_data.write chain_state.checkpoint_data checkpoint
       >>= fun () ->
       Stored_data.write chain_state.savepoint_data savepoint
       >>= fun () ->
       Stored_data.write chain_state.caboose_data caboose
-      >>= fun () -> may_unlock chain_store.lockfile
+      >>= fun () ->
+      (* Don't forget to unlock after the merge *)
+      may_unlock chain_store.lockfile
     in
+    (* Lock the directories while the reordering store is happening:
+       this prevents snapshots from accessing the store while a merge
+       is occuring. *)
+    lock_for_write chain_store.lockfile
+    >>= fun () ->
+    (* The main part of this function is asynchronous so it returns
+       immediately *)
     Block_store.merge_stores
       chain_store.block_store
       ~finalizer
@@ -988,31 +1017,31 @@ module Chain = struct
       ~from_block
       ~to_block
       ()
-    >>= fun () -> return (checkpoint, savepoint, caboose, to_block)
+    >>= fun () ->
+    (* The returned updated values are to be set in the memory
+       state. *)
+    return (checkpoint, savepoint, caboose, to_block)
 
   let set_head chain_store (new_head : Block.t) : Block.t tzresult Lwt.t =
-    Shared.update_with
-      chain_store.chain_state
-      (fun ({current_head; savepoint; checkpoint; caboose; _} as chain_state)
-           ->
+    Shared.update_with chain_store.chain_state (fun chain_state ->
+        let {current_head; savepoint; checkpoint; caboose; _} = chain_state in
         Stored_data.read current_head
         >>= fun prev_head ->
         Block.get_block_metadata chain_store new_head
         >>=? fun new_head_metadata ->
         Block.get_block_metadata chain_store prev_head
         >>=? fun prev_head_metadata ->
-        (* If the new head is equal to the previous head *)
         if Block.equal prev_head new_head then
           (* Nothing to do *)
           return (None, prev_head)
         else
           (* First, check that we do not try to set a head below the
-                 last allowed fork level *)
+             last allowed fork level *)
           fail_unless
             Compare.Int32.(
               Block.level new_head
               > Block.last_allowed_fork_level prev_head_metadata)
-            (Store_errors.Invalid_head_switch
+            (Invalid_head_switch
                {
                  minimum_allowed_level =
                    Int32.succ
@@ -1020,37 +1049,39 @@ module Chain = struct
                  given_head = Block.descriptor new_head;
                })
           >>=? fun () ->
-          (* Acceptable head *)
-          let new_head_last_allowed_fork_level =
+          (* This is an acceptable head *)
+          let new_head_lafl =
             Block.last_allowed_fork_level new_head_metadata
           in
-          let prev_head_last_allowed_fork_level =
+          let prev_head_lafl =
             Block.last_allowed_fork_level prev_head_metadata
           in
           (* Should we trigger a merge ? i.e. has the last allowed
-             fork level changed and do we have enough blocks ? *)
+               fork level changed and do we have enough blocks ? *)
           let has_lafl_changed =
-            Compare.Int32.(
-              new_head_last_allowed_fork_level
-              > prev_head_last_allowed_fork_level)
+            Compare.Int32.(new_head_lafl > prev_head_lafl)
           in
           let has_necessary_blocks =
-            Compare.Int32.(snd caboose <= prev_head_last_allowed_fork_level)
+            Compare.Int32.(snd caboose <= prev_head_lafl)
           in
-          ( if has_lafl_changed && has_necessary_blocks then
-            (* We must be sure that the previous merge is completed
-               before starting a new merge *)
+          ( if not (has_lafl_changed && has_necessary_blocks) then
+            return (checkpoint, savepoint, caboose, None)
+          else
+            (* Make sure that the previous merge is completed before
+                     starting a new merge *)
             Block_store.await_merging chain_store.block_store
             >>=? fun () ->
             let is_already_cemented =
-              Option.unopt_map
-                ~f:(fun highest_cemented_level ->
-                  Compare.Int32.(
-                    highest_cemented_level >= new_head_last_allowed_fork_level))
-                ~default:false
-                (get_highest_cemented_level chain_store)
+              match get_highest_cemented_level chain_store with
+              | Some highest_cemented_level ->
+                  Compare.Int32.(highest_cemented_level >= new_head_lafl)
+              | None ->
+                  false
             in
-            if is_already_cemented then return (checkpoint, savepoint, caboose)
+            (* It might already be cemented when the store is imported
+                 from a snapshot *)
+            if is_already_cemented then
+              return (checkpoint, savepoint, caboose, None)
             else
               trigger_merge
                 chain_store
@@ -1059,22 +1090,19 @@ module Chain = struct
                 ~new_head
                 ~new_head_metadata
               >>=? fun (checkpoint, savepoint, caboose, to_block) ->
-              (* Filter alternate heads that are below the new highest cemented block *)
-              update_alternate_heads
-                chain_store
-                ~filter_below:(snd to_block)
-                chain_state.alternate_heads
-                ~prev_head
-                ~new_head
-              >>= fun () -> return (checkpoint, savepoint, caboose)
-          else
-            update_alternate_heads
-              chain_store
-              chain_state.alternate_heads
-              ~prev_head
-              ~new_head
-            >>= fun () -> return (checkpoint, savepoint, caboose) )
-          >>=? fun (checkpoint, savepoint, caboose) ->
+              (* [to_block] might be different from checkpoint
+                 (e.g. checkpoint in the future) *)
+              return (checkpoint, savepoint, caboose, Some (snd to_block)) )
+          >>=? fun (checkpoint, savepoint, caboose, limit_opt) ->
+          (* Update and filter out alternate heads that are below the
+             new highest cemented block *)
+          update_alternate_heads
+            chain_store
+            ?filter_below:limit_opt
+            chain_state.alternate_heads
+            ~prev_head
+            ~new_head
+          >>= fun () ->
           (* Update current_head and live_{blocks,ops} *)
           Stored_data.write current_head new_head
           >>= fun () ->
@@ -1087,17 +1115,17 @@ module Chain = struct
             ~block:new_head
             new_head_max_op_ttl
           >>= fun (live_blocks, live_operations) ->
-          return
-            ( Some
-                {
-                  chain_state with
-                  live_blocks;
-                  live_operations;
-                  checkpoint;
-                  savepoint;
-                  caboose;
-                },
-              prev_head ))
+          let new_chain_state =
+            {
+              chain_state with
+              live_blocks;
+              live_operations;
+              checkpoint;
+              savepoint;
+              caboose;
+            }
+          in
+          return (Some new_chain_state, prev_head))
 
   let known_heads chain_store =
     Shared.use
@@ -2016,7 +2044,7 @@ let load_store ?history_mode ~store_dir ~context_index ~chain_id
       let previous_history_mode = Chain.history_mode main_chain_store in
       fail_when
         (history_mode <> previous_history_mode)
-        (Store_errors.Incorrect_history_mode_switch
+        (Incorrect_history_mode_switch
            {previous_mode = previous_history_mode; next_mode = history_mode})
   )
   >>=? fun () ->
@@ -2166,12 +2194,10 @@ module Unsafe = struct
     let chain_store = main_chain_store store in
     lock_for_read chain_store.lockfile
     >>= fun () ->
-    Error_monad.protect
-      ~on_error:(fun err ->
-        close_store store >>= fun () -> Lwt.return (Error err))
-      (fun () ->
-        locked_f (chain_store, context_index)
-        >>=? fun res -> close_store store >>= fun () -> return res)
+    Error_monad.protect (fun () ->
+        Lwt.finalize
+          (fun () -> locked_f (chain_store, context_index))
+          (fun () -> close_store store))
 
   let restore_from_snapshot ?(notify = fun () -> Lwt.return_unit) ~store_dir
       ~context_index ~genesis ~genesis_context_hash ~floating_blocks_stream
@@ -2332,7 +2358,7 @@ module Unsafe = struct
     in
     (* Write consistent stored data *)
     (* We will write protocol levels when we have access to blocks to
-     retrieve necessary infos *)
+       retrieve necessary infos *)
     Stored_data.write_file
       ~file:Naming.(chain_dir // Chain_data.current_head)
       Block_repr.encoding
