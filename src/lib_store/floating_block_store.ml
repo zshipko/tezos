@@ -55,24 +55,26 @@ let find_predecessors floating_store hash =
 
 let read_block floating_store hash =
   (* Must be `when_idle` or the fd offset might be moved by other calls  *)
-  Lwt_idle_waiter.when_idle floating_store.scheduler (fun () ->
+  Lwt_idle_waiter.task floating_store.scheduler (fun () ->
       try
         let {offset; _} =
           Floating_block_index.find floating_store.floating_block_index hash
         in
-        Lwt_unix.lseek floating_store.fd offset Unix.SEEK_SET
-        >>= fun _ ->
         (* Read dynamic length prefix *)
         let length_bytes = Bytes.create 4 in
-        Lwt_utils_unix.read_bytes ~pos:0 ~len:4 floating_store.fd length_bytes
+        Lwt_utils_unix.read_bytes
+          ~file_offset:offset
+          ~pos:0
+          ~len:4
+          floating_store.fd
+          length_bytes
         >>= fun () ->
         let length = Data_encoding.(Binary.of_bytes_exn int31 length_bytes) in
-        let block_bytes = Bytes.create (4 + length) in
-        Lwt_unix.lseek floating_store.fd offset Unix.SEEK_SET
-        >>= fun _ ->
+        let block_bytes = Bytes.extend length_bytes 0 length in
         Lwt_utils_unix.read_bytes
-          ~pos:0
-          ~len:(4 + length)
+          ~file_offset:(offset + 4)
+          ~pos:4
+          ~len:length
           floating_store.fd
           block_bytes
         >>= fun () ->
@@ -107,7 +109,7 @@ let locked_write_block floating_store ~offset ~block ~predecessors =
   Lwt.return block_length
 
 let append_block floating_store predecessors (block : Block_repr.t) =
-  Lwt_idle_waiter.force_idle floating_store.scheduler (fun () ->
+  Lwt_idle_waiter.when_idle floating_store.scheduler (fun () ->
       Lwt_unix.lseek floating_store.fd 0 Unix.SEEK_END
       >>= fun offset ->
       locked_write_block floating_store ~offset ~block ~predecessors
@@ -117,7 +119,7 @@ let append_block floating_store predecessors (block : Block_repr.t) =
 
 let append_all floating_store
     (blocks : (Block_hash.t list * Block_repr.t) list) =
-  Lwt_idle_waiter.force_idle floating_store.scheduler (fun () ->
+  Lwt_idle_waiter.when_idle floating_store.scheduler (fun () ->
       Lwt_unix.lseek floating_store.fd 0 Unix.SEEK_END
       >>= fun eof_offset ->
       Lwt_list.fold_left_s
