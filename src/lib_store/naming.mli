@@ -25,7 +25,7 @@
 
 (** Filenames convention. *)
 
-(** Path concatenation operator (alias of {Filename.concat}). *)
+(** Path concatenation operator (alias of {!Filename.concat}). *)
 val ( // ) : string -> string -> string
 
 (** Chain store directory name. *)

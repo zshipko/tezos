@@ -50,7 +50,7 @@
 
    {2 History mode handling}
 
-   This store handles the three different {Tezos_base.History_mode.t}:
+   This store handles the three different {!Tezos_base.History_mode.t}:
 
    - Archive: maintains every block that is part of the chain
    including their metadata.
@@ -96,10 +96,10 @@
    chain (with or without metadata).
 
     More details and invariants on these points are provided in the
-   {Chain} module description below.
+   {!Chain} module description below.
 
     When a block is promoted as head of the chain (through
-   {Chain.set_head}) a number of things happens:
+   {!Chain.set_head}) a number of things happens:
 
    - A check is made if this head is consistent (i.e. if it's not
    below the checkpoint);
@@ -121,7 +121,7 @@
    only retain the changes in RAM so we may keep storing new blocks
    without blocking but if the process crashes while a merge is
    happening, the state is reloaded before the merging point. More
-   details are given in {Chain.set_head}.
+   details are given in {!Chain.set_head}.
 
    {2 Files hierarchy}
 
@@ -143,7 +143,7 @@
      as a JSON file.
 
    - [chain_store_dir]/<block_store> contains every file mentioned in
-     {Block_store}'s format.
+     {!Block_store}'s format.
 
    - [chain_store_dir]/<stored_data>* files containing encoded simple
      data structures such as: genesis block, checkpoint, savepoint,
@@ -159,7 +159,7 @@ type t
 (** The type alias for the global store. *)
 type store = t
 
-(** The abstract type for a chain store. Equivalent to {Chain.t}. *)
+(** The abstract type for a chain store. Equivalent to {!Chain.t}. *)
 type chain_store
 
 (** {3 Initialization} *)
@@ -172,7 +172,7 @@ type chain_store
     able to fork chains and instanciate testchain's sub chain stores.
     The chain store created is based on the [genesis] provided. Its
     chain id will computed using the
-    {Tezos_crypto.Chain_id.of_block_hash} function.
+    {!Tezos_crypto.Chain_id.of_block_hash} function.
 
     @param patch_context the handle called when initializing the
     context. It usually is passed when creating a sandboxed chain.
@@ -182,12 +182,12 @@ type chain_store
     in readonly (e.g. started by an external validator) and we want to
     prevent writing in the context. {b Warning} passing this argument
     will initialize the context in readonly.
-      Default: {Context.commit_genesis} is called with [genesis]
+      Default: {!Context.commit_genesis} is called with [genesis]
 
     @param history_mode the history mode used throughout the store. If
     a directory already exists and the given [history_mode] is
     different, the initialization will fail.
-      Default: {History_mode.default} (which should correspond to full
+      Default: {!History_mode.default} (which should correspond to full
     with 5 extra preserved cycles.)
 
     @param readonly a flag that, if set to true, prevent writing
@@ -283,7 +283,7 @@ module Block : sig
   val is_genesis : chain_store -> Block_hash.t -> bool
 
   (** [validity chain_store bh] computes the
-      {Block_locator.validity} ([Unknown], [Known_valid] or
+      {!Block_locator.validity} ([Unknown], [Known_valid] or
       [Known_invalid]) for the block [bh] in [chain_store].  *)
   val validity : chain_store -> Block_hash.t -> Block_locator.validity Lwt.t
 
@@ -401,7 +401,7 @@ module Block : sig
   val protocol_hash : chain_store -> block -> Protocol_hash.t tzresult Lwt.t
 
   (** [compute_locator chain_store ?size block seed] computes a
-      {Block_locator.t} of length [size] (default: 200) from the
+      {!Block_locator.t} of length [size] (default: 200) from the
       [block] stored in [chain_store] using the [seed]. *)
   val compute_locator :
     chain_store ->
@@ -496,7 +496,7 @@ module Chain : sig
   (** The abstract type alias of a chain store. *)
   type nonrec chain_store = chain_store
 
-  (** The type alias of {chain_store}. *)
+  (** The type alias of [chain_store]. *)
   type t = chain_store
 
   (** The abstract type for testchain. *)
@@ -517,7 +517,7 @@ module Chain : sig
       [chain_store]. *)
   val history_mode : chain_store -> History_mode.t
 
-  (** [genesis chain_store] returns the {Genesis.t} of the
+  (** [genesis chain_store] returns the {!Genesis.t} of the
       [chain_store]. *)
   val genesis : chain_store -> Genesis.t
 
@@ -617,7 +617,7 @@ module Chain : sig
   (** [compute_live_blocks ~block chain_store] computes the set of
       live blocks and live operations relative to [block]. Does nothing
       if [block] is the [chain_store]'s current head as it was
-      previously updated in {set_head}.
+      previously updated in {!set_head}.
 
       Note: this operation should not be costly in most cases as
       recent blocks and operations are expected to be in the block
@@ -851,11 +851,11 @@ module Chain_traversal : sig
     (Block.t * Block.t list) Lwt.t
 end
 
-(**/*)
+(**/**)
 
 (** Unsafe set of functions intended for internal store manipulation
    (e.g. snapshot, reconstruct, testing). Must not be used outside of
-   the Tezos_store. *)
+   the [Tezos_store]. *)
 module Unsafe : sig
   val repr_of_block : Block.t -> Block_repr.t
 

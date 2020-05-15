@@ -27,17 +27,17 @@
 
     The floating block store is an append-only store where blocks are
     stored arbitrarily. This structure possess an indexed map
-    {Block_hash.t} -> (offset × predecessors) which points to its
+    {!Block_hash.t} -> (offset × predecessors) which points to its
     offset in the associated file along with a list of block
     predecessors. The structure access/modification is protected by a
-    mutex ({Lwt_idle_waiter}) and thus can be concurently manipulated.
+    mutex ({!Lwt_idle_waiter}) and thus can be concurently manipulated.
     Stored blocks may or may not contain metadata. The instance
     maintains an opened file descriptor therefore it must be properly
     closed or it might lead to a fd leak.
 
     Four differents kind of instance are allowed to co-exist for an
     identitcal path: - RO, a read-only instance; - RW, a read-write
-    instance - RO_TMP, RW_TMP, read-write instances.  See {Block_store}
+    instance - RO_TMP, RW_TMP, read-write instances.  See {!Block_store}
 
     {1 Invariants}
 
@@ -49,12 +49,12 @@
 
     The floating block store is composed of the following files:
 
-    - file : /<kind>_floating_block_store, a list of {Block_repr.t}:
+    - file : /<kind>_floating_block_store, a list of {!Block_repr.t}:
 
     | <block> * |
 
-    where <kind> is RO(_TMP), RW(_TMP) (see {Naming}) and <block>, a
-    {Block_repr.t} value encoded using {Block_repr.encoding} (thus
+    where <kind> is RO(_TMP), RW(_TMP) (see {!Naming}) and <block>, a
+    {!Block_repr.t} value encoded using {!Block_repr.encoding} (thus
     prefixed by the its size).
 *)
 

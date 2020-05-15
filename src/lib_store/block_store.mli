@@ -29,7 +29,7 @@
     block store. The floating stores serves as buffer until enough
     blocks arrived to perform a "cementing" (also called a "merge").
     Under normal circumstances, there are two different kind
-    ({Floating_block_store.floating_kind} of floating stores instances:
+    ({!Floating_block_store.floating_kind} of floating stores instances:
     a [RO] and a [RW]. Newly arrived blocks are {b always} pushed in
     the [RW] instance. The block lookup is first tried in [RW] then
     [RO] and finally in the cement blocks.
@@ -105,16 +105,17 @@
 *)
 
 (** {1 Merging example}
-
+{v
            RO          RW
 
-                 | C' - D' - E'    G'
-              /                  /
+                 | C' - D' - E'   G'
+              /  |               /
          A - B - | C - D - E - F - G
-                    \
+                 |  \
                  |    D'' - E''
                  |     \
                  |       E'''
+v}
 *)
 
 (** For instance, a merging from [A] to [C] will first retrieve blocks
@@ -126,12 +127,12 @@
 
     The algorithm start iterating over this sequence and will only
     copy blocks for which predecessors are present in the set S of hash
-    (initially S = { hash([C]) }). Thus, for the given sequence, [D'']
-    will first be considered, S will be updated to { hash([C]),
-    hash([D]) } and so on, until [RO] and [RW] are fully read.
+    (initially S = \{ hash([C]) \}). Thus, for the given sequence, [D'']
+    will first be considered, S will be updated to \{ hash([C]),
+    hash([D]) \} and so on, until [RO] and [RW] are fully read.
 
     The new RO will then be :
-
+{v
                 G'
                /
     - D - E - F - G
@@ -139,7 +140,7 @@
     - D'' - E''
        \
         E'''
-
+v}
     where its storing order will be correct with regards to the
     invariant.
 *)
@@ -201,7 +202,7 @@ val store_block : block_store -> Block_repr.t -> unit Lwt.t
 (** [cement_blocks ?check_consistency ~write_metadata block_store
     chunk]
 
-    Wrapper of {Cemented_block_store.cement_blocks}. If the flag
+    Wrapper of {!Cemented_block_store.cement_blocks}. If the flag
     [check_consistency] is set, it verifies that all the blocks in [chunk]
     are in a consecutive order. *)
 val cement_blocks :
@@ -223,7 +224,7 @@ val cement_blocks :
     potential deleted floating store is referenced in the structure.
 
     Fails if both [src] and [dst] (if it exists) have the same
-    {Floating_block_store.floating_kind}. *)
+    {!Floating_block_store.floating_kind}. *)
 val swap_floating_store :
   block_store ->
   src:Floating_block_store.t ->
@@ -243,7 +244,7 @@ val await_merging : block_store -> unit tzresult Lwt.t
     longest suffix otherwise) along with their metadata in the floating
     store potentially having duplicate in the cemented block store.
 
-    After the cementing, {Cemented_block_store.trigger_gc} will be
+    After the cementing, {!Cemented_block_store.trigger_gc} will be
     called with the given [history_mode]. When the merging thread
     succeeds, the callback [finalizer] will be called.
 

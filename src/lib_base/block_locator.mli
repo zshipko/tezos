@@ -34,12 +34,12 @@
     This is the purpose of the function [to_steps].
 
     The [step] representation is mostly used by the [peer_validator] module and the
-    [bootstrap_pipeline} modules.
+    [bootstrap_pipeline] modules.
 
     The last step of a locator may be truncated. There are two typical case of this:
     1. When the last step hit the genesis block hash
     2. In [Rolling] or [Full] mode, we are not inserted into blocks below the
-    [save point]. A step which is not truncated is said [strict]. *)
+    [savepoint]. A step which is not truncated is said [strict]. *)
 
 (** Type for sparse block locators (/à la/ Bitcoin). *)
 type t = private Block_header.t * Block_hash.t list

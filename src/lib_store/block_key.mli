@@ -23,7 +23,7 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-(** Super-set of {Block_hash} to satisfy {Index.Key} interface. *)
+(** Super-set of {!Block_hash} to satisfy {!Index.Key} interface. *)
 
 include module type of Block_hash
 

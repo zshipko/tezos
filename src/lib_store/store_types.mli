@@ -36,10 +36,10 @@ val block_descriptor_encoding : (Block_hash.t * int32) Data_encoding.t
     These values should be indexed by the block's hash. *)
 type invalid_block = {level : int32; errors : Error_monad.error list}
 
-(** Encoding for {invalid_block}. *)
+(** Encoding for {!invalid_block}. *)
 val invalid_block_encoding : invalid_block Data_encoding.t
 
-(** Module {Protocol_levels} represents an association map of protocol
+(** Module [Protocol_levels] represents an association map of protocol
    levels to corresponding blocks which supposedly activate new
    protocols. *)
 module Protocol_levels : sig
@@ -60,9 +60,9 @@ module Protocol_levels : sig
         parents.
 
       This structure should be populated with the result of
-      {Tezos_context.Context.retrieve_commit_info} and the consistency
+      {!Tezos_context.Context.retrieve_commit_info} and the consistency
       check is done by
-      {Tezos_context.Context.check_protocol_commit_consistency}
+      {!Tezos_context.Context.check_protocol_commit_consistency}
   *)
   type commit_info = {
     author : string;
@@ -72,7 +72,7 @@ module Protocol_levels : sig
     parents_contexts : Context_hash.t list;
   }
 
-  (** Encoding for {commit_info}. *)
+  (** Encoding for {!commit_info}. *)
   val commit_info_encoding : commit_info Data_encoding.t
 
   (** The type for activation blocks.

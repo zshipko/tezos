@@ -23,7 +23,7 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-(** Block level satisfying {Index.Key} interface. *)
+(** Block level satisfying {!Index.Key} interface. *)
 
 (** The type for block levels *)
 type t = int32

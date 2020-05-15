@@ -32,11 +32,11 @@
 type contents = {header : Block_header.t; operations : Operation.t list list}
 
 (** The type for a block's [metadata] stored on disk. This representation is
-    tightly linked to {Tezos_validation.Block_validation.result} which
+    tightly linked to {!Tezos_validation.Block_validation.result} which
     also has a strong dependency to
-    {Tezos_protocol_environment.validation_result}.
+    {!Tezos_protocol_environment.validation_result}.
 
-    Some fields exposed by {Tezos_validation.Block_validation.result}
+    Some fields exposed by {!Tezos_validation.Block_validation.result}
     are unnecessary hence the lack of direct link. *)
 type metadata = {
   message : string option;
@@ -65,17 +65,17 @@ type block = {
 
 type t = block
 
-(** Encoding for {contents}. *)
+(** Encoding for {!contents}. *)
 val contents_encoding : contents Data_encoding.t
 
-(** Encoding for {metadata}. *)
+(** Encoding for {!metadata}. *)
 val metadata_encoding : metadata Data_encoding.t
 
-(** Encoding for {t} (and {block}).
+(** Encoding for {!t} (and {!block}).
 
     {b Important} An encoded block is prefixed by 4 bytes of the
     length of the data before the data. This is the case with
-    {Data_encoding.dynamic_size ~kind:`Uint30} encodings. This will
+    [Data_encoding.dynamic_size ~kind:`Uint30] encodings. This will
     be expected to be present to improve the store efficiency.
 *)
 val encoding : t Data_encoding.t

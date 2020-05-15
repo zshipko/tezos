@@ -76,8 +76,8 @@
 
     where n is ( j- i + 1), <offset> is 4 bytes integer representing
    the absolute offset of the k-th (with 0 <= k <= n) block in the
-   file and with <block>, a {Block_repr.t} value encoded using
-   {Block_repr.encoding} (thus prefixed by the its size).
+   file and with <block>, a {!Block_repr.t} value encoded using
+   {!Block_repr.encoding} (thus prefixed by the its size).
 
     - dir : /<cemented_block_index_level>, the Hash -> Level key/value
    index ;
@@ -208,18 +208,19 @@ val cement_blocks :
 
 (** [trigger_gc cemented_store history_mode] garbage collect metadata
    chunks and/or chunks from [cemented_store] depending on the
-   [history_mode]:
+   {!History_mode.t}:
 
-    - in {Archive} mode, nothing is done;
+    - in [Archive] mode, nothing is done;
 
-    - in {Full <offset>} mode, only [<offset>] chunks of {b metadata}
-   are kept;
+    - in [Full offset] mode, only [offset] chunks of {b metadata} are
+   kept;
 
-    - in {Rolling <offset>} mode, only [<offset>] chunks of {b
-    metadata and chunks} are kept. {b Important:} when purging chunks
-    of blocks, it is necessary to rewrite the index to remove garbage
-    collected blocks. Therefore, the higher the offset, the longest the
-    GC phase will be. *)
+    - in [Rolling offset] mode, only [offset] chunks of {b metadata and chunks}
+    are kept.
+
+    {b Important:} when purging chunks of blocks, it is necessary to
+    rewrite the index to remove garbage collected blocks. Therefore,
+    the higher the offset, the longest the GC phase will be. *)
 val trigger_gc : t -> History_mode.t -> unit Lwt.t
 
 (** [iter_cemented_file ~cemented_block_dir f block_file] reads from
