@@ -1,5 +1,5 @@
 (executables
- (names test)
+ (names test test_legacy)
  (libraries tezos-base
             tezos-store
 	    tezos-legacy-store
@@ -8,29 +8,47 @@
             tezos-embedded-protocol-demo-noops
             tezos-embedded-protocol-alpha
             tezos-protocol-alpha-parameters
+            tezos-validation
             alcotest-lwt)
  (flags (:standard -open Tezos_base__TzPervasives
                    -open Tezos_store
 		   -open Tezos_legacy_store
                    -open Tezos_shell_services
                    -open Tezos_stdlib_unix
+                   -open Tezos_validation
                    -open Tezos_protocol_alpha_parameters)))
 
 (alias
  (name buildtest)
- (deps test.exe))
+ (deps
+   ../legacy_store/legacy_store_builder.exe
+   test.exe
+   test_legacy.exe))
+
+(alias
+ (name runtest_store)
+ (action
+  (setenv SLOW_TEST false
+   (run %{exe:test.exe}))))
+
+(alias
+ (name runtest_store_legacy)
+ (deps (:legacy_builder ../legacy_store/legacy_store_builder.exe))
+ (action (run %{exe:test_legacy.exe} --builder-path %{legacy_builder})))
+
+(alias
+ (name runtest_store_slow)
+ (action
+  (setenv SLOW_TEST true
+   (run %{exe:test.exe}))))
 
 (alias
  (name runtest)
- (action
-  (setenv SLOW_TEST false
-   (chdir %{workspace_root} (run %{exe:test.exe})))))
+ (package tezos-store)
+ (deps
+  (alias runtest_store)
+  (alias runtest_store_legacy)))
 
-(alias
- (name runtest-slow)
- (action
-  (setenv SLOW_TEST true
-   (chdir %{workspace_root} (run %{exe:test.exe})))))
 
 (alias
  (name runtest_lint)

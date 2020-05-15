@@ -77,7 +77,7 @@ val raw_upgrade :
     user. *)
 val upgrade_0_0_4 :
   data_dir:string ->
-  patch_context:(Context.t -> Context.t tzresult Lwt.t) option ->
+  ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->
   chain_name:Distributed_db_version.Name.t ->
   Genesis.t ->
   string tzresult Lwt.t

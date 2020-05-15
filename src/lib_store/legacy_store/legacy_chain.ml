@@ -67,49 +67,51 @@ let locator chain_state seed =
   >>= fun data ->
   Legacy_state.compute_locator chain_state data.current_head seed
 
-let locked_set_head _chain_store data block =
-  (* let rec pop_blocks ancestor block =
-   *   let hash = Legacy_state.Block.hash block in
-   *   if Block_hash.equal hash ancestor then Lwt.return_unit
-   *   else
-   *     (\* lwt_debug
-   *      *   Tag.DSL.(
-   *      *     fun f ->
-   *      *       f "pop_block %a" -% t event "pop_block"
-   *      *       -% a Block_hash.Logging.tag hash)
-   *      * >>= fun () -> *\)
-   *     Legacy_store.Chain_data.In_main_branch.remove (chain_store, hash)
-   *     >>= fun () ->
-   *     Legacy_state.Block.predecessor block
-   *     >>= function
-   *     | Some predecessor ->
-   *         pop_blocks ancestor predecessor
-   *     | None ->
-   *         assert false
-   *   (\* Cannot pop the genesis... *\)
-   * in *)
-  (* let push_block pred_hash block =
-   *   let hash = Legacy_state.Block.hash block in
-   *   (\* lwt_debug
-   *    *   Tag.DSL.(
-   *    *     fun f ->
-   *    *       f "push_block %a" -% t event "push_block"
-   *    *       -% a Block_hash.Logging.tag hash)
-   *    * >>= fun () -> *\)
-   *   Legacy_store.Chain_data.In_main_branch.store (chain_store, pred_hash) hash
-   *   >>= fun () -> Lwt.return hash
-   * in *)
-  (* Chain_traversal.new_blocks ~from_block:data.current_head ~to_block:block
-   * >>= fun (ancestor, path) ->
-   * let ancestor = Legacy_state.Block.hash ancestor in
-   * pop_blocks ancestor data.current_head
-   * >>= fun () ->
-   * Lwt_list.fold_left_s push_block ancestor path
-   * >>= fun _ ->
-   * Legacy_store.Chain_data.Current_head.store
-   *   chain_store
-   *   (Legacy_state.Block.hash block)
-   * >>= fun () -> *)
+let locked_set_head chain_store data block =
+  let rec pop_blocks ancestor block =
+    let hash = Legacy_state.Block.hash block in
+    if Block_hash.equal hash ancestor then Lwt.return_unit
+    else
+      (* lwt_debug
+       *   Tag.DSL.(
+       *     fun f ->
+       *       f "pop_block %a" -% t event "pop_block"
+       *       -% a Block_hash.Logging.tag hash)
+       * >>= fun () -> *)
+      Legacy_store.Chain_data.In_main_branch.remove (chain_store, hash)
+      >>= fun () ->
+      Legacy_state.Block.predecessor block
+      >>= function
+      | Some predecessor ->
+          pop_blocks ancestor predecessor
+      | None ->
+          assert false
+    (* Cannot pop the genesis... *)
+  in
+  let push_block pred_hash block =
+    let hash = Legacy_state.Block.hash block in
+    (* lwt_debug
+     *   Tag.DSL.(
+     *     fun f ->
+     *       f "push_block %a" -% t event "push_block"
+     *       -% a Block_hash.Logging.tag hash)
+     * >>= fun () -> *)
+    Legacy_store.Chain_data.In_main_branch.store (chain_store, pred_hash) hash
+    >>= fun () -> Lwt.return hash
+  in
+  Legacy_chain_traversal.new_blocks
+    ~from_block:data.current_head
+    ~to_block:block
+  >>= fun (ancestor, path) ->
+  let ancestor = Legacy_state.Block.hash ancestor in
+  pop_blocks ancestor data.current_head
+  >>= fun () ->
+  Lwt_list.fold_left_s push_block ancestor path
+  >>= fun _ ->
+  Legacy_store.Chain_data.Current_head.store
+    chain_store
+    (Legacy_state.Block.hash block)
+  >>= fun () ->
   (* TODO more optimized updated of live_{blocks/operations} when the
      new head is a direct successor of the current head...
      Make sure to do the live blocks computation in `init_head`

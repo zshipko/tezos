@@ -302,13 +302,7 @@ let make_tests_snapshoted speed patch_context =
     permutations
 
 let tests speed =
-  let genesis_parameters =
-    Tezos_protocol_alpha_parameters.Default_parameters.(
-      parameters_of_constants constants_sandbox)
-  in
-  let patch_context ctxt =
-    Alpha_utils.patch_context ~genesis_parameters ctxt
-  in
+  let patch_context ctxt = Alpha_utils.default_patch_context ctxt in
   let test_cases_reconstruct = make_tests_bootstrapped speed patch_context in
   let test_cases_reconstruct_snapshots =
     make_tests_snapshoted speed patch_context

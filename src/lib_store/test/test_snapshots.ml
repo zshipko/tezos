@@ -455,7 +455,7 @@ let make_tests speed genesis_parameters =
                  ~keep_dir:false
                  ~history_mode
                  ~patch_context:(fun ctxt ->
-                   Alpha_utils.patch_context ~genesis_parameters ctxt)
+                   Alpha_utils.default_patch_context ctxt)
                  ( test_descr,
                    fun store_path store ->
                      test
@@ -467,10 +467,8 @@ let make_tests speed genesis_parameters =
                        store )) ))
     permutations
 
-let test_rolling genesis_parameters =
-  let patch_context ctxt =
-    Alpha_utils.patch_context ~genesis_parameters ctxt
-  in
+let test_rolling () =
+  let patch_context ctxt = Alpha_utils.default_patch_context ctxt in
   let test (store_dir, context_dir) store =
     let chain_store = Store.main_chain_store store in
     Store.Chain.genesis_block chain_store
@@ -549,7 +547,7 @@ let test_rolling genesis_parameters =
     ( Format.asprintf
         "genesis consistency after rolling import (blocks per cycle = %ld)"
         Tezos_protocol_alpha.Protocol.(
-          genesis_parameters.Parameters_repr.constants
+          Alpha_utils.default_genesis_parameters.Parameters_repr.constants
             .Constants_repr.blocks_per_cycle),
       test )
 
@@ -566,14 +564,6 @@ let tests speed =
         Tezos_protocol_alpha_parameters.Default_parameters.(
           parameters_of_constants constants_sandbox)
     in
-    let rolling_tests =
-      [ test_rolling
-          Tezos_protocol_alpha_parameters.Default_parameters.(
-            parameters_of_constants constants_sandbox);
-        test_rolling
-          Tezos_protocol_alpha_parameters.Default_parameters.(
-            parameters_of_constants constants_test) ]
-    in
-    generated_tests @ rolling_tests
+    test_rolling () :: generated_tests
   in
   ("snapshots", test_cases)

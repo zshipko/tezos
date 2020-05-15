@@ -63,6 +63,17 @@ module Account = struct
     sk : Signature.Secret_key.t;
   }
 
+  let pp fmt {pkh; pk; sk} =
+    Format.fprintf
+      fmt
+      "pkh: %a@ pk: %a@ nsk: %a"
+      Signature.Public_key_hash.pp
+      pkh
+      Signature.Public_key.pp
+      pk
+      Signature.Secret_key.pp
+      sk
+
   type account = t
 
   let known_accounts = Signature.Public_key_hash.Table.create 17
@@ -74,7 +85,7 @@ module Account = struct
     account
 
   let add_account ({pkh; _} as account) =
-    Signature.Public_key_hash.Table.add known_accounts pkh account
+    Signature.Public_key_hash.Table.replace known_accounts pkh account
 
   let activator_account = new_account ()
 
@@ -336,40 +347,63 @@ let check_constants_consistency constants =
          blocks per roll snapshot")
   >>=? return
 
-let default_genesis_parameters =
-  let open Tezos_protocol_alpha_parameters in
-  Default_parameters.(parameters_of_constants constants_sandbox)
-
 let default_accounts =
-  let n = 5 in
-  let open Account in
-  let default_amount = Tez_repr.of_mutez_exn 4_000_000_000_000L in
-  List.map
-    (fun _ ->
-      let (pkh, pk, sk) = Signature.generate_key () in
-      let account = {pkh; pk; sk} in
-      Signature.Public_key_hash.Table.add known_accounts pkh account ;
-      (account, default_amount))
-    (1 -- n)
-
-let patch_context ?(genesis_parameters = default_genesis_parameters) ctxt =
-  let shell =
-    Forge.make_shell
-      ~level:0l
-      ~predecessor:Test_utils.genesis.Genesis.block
-      ~timestamp:Test_utils.genesis.Genesis.time
-      ~fitness:(Fitness_repr.from_int64 0L)
-      ~operations_hash:Operation_list_list_hash.zero
+  let initial_accounts =
+    [ ( "tz1Wi61aZXxBDTa3brfPfYgMawojnAFTjy8u",
+        "edpkvMmiFiAs9Uj9a53dZVPGNJDxMDkAcsEAyVG6dau7GF9vfGWGEY",
+        "edsk3UqeiQWXX7NFEY1wUs6J1t2ez5aQ3hEWdqX5Jr5edZiGLW8nZr" );
+      ( "tz1Y5JfsJXF4ip1RUQHCgaMbqHAzMDWaiJFf",
+        "edpktnweMhc2suERAJVCLQwfbJovHsdMKeHC7GqaGQXhvX7SpDRtTc",
+        "edsk4Z5G4QFmVc4iHbpyp35E6272gWhTvDeerpivH78oUX1LVKZTGb" );
+      ( "tz1dcv5NSS2Fbs2dW9pRDhi6KJTBAXqiJKBP",
+        "edpkv7dXhM2emnJouMb1phgvGW6fMGHjJjmo1ntyjkqGxARbdgk4T6",
+        "edsk2hP48izVsHsXtqguwiNt5wq1qXdwLyxFQC8Qc72KuyKS9q88XS" );
+      ( "tz1YEjis1GFsL1rKSyLtmSKQypVp1sniosVt",
+        "edpkvYDUiKiMnCNSG4riBy2WSLaLEyAo763KhPFXtuBw2PMPzvTY93",
+        "edsk3Dn8hFgHKxvjK89tMnU2fCrR6AxSprTM8cR9WaBZcysEa2uird" );
+      ( "tz1c7arDAi3tDzAXEmYHprwuNsJiFBQJKtjc",
+        "edpku6BBVDhWUBCrcVEYjjAdizR1NQGF24v5bAEL34A71oLr9QqzNo",
+        "edsk2q6rzFB35micz8ZauYcUMUFyF9rVPvP3PQXZyuYPSzuEYbSMkG" ) ]
   in
-  let open Tezos_protocol_alpha_parameters in
-  let genesis_parameters =
+  let default_amount = Tez_repr.of_mutez_exn 4_000_000_000_000L in
+  let open Account in
+  let to_account (pkh, pk, sk) =
     {
-      genesis_parameters with
-      bootstrap_accounts =
-        List.map Account.account_to_bootstrap default_accounts;
+      pkh = Signature.Public_key_hash.of_b58check_exn pkh;
+      pk = Signature.Public_key.of_b58check_exn pk;
+      sk = Signature.Secret_key.of_b58check_exn sk;
     }
   in
-  let json = Default_parameters.json_of_parameters genesis_parameters in
+  let accounts = List.map to_account initial_accounts in
+  List.iter Account.add_account accounts ;
+  List.map
+    (fun acc -> Account.account_to_bootstrap (acc, default_amount))
+    accounts
+
+let default_genesis_parameters =
+  let open Tezos_protocol_alpha_parameters in
+  {
+    Default_parameters.(parameters_of_constants constants_sandbox) with
+    bootstrap_accounts = default_accounts;
+  }
+
+let default_patch_context ctxt =
+  let shell =
+    {
+      Tezos_base.Block_header.level = 0l;
+      proto_level = 0;
+      predecessor = Test_utils.genesis.block;
+      timestamp = Test_utils.genesis.time;
+      validation_passes = 0;
+      operations_hash = Operation_list_list_hash.empty;
+      fitness = [];
+      context = Context_hash.zero;
+    }
+  in
+  let open Tezos_protocol_alpha_parameters in
+  let json =
+    Default_parameters.json_of_parameters default_genesis_parameters
+  in
   let proto_params =
     Data_encoding.Binary.to_bytes_exn Data_encoding.json json
   in

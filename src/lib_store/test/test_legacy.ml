@@ -25,6 +25,7 @@
 (*****************************************************************************)
 
 open Test_utils
+open Legacy_utils
 
 (* From "legacy chain_validator"*)
 let may_update_checkpoint chain_state new_head =
@@ -64,44 +65,6 @@ let may_update_checkpoint chain_state new_head =
                   chain_state
                   new_checkpoint ) )
 
-let copy_to_legacy previously_baked_blocks old_state current_store =
-  Error_monad.iter_s
-    (fun b ->
-      let header = Store.Block.header b in
-      let legacy_block =
-        ( {chain_state = old_state; hash = Store.Block.hash b; header}
-          : Legacy_state.Block.t )
-      in
-      Store.Block.get_block_metadata current_store b
-      >>=? fun m ->
-      let block_header_metadata = Store.Block.block_metadata m in
-      let operations = Store.Block.operations b in
-      let operations_metadata = Store.Block.operations_metadata m in
-      let validation_store =
-        ( Store.Block.
-            {
-              context_hash = context_hash b;
-              message = message m;
-              max_operations_ttl = max_operations_ttl m;
-              last_allowed_fork_level = last_allowed_fork_level m;
-            }
-          : Tezos_validation.Block_validation.validation_store )
-      in
-      (* Context checks are ignored *)
-      Legacy_state.Block.store
-        old_state
-        header
-        block_header_metadata
-        operations
-        operations_metadata
-        validation_store
-        ~forking_testchain:false
-      >>=? fun _block ->
-      Legacy_chain.set_head old_state legacy_block
-      >>=? fun _prev_head ->
-      may_update_checkpoint old_state legacy_block >>=? fun () -> return_unit)
-    previously_baked_blocks
-
 let assert_presence new_chain_store previously_baked_blocks ?savepoint ?caboose
     = function
   | History_mode.Archive ->
@@ -132,12 +95,12 @@ let assert_presence new_chain_store previously_baked_blocks ?savepoint ?caboose
       >>=? fun () ->
       assert_presence_in_store ~with_metadata:true new_chain_store complete
 
-let check_flags new_chain_store descr previously_baked_blocks last history_mode
-    =
+let check_flags new_chain_store previously_baked_blocks history_mode =
+  let last = List.last_exn previously_baked_blocks in
   match history_mode with
   | History_mode.Archive ->
       Assert.equal_history_mode
-        ~msg:("history mode consistency: " ^ descr)
+        ~msg:"history mode consistency: "
         history_mode
         (Store.Chain.history_mode new_chain_store) ;
       Store.Chain.checkpoint new_chain_store
@@ -147,27 +110,27 @@ let check_flags new_chain_store descr previously_baked_blocks last history_mode
       let expected_checkpoint = Store.Block.last_allowed_fork_level metadata in
       Assert.equal
         ~prn:(Format.sprintf "%ld")
-        ~msg:("checkpoint consistency: " ^ descr)
+        ~msg:"checkpoint consistency: "
         expected_checkpoint
         (snd checkpoint) ;
       Store.Chain.savepoint new_chain_store
       >>= fun savepoint ->
       Assert.equal
         ~prn:(Format.sprintf "%ld")
-        ~msg:("savepoint consistency: " ^ descr)
+        ~msg:"savepoint consistency: "
         0l
         (snd savepoint) ;
       Store.Chain.caboose new_chain_store
       >>= fun caboose ->
       Assert.equal
         ~prn:(Format.sprintf "%ld")
-        ~msg:("caboose consistency: " ^ descr)
+        ~msg:"caboose consistency: "
         (snd savepoint)
         (snd caboose) ;
       assert_presence new_chain_store previously_baked_blocks history_mode
   | Full _ ->
       Assert.equal_history_mode
-        ~msg:("history mode consistency: " ^ descr)
+        ~msg:"history mode consistency: "
         history_mode
         (Store.Chain.history_mode new_chain_store) ;
       Store.Chain.checkpoint new_chain_store
@@ -177,21 +140,21 @@ let check_flags new_chain_store descr previously_baked_blocks last history_mode
       let expected_checkpoint = Store.Block.last_allowed_fork_level metadata in
       Assert.equal
         ~prn:(Format.sprintf "%ld")
-        ~msg:("checkpoint consistency: " ^ descr)
+        ~msg:"checkpoint consistency: "
         expected_checkpoint
         (snd checkpoint) ;
       Store.Chain.savepoint new_chain_store
       >>= fun savepoint ->
       Assert.equal
         ~prn:(Format.sprintf "%ld")
-        ~msg:("savepoint consistency: " ^ descr)
+        ~msg:"savepoint consistency: "
         expected_checkpoint
         (snd savepoint) ;
       Store.Chain.caboose new_chain_store
       >>= fun caboose ->
       Assert.equal
         ~prn:(Format.sprintf "%ld")
-        ~msg:("caboose consistency: " ^ descr)
+        ~msg:"caboose consistency: "
         0l
         (snd caboose) ;
       assert_presence
@@ -201,7 +164,7 @@ let check_flags new_chain_store descr previously_baked_blocks last history_mode
         history_mode
   | Rolling _ ->
       Assert.equal_history_mode
-        ~msg:("history mode consistency: " ^ descr)
+        ~msg:"history mode consistency: "
         history_mode
         (Store.Chain.history_mode new_chain_store) ;
       Store.Chain.checkpoint new_chain_store
@@ -211,14 +174,14 @@ let check_flags new_chain_store descr previously_baked_blocks last history_mode
       let expected_checkpoint = Store.Block.last_allowed_fork_level metadata in
       Assert.equal
         ~prn:(Format.sprintf "%ld")
-        ~msg:("checkpoint consistency: " ^ descr)
+        ~msg:"checkpoint consistency: "
         expected_checkpoint
         (snd checkpoint) ;
       Store.Chain.savepoint new_chain_store
       >>= fun savepoint ->
       Assert.equal
         ~prn:(Format.sprintf "%ld")
-        ~msg:("savepoint consistency: " ^ descr)
+        ~msg:"savepoint consistency: "
         expected_checkpoint
         (snd savepoint) ;
       Store.Chain.caboose new_chain_store
@@ -234,7 +197,7 @@ let check_flags new_chain_store descr previously_baked_blocks last history_mode
       in
       Assert.equal
         ~prn:(Format.sprintf "%ld")
-        ~msg:("caboose consistency: " ^ descr)
+        ~msg:"caboose consistency: "
         expected_caboose
         (snd caboose) ;
       assert_presence
@@ -244,131 +207,112 @@ let check_flags new_chain_store descr previously_baked_blocks last history_mode
         ~savepoint:expected_checkpoint
         history_mode
 
-let test descr base_dir baking_store legacy_state ~nb_blocks_to_bake
-    patch_context history_mode =
-  let current_chain_store = Store.main_chain_store baking_store in
-  Store.Chain.genesis_block current_chain_store
-  >>= fun genesis_block ->
-  Alpha_utils.bake_n current_chain_store nb_blocks_to_bake genesis_block
-  >>=? fun (previously_baked_blocks, last) ->
-  let chain_id = Store.Chain.chain_id (Store.main_chain_store baking_store) in
-  Legacy_state.Chain.get legacy_state chain_id
-  >>=? fun global_state ->
-  Legacy_state.Chain.store global_state
-  >>= fun old_store ->
-  copy_to_legacy previously_baked_blocks global_state current_chain_store
-  >>=? fun () ->
-  Legacy_chain.head global_state
-  >>= fun head ->
-  let lmdb_chain_store = Legacy_store.Chain.get old_store chain_id in
-  let lmdb_chain_data = Legacy_store.Chain_data.get lmdb_chain_store in
-  Legacy_store.Chain_data.Current_head.store lmdb_chain_data head.hash
+let test store (legacy_dir, (legacy_state : Legacy_state.t)) blocks =
+  let patch_context ctxt = Alpha_utils.default_patch_context ctxt in
+  let chain_store = Store.main_chain_store store in
+  let genesis = Store.Chain.genesis chain_store in
+  Lwt_utils_unix.create_dir legacy_dir
   >>= fun () ->
   let chain_name = Distributed_db_version.Name.of_string "TEZOS" in
-  let store_dir = base_dir // "upgraded_store" in
-  let context_dir = base_dir // "context" in
+  Legacy_state.Chain.get_exn legacy_state (Store.Chain.chain_id chain_store)
+  >>= fun legacy_chain ->
+  Lwt_list.map_p
+    (fun block ->
+      let hash = Store.Block.hash block in
+      Legacy_state.Block.known legacy_chain hash
+      >>= fun known -> Lwt.return (hash, known))
+    blocks
+  >>= fun present_blocks_in_legacy ->
+  Legacy.upgrade_0_0_4 ~data_dir:legacy_dir ~patch_context ~chain_name genesis
+  >>=? fun _upgrade_message ->
+  let history_mode = Store.Chain.history_mode chain_store in
   Store.init
     ~patch_context
     ~history_mode
-    ~store_dir
-    ~context_dir
-    ~allow_testchains:false
+    ~readonly:false
+    ~store_dir:(legacy_dir // "store")
+    ~context_dir:(legacy_dir // "context")
+    ~allow_testchains:true
     genesis
-  >>=? fun new_store ->
+  >>=? fun upgraded_store ->
   Lwt.finalize
     (fun () ->
-      Error_monad.protect
-        (fun () ->
-          Legacy.raw_upgrade
-            chain_name
-            ~new_store
-            ~old_store
-            history_mode
-            genesis
-          >>=? fun () -> return_false)
-        ~on_error:(function
-          | [Legacy.Failed_to_upgrade s] when s = "Nothing to do" ->
-              return_true
-          | err ->
-              Format.printf
-                "@\nTest failed:@\n%a@."
-                Error_monad.pp_print_error
-                err ;
-              Alcotest.fail "Should not fail")
-      >>=? fun expected_to_fail ->
-      if expected_to_fail then return_unit
-      else
-        Store.get_chain_store new_store chain_id
-        >>=? fun new_chain_store ->
-        check_flags
-          new_chain_store
-          descr
-          previously_baked_blocks
-          last
-          history_mode
-        >>=? fun () -> return_unit)
-    (fun () -> Store.close_store new_store)
+      let upgraded_chain_store = Store.main_chain_store upgraded_store in
+      Lwt_list.iter_s
+        (fun (hash, is_known) ->
+          Store.Block.is_known upgraded_chain_store hash
+          >>= fun is_known' ->
+          Assert.equal
+            ~msg:
+              (Format.asprintf
+                 "check %a existence after upgrade"
+                 Block_hash.pp
+                 hash)
+            is_known
+            is_known' ;
+          Lwt.return_unit)
+        present_blocks_in_legacy
+      >>= fun () ->
+      check_flags upgraded_chain_store blocks history_mode
+      >>=? fun () ->
+      Test_utils.check_invariants upgraded_chain_store
+      >>= fun () ->
+      (* Try baking a bit after upgrading... *)
+      Store.Chain.current_head upgraded_chain_store
+      >>= fun head ->
+      Alpha_utils.bake_until_n_cycle_end upgraded_chain_store 10 head
+      >>=? fun _ -> return_unit)
+    (fun () -> Store.close_store upgraded_store)
 
-let make_tests speed genesis_parameters =
+let make_test_cases speed : string Alcotest_lwt.test_case list =
   let history_modes =
-    match speed with
-    | `Slow ->
-        History_mode.
-          [ (* (Target, source) *)
-            (Archive, Legacy.Archive);
-            (Full {offset = 0}, Legacy.Full);
-            (Full {offset = default_offset}, Legacy.Full);
-            (Rolling {offset = 0}, Legacy.Rolling);
-            (Rolling {offset = default_offset}, Legacy.Rolling) ]
-    | `Quick ->
-        History_mode.
-          [ (* (Target, source) *)
-            (Archive, Legacy.Archive);
-            (Full {offset = 0}, Legacy.Full);
-            (Rolling {offset = 0}, Legacy.Rolling) ]
+    History_mode.[Legacy.Archive; Legacy.Full; Legacy.Rolling]
   in
   let nb_blocks_to_bake =
-    match speed with
-    | `Slow ->
-        0 -- 100
-    | `Quick ->
-        [0; 3; 8; 21; 42; 57; 89; 92; 101]
+    match speed with `Slow -> 0 -- 100 | `Quick -> [8; 57; 89; 101]
   in
   let permutations = List.(product nb_blocks_to_bake history_modes) in
-  let patch_context ctxt =
-    Alpha_utils.patch_context ~genesis_parameters ctxt
-  in
   List.map
-    (fun (nb_blocks_to_bake, (history_mode, legacy_history_mode)) ->
-      let descr =
+    (fun (nb_blocks_to_bake, legacy_history_mode) ->
+      let name =
         Format.asprintf
-          "Legacy upgrade on a bootstrapped %a node with %d blocks."
-          History_mode.pp
-          history_mode
+          "Upgrade legacy %a with %d blocks"
+          History_mode.Legacy.pp
+          legacy_history_mode
           nb_blocks_to_bake
       in
-      wrap_test_legacy
-        ~keep_dir:true
-        ~history_mode
-        ~legacy_history_mode
-        ~patch_context
-        ( descr,
-          fun base_dir current_store legacy_store ->
-            test
-              descr
-              base_dir
-              current_store
-              legacy_store
-              ~nb_blocks_to_bake
-              patch_context
-              history_mode ))
+      let test =
+        {
+          name;
+          speed;
+          legacy_history_mode;
+          nb_blocks = `Blocks nb_blocks_to_bake;
+          test;
+        }
+      in
+      wrap_test_legacy ~keep_dir:true test)
     permutations
 
-let tests speed =
-  let test_cases =
-    make_tests
-      speed
-      Tezos_protocol_alpha_parameters.Default_parameters.(
-        parameters_of_constants constants_sandbox)
+let tests : string Alcotest_lwt.test list =
+  let speed =
+    try
+      let s = Sys.getenv "SLOW_TEST" in
+      match String.(trim (uncapitalize_ascii s)) with
+      | "true" | "1" | "yes" ->
+          `Slow
+      | _ ->
+          `Quick
+    with Not_found -> `Quick
   in
-  ("legacy", test_cases)
+  let cases = make_test_cases speed in
+  [("legacy store upgrade", cases)]
+
+let () =
+  let open Cmdliner in
+  let arg =
+    Arg.(
+      required
+      & opt (some string) None
+      & info ~docv:"[LEGACY_STORE_BUILDER_PATH]" ["builder-path"])
+  in
+  Lwt_main.run (Alcotest_lwt.run_with_args "tezos-store-legacy" arg tests)
