@@ -31,6 +31,9 @@ type block_descriptor = Block_hash.t * int32
 (** Encoding for {block_descriptor}. *)
 val block_descriptor_encoding : (Block_hash.t * int32) Data_encoding.t
 
+(** Pretty-printer for [block_descriptor] *)
+val pp_block_descriptor : Format.formatter -> block_descriptor -> unit
+
 (** The type used to store an invalid block's value. We only retain
     the level and the errors encountered during validation.
     These values should be indexed by the block's hash. *)

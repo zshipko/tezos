@@ -29,6 +29,9 @@ let block_descriptor_encoding =
   let open Data_encoding in
   tup2 Block_hash.encoding int32
 
+let pp_block_descriptor fmt (hash, level) =
+  Format.fprintf fmt "%a (level: %ld)" Block_hash.pp hash level
+
 type invalid_block = {level : int32; errors : Error_monad.error list}
 
 let invalid_block_encoding =

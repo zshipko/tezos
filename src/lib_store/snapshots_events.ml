@@ -24,9 +24,12 @@
 (*                                                                           *)
 (*****************************************************************************)
 
+open Store_types
+
+(* FIXME most of these are never used *)
 type status =
-  | Export_unspecified_hash of Block_hash.t
-  | Export_info of History_mode.t * Store_types.block_descriptor
+  | Export_unspecified_hash of block_descriptor
+  | Export_info of History_mode.t * block_descriptor
   | Export_success of string
   | Set_history_mode of History_mode.t
   | Import_info of (string * Snapshot_version.metadata option)
@@ -37,18 +40,18 @@ type status =
   | Validate_protocol_sources of Protocol_hash.t
 
 let status_pp ppf = function
-  | Export_unspecified_hash h ->
+  | Export_unspecified_hash block_descr ->
       Format.fprintf
         ppf
         "There is no block hash specified with the `--block` option. Using %a \
-         (last savepoint)"
-        Block_hash.pp
-        h
+         (last savepoint) as the default value"
+        pp_block_descriptor
+        block_descr
   | Export_info (hm, (h, l)) ->
       Format.fprintf
         ppf
         "Exporting a snapshot in %a mode, targeting block hash %a at level %a"
-        History_mode.pp
+        History_mode.pp_short
         hm
         Block_hash.pp
         h
@@ -61,7 +64,7 @@ let status_pp ppf = function
   | Import_info (filename, metadata) ->
       Format.fprintf
         ppf
-        "Importing from snapshot %s%a."
+        "Importing data from snapshot %s%a."
         filename
         (Option.pp ~default:"." (fun fmt metadata ->
              Format.fprintf fmt ": %a" Snapshot_version.metadata_pp metadata))
@@ -69,7 +72,7 @@ let status_pp ppf = function
   | Import_unspecified_hash ->
       Format.fprintf
         ppf
-        "You may consider using the --block <block_hash> argument to verify \
+        "You may consider using the --block <block_hash> argument to ensure \
          that the block imported is the one you expected"
   | Import_loading ->
       Format.fprintf
@@ -99,9 +102,10 @@ module Definition = struct
          [ case
              (Tag 0)
              ~title:"Export_unspecified_hash"
-             Block_hash.encoding
-             (function Export_unspecified_hash h -> Some h | _ -> None)
-             (fun h -> Export_unspecified_hash h);
+             block_descriptor_encoding
+             (function
+               | Export_unspecified_hash descr -> Some descr | _ -> None)
+             (fun descr -> Export_unspecified_hash descr);
            case
              (Tag 1)
              ~title:"Export_info"
