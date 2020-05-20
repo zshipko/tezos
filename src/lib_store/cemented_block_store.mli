@@ -27,10 +27,10 @@
 
     The cemented block store is a store where blocks are stored
     linearly (by level) in chunks. Blocks in this store should not be
-    reorganized anymore and are thus *cemented*. As these blocks should
-    not be accessed regularly and especially their metadata (if
-    present), the later are compressed using a zip format to save disk
-    space. For each chunk of blocks, a dedicated file is
+    reorganized anymore and are thus *cemented*. As these blocks
+    should not be accessed regularly and especially their optionally
+    stored metadata, the later are compressed using a zip format to
+    save disk space. For each chunk of blocks, a dedicated file is
     used. Moreover, to enable easy access and to prevent too much
     on-disk reading, two indexed maps are used to retrieve blocks hash
     from their level and their level from the block hash.
@@ -44,53 +44,56 @@
     This store is expected to respect the following invariants:
 
     - A key/value present in an index is present as well in the other
-    as value/key.
+      as value/key.
 
     - Every block stored is correctly indexed.
 
-    - A cemented chunk of blocks that is represented by the interval [
-   i ; j ] (with i <= j) contains | j - i + 1 | blocks and are ordered
-   from i to j in the file.
+    - A cemented chunk of blocks that is represented by the interval
+      [ i ; j ] (with i <= j) contains | j - i + 1 | blocks and are
+      ordered from i to j in the file.
 
     - The set F of cemented chunks is always ordered by block level.
 
     - The cemented store does not contain holes: let F be the cemented
-   chunks, if |F| > 1 then:
+      chunks, if |F| > 1 then:
 
+{v
       ∀f_x=(i,j) ∈ F ∧ x < |F|, ∃f_y =(i', j'), x = y - 1 ∧ j + 1 = j'
+v}
 
       meaning the concatenation of every chunk must be continuous.
 
     - A metadata zip file is indexed by the same interval as the
-   chunks and, when it is the lowest chunk of metadata stored, is not
-   assured to contain every block's metadata of the chunk.
+      chunks and, when it is the lowest chunk of metadata stored, is
+      not assured to contain every block's metadata of the chunk.
 
     {1 Files format}
 
     The cemented block store is composed of the following files:
 
-    - file : /<i_j>, a chunk of blocks from level i to level j. The
-   format of this file is:
+    - file: /<i_j>, a chunk of blocks from level i to level j. The
+      format of this file is:
 
     | <n> × <offset> | <n> × <block> |
 
-    where n is ( j- i + 1), <offset> is 4 bytes integer representing
-   the absolute offset of the k-th (with 0 <= k <= n) block in the
-   file and with <block>, a {!Block_repr.t} value encoded using
-   {!Block_repr.encoding} (thus prefixed by the its size).
+    where n is (j - i + 1), <offset> is a 4 bytes integer
+    representing the absolute offset of the k-th (with 0 <= k <= n)
+    block in the file and with <block>, a {!Block_repr.t} value
+    encoded using {!Block_repr.encoding} (thus prefixed by the its
+    size).
 
-    - dir : /<cemented_block_index_level>, the Hash -> Level key/value
-   index ;
+    - dir: /<cemented_block_index_level>, the Hash -> Level key/value
+      index ;
 
-    - dir : /<cemented_block_index_hash>, the Level -> Hash key/value
-   index.
+    - dir: /<cemented_block_index_hash>, the Level -> Hash key/value
+      index.
 
-    - dir : /metadata, the directory containing chunks of compressed
-   metadata (present if relevent).
+    - dir: /metadata, the directory containing chunks of compressed
+      metadata (present if relevant).
 
-    - files : /metadata/<i_j>.zip, the compressed metadata: where
-   every chunk of block's metadata is indexed by their level encoded
-   as string (present if relevent).  *)
+    - files: /metadata/<i_j>.zip, the compressed metadata where every
+      chunk of block's metadata is indexed by their level encoded as
+      string (present if relevant). *)
 
 (** On-disk index of block's hash to level. *)
 module Cemented_block_level_index :
@@ -110,15 +113,15 @@ type cemented_blocks_file = {
   filename : string;
 }
 
-(** [init ~cemented_blocks_dir ~readonly] create or load an existing
+(** [init ~cemented_blocks_dir ~readonly] creates or loads an existing
     cemented block store at path
     [cemented_blocks_dir]. [cemented_blocks_dir] will be created if it
-    does not exists. If [readonly] is true, cementing blocks
-    will result in an error. *)
+    does not exists. If [readonly] is true, cementing blocks will
+    result in an error. *)
 val init : cemented_blocks_dir:string -> readonly:bool -> t tzresult Lwt.t
 
 (** [close cemented_store] closes the [cemented_store] opened files:
-   its indexes. *)
+    its indexes. *)
 val close : t -> unit
 
 (** [cemented_blocks_dir cemented_store] returns the path of the
@@ -137,68 +140,71 @@ val cemented_block_level_index : t -> Cemented_block_level_index.t
     index. *)
 val cemented_block_hash_index : t -> Cemented_block_hash_index.t
 
-(** [load_table ~cemented_blocks_dir] read the [cemented_blocks_dir]
+(** [load_table ~cemented_blocks_dir] reads the [cemented_blocks_dir]
     directory and instantiate the cemented blocks chunks files. *)
 val load_table :
   cemented_blocks_dir:string -> cemented_blocks_file array tzresult Lwt.t
 
 (** [find_block_file cemented_store block_level] lookup the
-    [cemented_store] to find the cemented block chunk file that include
-    the block at level [block_level]. *)
+    [cemented_store] to find the cemented block chunk file that
+    contains the block at level [block_level]. *)
 val find_block_file : t -> int32 -> cemented_blocks_file option
 
-(** [is_cemented cemented_store block_hash] check if the [block_hash]
+(** [is_cemented cemented_store block_hash] checks if the [block_hash]
     is stored in the [cemented_store]. *)
 val is_cemented : t -> Block_hash.t -> bool
 
 (** [get_cemented_block_level cemented_store block_hash] returns the
     level of the [block_hash] if present in [cemented_store]. Returns
-    None otherwise. *)
+    [None] otherwise. *)
 val get_cemented_block_level : t -> Block_hash.t -> int32 option
 
 (** [get_cemented_block_hash cemented_store block_level] returns the
     hash of the block at [block_level] if present in
-    [cemented_store]. Returns None otherwise. *)
+    [cemented_store]. Returns [None] otherwise. *)
 val get_cemented_block_hash : t -> int32 -> Block_hash.t option
 
-(** [get_cemented_block_hash cemented_store block_level] returns the
-    hash of the block at [block_level] if present in
-    [cemented_store]. Returns None otherwise. *)
+(** [read_block_metadata cemented_store block_level] returns the
+    metadata of the block at [block_level] if present in
+    [cemented_store]. Returns [None] otherwise. *)
 val read_block_metadata : t -> int32 -> Block_repr.metadata option
 
-(** [cement_blocks_metadata cemented_store chunk] compress and store
-    the metadata of blocks present in [chunk] present. If no blocks of
-    the given [chunk] contains metadata, nothing is done otherwise, for
-    every block containing metadata, an entry is written in the .zip
-    metadata file.
+(** [cement_blocks_metadata cemented_store chunk] compresses and
+    stores the metadata of blocks present in [chunk]. If no block of
+    the given [chunk] contains metadata, nothing is done. Otherwise,
+    for every block containing metadata, an entry is written in the
+    dedicated .zip metadata file.
 
     Hypothesis: the blocks containing metadata are contiguous and if
-    at least a block has metadata then the last block of [chunk] must
-    have metadata. *)
+    at least one block has metadata, then the blocks from that block
+    with metadata to the last block of [chunk] must have metadata.*)
 val cement_blocks_metadata : t -> Block_repr.t list -> unit tzresult Lwt.t
 
 (** [get_lowest_cemented_level cemented_store] returns the lowest
-    cemented block in [cemented_store] if it exists. *)
+    cemented block in [cemented_store], if it exists.*)
 val get_lowest_cemented_level : t -> int32 option
 
 (** [get_highest_cemented_level cemented_store] returns the highest
     cemented block in [cemented_store] if it exists. *)
 val get_highest_cemented_level : t -> int32 option
 
-(** [get_highest_cemented_by_level cemented_store level] reads the
-    cemented block at [level] in [cemented_store] if it exists. *)
+(** [get_cemented_block_by_level cemented_store ~read_metadata level]
+    reads the cemented block at [level] in [cemented_store], if it
+    exists. It also retrieves the metadata depending on
+    [read_metadata]. *)
 val get_cemented_block_by_level :
   t -> read_metadata:bool -> int32 -> Block_repr.block option Lwt.t
 
-(** [get_highest_cemented_by_hash cemented_store hash] reads the
-    cemented block of [hash] in [cemented_store] if it exists. *)
+(** [get_cemented_block_by_hash cemented_store hash] reads the cemented
+    block of [hash] in [cemented_store], if it exists. It also
+    retrieves the metadata depending on [read_metadata]. *)
 val get_cemented_block_by_hash :
   read_metadata:bool -> t -> Block_hash.t -> Block_repr.block option Lwt.t
 
-(** [cemented_blocks cemented_store ~write_metadata chunk] store the
-    [chunk] of blocks and write their metadata if the flag
-    [write_metadata] is set. [check_consistency] (default is true) check
-    the blocks in [chunk] are contiguous.  *)
+(** [cemented_blocks ?check_consistency cemented_store ~write_metadata
+    chunk] stores the [chunk] of blocks and write their metadata if
+    the flag [write_metadata] is set. [check_consistency] (default is
+    true) ensures that the blocks in the given [chunk] are contiguous. *)
 val cement_blocks :
   ?check_consistency:bool ->
   t ->
@@ -206,21 +212,21 @@ val cement_blocks :
   Block_repr.t list ->
   unit tzresult Lwt.t
 
-(** [trigger_gc cemented_store history_mode] garbage collect metadata
-   chunks and/or chunks from [cemented_store] depending on the
+(** [trigger_gc cemented_store history_mode] garbage collects metadata
+   chunks and/or chunks from the [cemented_store] depending on the
    {!History_mode.t}:
 
     - in [Archive] mode, nothing is done;
 
     - in [Full offset] mode, only [offset] chunks of {b metadata} are
-   kept;
+      kept;
 
-    - in [Rolling offset] mode, only [offset] chunks of {b metadata and chunks}
-    are kept.
+    - in [Rolling offset] mode, only [offset] chunks of {b metadata
+      and chunks} are kept.
 
-    {b Important:} when purging chunks of blocks, it is necessary to
-    rewrite the index to remove garbage collected blocks. Therefore,
-    the higher the offset, the longest the GC phase will be. *)
+      {b Important:} when purging chunks of blocks, it is necessary to
+      rewrite the index to remove garbage collected blocks. Therefore,
+      the higher the offset is, the longest the GC phase will last. *)
 val trigger_gc : t -> History_mode.t -> unit Lwt.t
 
 (** [iter_cemented_file ~cemented_block_dir f block_file] reads from
@@ -233,11 +239,12 @@ val iter_cemented_file :
   unit Lwt.t
 
 (** [check_indexes_consistency ?post_step ?genesis_hash cemented_store
-    history_mode] iterate over a partially intialized [cemented_store]
-    that contains chunks of blocks and both the index and check the
-    consistency of each block : (hashes, predecessors, levels). The
-    hash is not checked for [genesis_hash] and [post_step] is called
-    after each chunk treated.  This is used for snapshots import.  *)
+    history_mode] iterates over a partially initialized
+    [cemented_store] that contains both chunks of blocks and indexes
+    then check the consistency of each block: (hashes, predecessors and
+    levels). The hash is not checked for [genesis_hash] and
+    [post_step] is called after each treated chunk. This is used for
+    snapshot imports. *)
 val check_indexes_consistency :
   ?post_step:(unit -> unit Lwt.t) ->
   ?genesis_hash:Block_hash.t ->

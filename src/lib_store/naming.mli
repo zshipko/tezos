@@ -90,6 +90,9 @@ val cemented_block_level_index_directory : string
 (** Cemented blocks hash index directory name. *)
 val cemented_block_hash_index_directory : string
 
+(** Cemented block file name based on [start_level] and [end_level]. *)
+val cemented_block_filename : start_level:int32 -> end_level:int32 -> string
+
 (** Testchain directory name. *)
 val testchain_dir : string
 

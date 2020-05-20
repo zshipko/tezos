@@ -66,6 +66,9 @@ let cemented_block_level_index_directory = "level_index"
 
 let cemented_block_hash_index_directory = "hash_index"
 
+let cemented_block_filename ~start_level ~end_level =
+  Format.sprintf "%ld_%ld" start_level end_level
+
 let testchain_dir = "testchains"
 
 type floating_kind = RO | RW | RW_TMP | RO_TMP
