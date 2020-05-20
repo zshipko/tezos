@@ -138,7 +138,7 @@ val cemented_block_level_index : t -> Cemented_block_level_index.t
 val cemented_block_hash_index : t -> Cemented_block_hash_index.t
 
 (** [load_table ~cemented_blocks_dir] read the [cemented_blocks_dir]
-    directory and instanciate the cemented blocks chunks files. *)
+    directory and instantiate the cemented blocks chunks files. *)
 val load_table :
   cemented_blocks_dir:string -> cemented_blocks_file array tzresult Lwt.t
 

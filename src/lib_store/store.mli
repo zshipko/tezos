@@ -169,7 +169,7 @@ type chain_store
     (resp. [context_dir]) does not exists, a fresh store
     (resp. context) is created, else it loads the store from reading
     the directory. If [allow_testchains] is passed, the store will be
-    able to fork chains and instanciate testchain's sub chain stores.
+    able to fork chains and instantiate testchain's sub chain stores.
     The chain store created is based on the [genesis] provided. Its
     chain id will computed using the
     {!Tezos_crypto.Chain_id.of_block_hash} function.
@@ -705,7 +705,7 @@ module Chain : sig
   val set_checkpoint : chain_store -> block_descriptor -> unit tzresult Lwt.t
 
   (** [testchain chain_store] return the active testchain associated
-      to the given [chain_store] if it has been instanciated. *)
+      to the given [chain_store] if it has been instantiated. *)
   val testchain : chain_store -> testchain option Lwt.t
 
   (** [testchain_forked_block testchain] return the hash of the forked
@@ -766,7 +766,7 @@ module Chain : sig
     Block.block * Protocol_hash.t ->
     unit tzresult Lwt.t
 
-  (** [watcher chain_store] instanciate a new block watcher for [chain_store]. *)
+  (** [watcher chain_store] instantiate a new block watcher for [chain_store]. *)
   val watcher : chain_store -> Block.t Lwt_stream.t * Lwt_watcher.stopper
 
   (** [get_rpc_directory chain_store block] return the RPC directory
@@ -785,7 +785,7 @@ module Chain : sig
     unit Lwt.t
 end
 
-(** [global_block_watcher global_store] instanciate a new block
+(** [global_block_watcher global_store] instantiate a new block
     watcher for every chain store active in [global_store]. *)
 val global_block_watcher :
   store -> (Chain.chain_store * Block.block) Lwt_stream.t * Lwt_watcher.stopper
@@ -817,7 +817,7 @@ module Protocol : sig
   val store_raw :
     store -> Protocol_hash.t -> bytes -> Protocol_hash.t option Lwt.t
 
-  (** [protocol_watcher global_store] instanciate a new protocol
+  (** [protocol_watcher global_store] instantiate a new protocol
       watcher in [global_store]. *)
   val protocol_watcher :
     store -> Protocol_hash.t Lwt_stream.t * Lwt_watcher.stopper
