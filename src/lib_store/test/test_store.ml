@@ -73,7 +73,10 @@ let pp_print_list fmt l =
 
 let test_path chain_store tbl =
   let check_path h1 h2 p2 =
-    Store.Chain_traversal.path chain_store (vblock tbl h1) (vblock tbl h2)
+    Store.Chain_traversal.path
+      chain_store
+      ~from_block:(vblock tbl h1)
+      ~to_block:(vblock tbl h2)
     >>= function
     | None ->
         Assert.fail_msg "cannot compute path %s -> %s" h1 h2
