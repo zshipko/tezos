@@ -35,28 +35,28 @@ val block_descriptor_encoding : (Block_hash.t * int32) Data_encoding.t
 val pp_block_descriptor : Format.formatter -> block_descriptor -> unit
 
 (** The type used to store an invalid block's value. We only retain
-    the level and the errors encountered during validation.
-    These values should be indexed by the block's hash. *)
+    the level and the errors encountered during validation. These
+    values should be indexed by the block's hash. *)
 type invalid_block = {level : int32; errors : Error_monad.error list}
 
 (** Encoding for {!invalid_block}. *)
 val invalid_block_encoding : invalid_block Data_encoding.t
 
-(** Module [Protocol_levels] represents an association map of protocol
-   levels to corresponding blocks which supposedly activate new
-   protocols. *)
+(** Module [Protocol_levels] represents an associative map of protocol
+    levels to corresponding blocks which supposedly activate new
+    protocols. *)
 module Protocol_levels : sig
   include Map.S with type key = int
 
-  (** The type representing a subset of the commit informations. These
-      are used to easily check that a given [Context_hash.t],
-      with the associated context not present on disk, is consistent.
-      It is used to verify that an announced protocol is indeed the one
-      that was commited on disk. Fields are:
+  (** The type representing a subset of the commit information. These
+      are used to easily check that a given [Context_hash.t], with the
+      associated context not present on disk, is consistent.  It is
+      used to verify that an announced protocol is indeed the one that
+      was committed on disk. Fields are:
       - [author] is the commit's author;
       - [message] is the commit's message;
-      - [test_chain_status] is the status of the test chain at
-        commit time;
+      - [test_chain_status] is the status of the test chain at commit
+        time;
       - [data_merkle_root] is the merkle root of the context's data
         main node;
       - [parents_contexts] are the context hashes of this commit's
@@ -80,15 +80,15 @@ module Protocol_levels : sig
 
   (** The type for activation blocks.
 
-      {b WARNING.} Commit informations are optional to allow
+      {b WARNING.} Commit information are optional to allow
       retro-compatibility: the LMDB legacy store does not contain such
-      informations and thus populating the protocol levels' map while
-      upgrading would prevent us from storing an activation block which
-      is used to retrieve the [protocol] to load and therefore being
-      unable to decode stored blocks. In the future, when a sufficient
-      number of  nodes have fully migrated, we can stitch the missing
-      commit informations by hard-coding them and allowing use to remove
-      the option. *)
+      information. Thus, populating the protocol levels' map while
+      upgrading the storage would prevent us from storing an
+      activation block which is used to retrieve the [protocol] to
+      load, and therefore, being unable to decode stored blocks. In
+      the future, when a sufficient number of nodes have fully
+      migrated, we can stitch the missing commit information by
+      hard-coding them, allowing us to remove the option. *)
   type activation_block = {
     block : block_descriptor;
     protocol : Protocol_hash.t;
