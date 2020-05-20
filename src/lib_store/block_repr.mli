@@ -27,13 +27,14 @@
 
 (** {1 Type definitions and encodings} *)
 
-(** The type for the effective [contents] of a block is its header and the
-    [operations] it contains *)
+(** The type for the effective [contents] of a block is its header and
+    the [operations] it contains. *)
 type contents = {header : Block_header.t; operations : Operation.t list list}
 
-(** The type for a block's [metadata] stored on disk. This representation is
-    tightly linked to {!Tezos_validation.Block_validation.result} which
-    also has a strong dependency to
+(** The type for a block's [metadata] stored on disk. This
+    representation is tightly linked to
+    {!Tezos_validation.Block_validation.result} which also has a
+    strong dependency to
     {!Tezos_protocol_environment.validation_result}.
 
     Some fields exposed by {!Tezos_validation.Block_validation.result}
@@ -48,15 +49,14 @@ type metadata = {
 
 (** The type for a [block] stored on disk.
 
-    The [hash] of the block is
-    also stored to improve efficiency by not forcing the user to hash
-    the header.  This also allows to store fake hashes (e.g. sandbox's
-    genesis blocks) but should be prevented by the API.
+    The [hash] of the block is also stored to improve efficiency by
+    not forcing the user to hash the header. This also allows to store
+    fake hashes (e.g. sandbox's genesis blocks) but should be
+    prevented by the API.
 
     The [metadata] might not be present. The mutability flag allows
     users to re-use the same structure to store freshly loaded
-    metadata.
-*)
+    metadata. *)
 type block = {
   hash : Block_hash.t;
   contents : contents;
@@ -73,11 +73,10 @@ val metadata_encoding : metadata Data_encoding.t
 
 (** Encoding for {!t} (and {!block}).
 
-    {b Important} An encoded block is prefixed by 4 bytes of the
-    length of the data before the data. This is the case with
-    [Data_encoding.dynamic_size ~kind:`Uint30] encodings. This will
-    be expected to be present to improve the store efficiency.
-*)
+    {b Important} An encoded block is prefixed by 4 bytes which stands
+    for the length of the data. This is the case with
+    [Data_encoding.dynamic_size ~kind:`Uint30] encodings. This will be
+    expected to be present to improve the store efficiency. *)
 val encoding : t Data_encoding.t
 
 (** [pp_json] pretty-print a block as JSON. *)
@@ -86,8 +85,8 @@ val pp_json : Format.formatter -> t -> unit
 (** {1 Accessors} *)
 
 (** [hash block] returns the stored [block]'s hash. It is not
-    guarenteed to be the same one as
-    [Block_header.hash (header block)]. *)
+    guaranteed to be the same as [Block_header.hash (header block)]
+    (e.g. in sandbox, the genesis block might have a fake hash). *)
 val hash : t -> Block_hash.t
 
 (** [operations block] returns the list of list of operations
@@ -116,7 +115,7 @@ val context : t -> Tezos_crypto.Context_hash.t
 
 val protocol_data : t -> Bytes.t
 
-(** {2 Metadata accesors} *)
+(** {2 Metadata accessors} *)
 
 val metadata : t -> metadata option
 
@@ -132,22 +131,22 @@ val operations_metadata : metadata -> Bytes.t list list
 
 (** {1 Utility functions} *)
 
-(** [check_block_consistency ~genesis_hash ?pred_block block] checks
+(** [check_block_consistency ?genesis_hash ?pred_block block] checks
     that the stored data is consistent:
 
     - Does the [hash] stored equals the result of [Block_header.hash]
-      of its header and, if not, is this the [genesis_hash] ?
+      of its header and, if not, is this the [genesis_hash]?
     - Is the [block] a successor of [pred_block] with regards to its
-      level and its predecessor's hash ?
-*)
+      level and its predecessor's hash? *)
 val check_block_consistency :
   ?genesis_hash:Block_hash.t -> ?pred_block:t -> t -> unit tzresult Lwt.t
 
 (** [read_next_block fd] reads from [fd] and decode the next block
-    found in the descriptor moving the [fd]'s offset in doing so. This
-    returns the binary length of the encoded block along with the
-    decoded block.  *)
+    found in the descriptor. The [fd]'s offset is moved as a side
+    effect. This returns the binary length of the encoded block along
+    with the decoded block. *)
 val read_next_block : Lwt_unix.file_descr -> (t * int) Lwt.t
 
-(** Same as [read_next_block fd] but returns None if there was an error. *)
+(** Same as [read_next_block fd] but returns [None] if there was an
+    error. *)
 val read_next_block_opt : Lwt_unix.file_descr -> (t * int) option Lwt.t

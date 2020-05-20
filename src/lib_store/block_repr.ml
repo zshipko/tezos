@@ -100,6 +100,7 @@ let pp_json fmt b =
   Data_encoding.Json.pp fmt json
 
 (* Contents accessors *)
+
 let hash blk = blk.hash
 
 let header blk = blk.contents.header
