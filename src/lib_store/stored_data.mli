@@ -26,37 +26,37 @@
 (** Persistent data manager.
 
     Every data read/write operation is protected by a mutex preventing
-    concurrent data-races.  *)
+    concurrent data-races. *)
 
 (** The type for the persistent data. *)
 type 'a t
 
-(** [read data] access the data (cached). *)
+(** [read data] accesses the data (cached). *)
 val read : 'a t -> 'a Lwt.t
 
 (** [write data value] overwrites the previous [data] with the new
     [value]. *)
 val write : 'a t -> 'a -> unit Lwt.t
 
-(** [write_file ~file encoding value] raw write the [file] with the
-    [value] encoding using [encoding].
+(** [write_file ~file encoding value] raw writes the [file] with the
+    [value]'s [encoding].
 
     {b Warning} this function should not be used in a normal
-    context. Prefer the usage of [write]. *)
+    context. Favour the usage of [write]. *)
 val write_file : file:string -> 'a Data_encoding.t -> 'a -> unit Lwt.t
 
 (** [update_with data f] {b atomically} updates [data] with the result
-    of the application of [f]. Concurrent access to the data will block
-    until the value is updated.
+    of the application of [f]. Concurrent accesses to the data will
+    block until the value is updated.
 
-    {b Warning} Calling read/write in [f] will result in a deadlock.
-*)
+    {b Warning} Calling read/write in [f] will result in a deadlock. *)
 val update_with : 'a t -> ('a -> 'a Lwt.t) -> unit Lwt.t
 
 (** [load ~file encoding] reads from [file] the data and decode it
     using [encoding]. *)
 val load : file:string -> 'a Data_encoding.t -> 'a t Lwt.t
 
-(** [init ~file encoding ~initial_data] load if [file] already exists
-    or create the [file] with [initial_data]. *)
+(** [init ~file encoding ~initial_data] creates or load an on-disk
+    data. If the file already exists, then the data is read from the
+    file. Otherwise, [initial_data] is used. *)
 val init : file:string -> 'a Data_encoding.t -> initial_data:'a -> 'a t Lwt.t

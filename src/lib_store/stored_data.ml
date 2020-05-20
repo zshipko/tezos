@@ -89,9 +89,11 @@ let load ~file encoding =
         "Stored_data.load: no corresponding data found in file %s"
         file
 
-(** [init initial_data] creates or load an on-disk data. If the file
-    already exists, then the data is read from the file. Otherwise,
-    [initial_data] is used. *)
+(* FIXME: redundant.*)
+
+(** [init ~file encoding ~initial_data] creates or load an on-disk
+    data. If the file already exists, then the data is read from the
+    file. Otherwise, [initial_data] is used. *)
 let init ~file encoding ~initial_data =
   Lwt_unix.file_exists file
   >>= function
