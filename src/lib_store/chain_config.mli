@@ -37,10 +37,10 @@ type t = chain_config
 (** (Versioned) Encoding for the [chain_config]. *)
 val encoding : t Data_encoding.t
 
-(** [write ~chain_dir config] writes on disk the chain [config] in
+(** [write ~chain_dir config] writes on disk the [chain_config] in
     [chain_dir] as a JSON file. *)
 val write : chain_dir:string -> t -> unit tzresult Lwt.t
 
-(** [load ~chain_dir] reads and parse from disk the chain [config]
-    from the [chain_dir]. *)
+(** [load ~chain_dir] reads from disk and parse the [chain_config]
+    located in [chain_dir]. *)
 val load : chain_dir:string -> t tzresult Lwt.t
