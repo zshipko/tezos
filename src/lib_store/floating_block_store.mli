@@ -30,14 +30,15 @@
     {!Block_hash.t} -> (offset × predecessors) which points to its
     offset in the associated file along with a list of block
     predecessors. The structure access/modification is protected by a
-    mutex ({!Lwt_idle_waiter}) and thus can be concurently manipulated.
-    Stored blocks may or may not contain metadata. The instance
-    maintains an opened file descriptor therefore it must be properly
-    closed or it might lead to a fd leak.
+    mutex ({!Lwt_idle_waiter}) and thus can be manipulated
+    concurrently. Stored blocks may or may not contain metadata. The
+    instance maintains an opened file descriptor. Therefore it must be
+    properly closed or it might lead to a file descriptor leak.
 
-    Four differents kind of instance are allowed to co-exist for an
-    identitcal path: - RO, a read-only instance; - RW, a read-write
-    instance - RO_TMP, RW_TMP, read-write instances.  See {!Block_store}
+    Four different kind of instances are allowed to co-exist for an
+    identical path: - RO, a read-only instance; - RW, a read-write
+    instance - RO_TMP, RW_TMP, read-write instances. See
+    {!Block_store}.
 
     {1 Invariants}
 
@@ -49,7 +50,7 @@
 
     The floating block store is composed of the following files:
 
-    - file : /<kind>_floating_block_store, a list of {!Block_repr.t}:
+    - file: /<kind>_floating_block_store, a list of {!Block_repr.t}:
 
     | <block> * |
 
@@ -64,15 +65,15 @@ type t
 (** The type for the kind of floating store opened. *)
 type floating_kind = Naming.floating_kind = RO | RW | RW_TMP | RO_TMP
 
-(** [kind floating_store] return the kind. *)
+(** [kind floating_store] returns the floating store's kind. *)
 val kind : t -> floating_kind
 
-(** [mem floating_store hash] test whether [hash] is stored in
+(** [mem floating_store hash] tests whether [hash] is stored in
     [floating_store]. *)
 val mem : t -> Block_hash.t -> bool Lwt.t
 
-(** [find_predecessors floating_store hash] reads from the index the
-    list of predecessors for [hash] if the block is stored in
+(** [find_predecessors floating_store block_hash] reads from the index
+    the list of [block_hash]'s predecessors if the block is stored in
     [floating_store], returns [None] otherwise. *)
 val find_predecessors : t -> Block_hash.t -> Block_hash.t list option Lwt.t
 
@@ -81,9 +82,9 @@ val find_predecessors : t -> Block_hash.t -> Block_hash.t list option Lwt.t
     otherwise. *)
 val read_block : t -> Block_hash.t -> Block_repr.t option Lwt.t
 
-(** [append_block ?should_flush floating_store preds block] stores the
-    [block] in [floating_store] updating its index with the given
-    predecessors [preds]. *)
+(** [append_block floating_store preds block] stores the [block] in
+    [floating_store] updating its index with the given predecessors
+    [preds]. *)
 val append_block : t -> Block_hash.t list -> Block_repr.t -> unit Lwt.t
 
 (** [append_all floating_store chunk] stores the [chunk] of
@@ -91,7 +92,7 @@ val append_block : t -> Block_hash.t list -> Block_repr.t -> unit Lwt.t
     accordingly. *)
 val append_all : t -> (Block_hash.t list * Block_repr.t) list -> unit Lwt.t
 
-(** [iter_raw_fd f fd] unsafe sequential iterator on a direct file descriptor
+(** [iter_raw_fd f fd] unsafe sequential iterator on a file descriptor
     [fd]. Applies [f] on every block encountered.
 
     {b Warning}: should be used for internal use only (e.g. snapshots). *)
@@ -108,10 +109,12 @@ val iter_seq :
   unit tzresult Lwt.t
 
 (** [init ~chain_dir ~readonly kind] creates or load an existing
-    floating store at path [chain_dir] with [kind]. [RO] floating
-    stores may be written into if [readonly] is false. *)
+   floating store at path [chain_dir] with [kind].
+
+    {b Warning} If [readonly] is not set, a [RO] instance is
+    writable. *)
 val init : chain_dir:string -> readonly:bool -> floating_kind -> t Lwt.t
 
-(** [close floating_store] closes [floating_store] closing the index
-    and the opened file descriptor. *)
+(** [close floating_store] closes [floating_store] by closing the
+    index and the associated opened file descriptor. *)
 val close : t -> unit Lwt.t

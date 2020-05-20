@@ -172,7 +172,7 @@ let iter_raw f floating_store =
   in
   loop eof_offset
 
-(* Iter sequentially(!) on every blocks in the file *)
+(* Iter sequentially on every blocks in the file *)
 let iter_seq f floating_store =
   Lwt_idle_waiter.when_idle floating_store.scheduler (fun () ->
       (* We open a new fd *)
