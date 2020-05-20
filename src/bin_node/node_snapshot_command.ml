@@ -258,8 +258,8 @@ module Term = struct
     let open Cmdliner.Arg in
     let doc =
       "Setting this flag disable the snapshot compression. This slightly \
-       speeds up the export process but the snapshot will occupy more on-disk \
-       space."
+       speeds up of the export process but the snapshot will occupy more \
+       on-disk space."
     in
     value & flag & info ~doc ["no-compress"]
 

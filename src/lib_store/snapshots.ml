@@ -71,7 +71,7 @@ let () =
       Format.fprintf
         ppf
         "The requested history mode (%a) for the snapshot export is not \
-         compatible with the given storage, running with history mode (%a)."
+         compatible with the given storage (running with history mode %a)."
         History_mode.pp_short
         requested
         History_mode.pp_short
@@ -299,6 +299,7 @@ let () =
           computed_protocol_hash_from_embedded_sources;
         })
 
+(* FIXME: add proper error *)
 let write_snapshot_metadata metadata file =
   let metadata_json =
     Data_encoding.Json.construct Snapshot_version.metadata_encoding metadata
@@ -310,6 +311,7 @@ let write_snapshot_metadata metadata file =
   | Ok () ->
       Lwt.return_unit
 
+(* FIXME: add proper error *)
 let read_snapshot_metadata file =
   let filename = Naming.(file // Snapshot.metadata) in
   let read_config json =
@@ -415,11 +417,13 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
                 return block
             | None ->
                 (* No block to read *)
+                (* FIXME: proper error *)
                 failwith
                   " export_floating_blocks: broken invariant, no blocks to \
                    read in floating stores" ))
   >>=? fun first_block ->
   if Compare.Int32.(limit_level < Block_repr.level first_block) then
+    (* FIXME: proper error *)
     failwith
       " export_floating_blocks: broken invariant, the first floating block is \
        above the target block"
@@ -447,11 +451,13 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
               >>= fun _ ->
               Floating_block_store.iter_raw_fd f floating_rw_fd
               >>=? fun () ->
+              (* FIXME: proper error *)
               failwith "floating_export: could not retrieve the target block")
             (function
               | Done ->
                   return_unit
               | exn ->
+                  (* FIXME: proper error *)
                   failwith
                     "floating_export: error while reading the floating stores \
                      floating: %s"
@@ -460,9 +466,8 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
     in
     return (reading_thread, stream)
 
-(* Export the protocol table (info regarding the protocol transitions) as well
-   as all the stored protocols *)
-
+(* Export the protocol table (info regarding the protocol transitions)
+   as well as all the stored protocols *)
 let export_protocols protocol_levels ~src_dir ~dst_dir =
   let protocol_tbl_filename = Naming.(dst_dir // Snapshot.protocols_table) in
   Lwt_unix.openfile
@@ -518,7 +523,6 @@ let export_protocols protocol_levels ~src_dir ~dst_dir =
         (fun () -> Lwt_unix.closedir dir_handle))
 
 (* Creates the requested export folder and its hierarchy *)
-
 let create_snapshot_dir ~snapshot_dir =
   Lwt_unix.mkdir snapshot_dir 0o755
   >>= fun () ->
@@ -529,21 +533,13 @@ let create_snapshot_dir ~snapshot_dir =
   Lwt_unix.mkdir dst_protocol_dir 0o755
   >>= fun () -> return (dst_cemented_dir, dst_protocol_dir)
 
-(*
-   How to choose default block:
-   - Archive => checkpoint (if not in the future)
-                last_allow_fork_level(head) otherwise
-   - Full n | Rolling n when n > 0 => checkpoint (if not in the future)
-   else
-     savepoint + 1 + max_op_ttl blocks prunés dispo (en relation avec caboose)
-
- To be a valid export block, the block b and it's pred bp must:
-    - not be genesis
-    - be both known
-    - not be pruned, having their context present
-    - have at least max_op_ttl(b) blocks (pruned or not) available
+(* Ensures that the data needed to export the snapshot from the target
+   block is available:
+   - the target_block is not the genesis
+   - the target_block and its predecessor is know
+   - the context of the predecessor of the target_block must be known
+   - at least max_op_ttl(target_block) headers must be available
 *)
-
 let check_export_block_validity chain_store block =
   let (block_hash, block_level) = Store.Block.descriptor block in
   Store.Block.is_known_valid chain_store block_hash
@@ -607,6 +603,11 @@ let check_export_block_validity chain_store block =
     (Invalid_export_block {block = Some block_hash; reason = `Not_enough_pred})
   >>=? fun () -> return (pred_block, minimum_level_needed)
 
+(* Retrieves the block to export based on given block "as hint". As
+   the checkpoint is provided as a default value, we must ensure that
+   it is valid. I may be not the case when the checkpoint was set in
+   the future. In this particular case, the last allowed fork level of
+   the current head is chosen. *)
 let retrieve_export_block chain_store block =
   ( match block with
   | `Hash (h, distance) -> (
@@ -680,6 +681,10 @@ let retrieve_export_block chain_store block =
       >>=? fun (pred_block, minimum_level_needed) ->
       return (export_block, pred_block, minimum_level_needed)
 
+(* Returns the list of cemented files to export and an optional list
+   of reaming blocks. If the export block is cemented, we need to cut
+   the cycle containing the export block accordingly and retrieve the
+   extra blocks. *)
 let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
     ~export_block =
   Cemented_block_store.load_table ~cemented_blocks_dir:src_cemented_dir
@@ -688,20 +693,18 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
   let table = Array.to_list table_arr in
   (* Check whether the export_block is in the cemented blocks *)
   let export_block_level = Store.Block.level export_block in
+  let last_cemented_level =
+    table_arr.(table_len - 1).Cemented_block_store.end_level
+  in
   let is_cemented =
-    table_len > 0
-    && Compare.Int32.(
-         export_block_level
-         <= table_arr.(table_len - 1).Cemented_block_store.end_level)
+    table_len > 0 && Compare.Int32.(export_block_level <= last_cemented_level)
   in
   if not is_cemented then
     (* Return either an empty list or the list of all cemented files *)
     return (table, None)
   else
     let is_last_cemented_block =
-      Compare.Int32.(
-        export_block_level
-        = table_arr.(table_len - 1).Cemented_block_store.end_level)
+      Compare.Int32.(export_block_level = last_cemented_level)
     in
     if is_last_cemented_block then return (table, Some [])
     else
@@ -710,8 +713,7 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
       let (filtered_table, extra_cycles) =
         List.partition
           (fun {Cemented_block_store.end_level; _} ->
-            let b = Compare.Int32.(export_block_level > end_level) in
-            b)
+            Compare.Int32.(export_block_level > end_level))
           table
       in
       assert (extra_cycles <> []) ;
@@ -722,6 +724,7 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
       else
         Store.Block.read_block_by_level chain_store extra_cycle.start_level
         >>=? (fun first_block_in_cycle ->
+               (* TODO explain this... *)
                if
                  Compare.Int32.(
                    Store.Block.level first_block_in_cycle > export_block_level)
@@ -733,15 +736,20 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
                  Store.Block.read_block_by_level chain_store caboose_level
                else return first_block_in_cycle)
         >>=? fun first_block ->
-        Store.Chain_traversal.path chain_store first_block export_block
+        Store.Chain_traversal.path
+          chain_store
+          ~from_block:first_block
+          ~to_block:export_block
         >>= function
         | None ->
+            (* FIXME: proper error *)
             failwith
-              "compute_cemented_table_and_extra_cycle: cannot retrieve \
-               the                 beggining of cycle."
+              "compute_cemented_table_and_extra_cycle: cannot retrieve the \
+               beginning of cycle."
         | Some floating_blocks ->
-            (* Don't forget to add the first block as [Chain_traversal.path] does
-               not include the lower-bound block *)
+            (* Don't forget to add the first block as
+               [Chain_traversal.path] does not include the lower-bound
+               block *)
             let floating_blocks = first_block :: floating_blocks in
             return (filtered_table, Some floating_blocks)
 
@@ -758,9 +766,10 @@ let dump_context context_index ~snapshot_dir ~pred_block ~export_block =
     block_data
     ~context_file_path:Naming.(snapshot_dir // Snapshot.context)
 
+(* Ensures that the history mode requested to export is compatible
+   with the current storage *)
 let check_history_mode chain_store ~rolling =
-  let open History_mode in
-  match Store.Chain.history_mode chain_store with
+  match (Store.Chain.history_mode chain_store : History_mode.t) with
   | Archive | Full _ ->
       return_unit
   | Rolling _ when rolling ->
@@ -801,16 +810,20 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
     (* Read the store to gather only the necessary blocks *)
     Store.Block.read_block_by_level chain_store lowest_block_level_needed
     >>=? fun minimum_block ->
-    Store.Chain_traversal.path chain_store minimum_block pred_block
+    Store.Chain_traversal.path
+      chain_store
+      ~from_block:minimum_block
+      ~to_block:pred_block
     >>= (function
           | None ->
+              (* FIXME: proper error *)
               failwith
                 "export_rolling: unable to retrieve the necessary blocks to \
                  create the snapshot"
           | Some blocks ->
               (* Don't forget to add the first block as
-                 [Chain_traversal.path] does not include the lower-bound
-                 block *)
+                 [Chain_traversal.path] does not include the
+                 lower-bound block *)
               return (minimum_block :: blocks))
     >>=? fun floating_blocks ->
     (* Prune all blocks except for the export_block's predecessor *)
@@ -825,6 +838,9 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
        contexts might get pruned *)
     dump_context context_index ~snapshot_dir ~pred_block ~export_block
     >>=? fun written_context_elements ->
+    (* FIXME: If we export only the required protocol (which seems
+       legitimate for a rolling snapshot), we should "prune" the
+       protocols in a bootstrapped rolling node as well. *)
     (* TODO: Export all the protocols: maybe only export the needed one
        s.t. forall proto_level. proto_level >= caboose.proto_level ? *)
     Store.Chain.all_protocol_levels chain_store
@@ -978,6 +994,7 @@ let zip_snapshot dir out =
       Format.fprintf fmt "Compressing snapshot: %d files treated" i)
     (fun notify ->
       if not (Sys.file_exists dir && Sys.is_directory dir) then
+        (* FIXME: proper error *)
         Format.ksprintf invalid_arg "zip_directory: %s is not a directory" dir
       else
         let oc = Zip.open_out out in
@@ -1010,6 +1027,7 @@ let zip_snapshot dir out =
 
 let unzip_snapshot zipfile path =
   if not (Sys.file_exists path && Sys.is_directory path) then
+    (* FIXME: proper error *)
     Format.ksprintf
       invalid_arg
       "unzip_directory: path %s is not a directory"
@@ -1156,7 +1174,8 @@ let restore_cemented_blocks ?(check_consistency = true) ~should_rename
                 false
           in
           if not is_valid then
-            failwith "Found a invalid cemented block file: %s" file
+            (* FIXME: proper error *)
+            failwith "Found an invalid cemented block file: %s" file
           else return_true)
     files
   >>=? fun cemented_files ->
@@ -1194,6 +1213,7 @@ let restore_cemented_blocks ?(check_consistency = true) ~should_rename
                (fun {Cemented_block_store.filename; _} ->
                  Compare.String.equal filename cemented_file)
                (Cemented_block_store.cemented_blocks_files cemented_store))
+          (* FIXME: proper error*)
         then failwith "Cemented copy error: cannot find file %s" cemented_file
         else return_unit)
       (List.sort compare cemented_files)
@@ -1229,6 +1249,7 @@ let read_floating_blocks ~genesis_hash ~floating_blocks_file =
     >>= fun _ ->
     let rec loop ?pred_block nb_bytes_left =
       if nb_bytes_left < 0 then
+        (* FIXME: proper error *)
         failwith "read_floating_blocks: corrupted blocks"
       else if nb_bytes_left = 0 then return_unit
       else
@@ -1280,6 +1301,7 @@ let restore_protocols ~should_rename ~snapshot_protocol_dir ~dst_protocol_dir =
       | Some ph ->
           return (ph, file)
       | None ->
+          (* FIXME: proper error *)
           failwith "Invalid protocol filename %s" file)
     protocol_files
   >>=? fun protocols ->
@@ -1299,6 +1321,7 @@ let restore_protocols ~should_rename ~snapshot_protocol_dir ~dst_protocol_dir =
         >>= fun protocol_sources ->
         match Protocol.of_bytes (Bytes.unsafe_of_string protocol_sources) with
         | None ->
+            (* FIXME: proper error *)
             failwith
               "import_protocol: cannot decode protocol %s"
               protocol_filename
@@ -1306,6 +1329,7 @@ let restore_protocols ~should_rename ~snapshot_protocol_dir ~dst_protocol_dir =
             let hash = Protocol.hash p in
             notify ()
             >>= fun () ->
+            (* FIXME: proper error *)
             fail_unless
               (Protocol_hash.equal expected_hash hash)
               (Exn
@@ -1331,6 +1355,7 @@ let import_log_notice ?snapshot_metadata filename block =
   >>= fun () -> lwt_emit Import_loading
 
 let check_context_hash_consistency validation_store block_header =
+  (* FIXME: proper error *)
   fail_unless
     (Context_hash.equal
        validation_store.Tezos_validation.Block_validation.context_hash
@@ -1340,14 +1365,14 @@ let check_context_hash_consistency validation_store block_header =
 let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
     ~user_activated_upgrades ~user_activated_protocol_overrides
     snapshot_metadata genesis chain_id =
-  (* Restore context *)
-  (* Start by commiting genesis *)
+  (* Start by committing genesis *)
   Context.commit_genesis
     context_index
     ~chain_id
     ~time:genesis.Genesis.time
     ~protocol:genesis.protocol
   >>=? fun genesis_ctxt_hash ->
+  (* Restore context *)
   Context.restore_context
     context_index
     ?expected_block
@@ -1360,12 +1385,14 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
         | Some ch ->
             return ch
         | None ->
+            (* FIXME: proper error *)
             failwith
               "Failed to checkout context with hash %a. Something is wrong \
                with your storage."
               Context_hash.pp
               pred_context_hash)
   >>=? fun predecessor_context ->
+  (* FIXME: proper error *)
   Tezos_validation.Block_validation.apply
     chain_id
     ~user_activated_upgrades
@@ -1375,6 +1402,14 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
     ~predecessor_context
     ~block_header
     operations
+  >>= (function
+        | Ok block_validation_result ->
+            return block_validation_result
+        | Error errs ->
+            failwith
+              "Failed to validate snapshot's target block: %a"
+              pp_print_error
+              errs)
   >>=? fun block_validation_result ->
   check_context_hash_consistency
     block_validation_result.validation_store
@@ -1387,7 +1422,7 @@ let import ?patch_context ?block:expected_block ?(check_consistency = true)
     ~snapshot_file ~dst_store_dir ~dst_context_dir ~user_activated_upgrades
     ~user_activated_protocol_overrides (genesis : Genesis.t) =
   if Sys.file_exists dst_store_dir then
-    (* TODO proper error *)
+    (* FIXME: proper error *)
     Format.ksprintf
       invalid_arg
       "import: target  %s already exists"
@@ -1535,6 +1570,7 @@ let legacy_verify_predecessors header_opt pred_hash =
   | None ->
       return_unit
   | Some header ->
+      (* FIXME: better error *)
       fail_unless
         ( header.Block_header.shell.level >= 2l
         && Block_hash.equal header.shell.predecessor pred_hash )
@@ -1631,7 +1667,7 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
      in
      let block = proj (hash, block) in
      match Block_repr.level block with
-     (* Hardcoded special treatement for first two blocks *)
+     (* Hardcoded special treatment for the first two blocks. *)
      | 0l ->
          (* No genesis in previous format *) assert false
      | 1l ->
@@ -1648,7 +1684,7 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
          (* 4 cases :
              - in future floating blocks => after the cementing part
              - at the end of a cycle
-             - in the midle of a cycle
+             - in the middle of a cycle
              - at the dawn of a cycle
             *)
          let is_end_of_a_cycle =
@@ -1732,6 +1768,7 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
   Context.checkout_exn context_index pred_context_hash
   >>= fun predecessor_context ->
   let {Context.Block_data_legacy.block_header; operations} = block_data in
+  (* FIXME: proper error *)
   Tezos_validation.Block_validation.apply
     chain_id
     ~user_activated_upgrades
@@ -1742,6 +1779,14 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
     ~predecessor_context
     ~block_header
     operations
+  >>= (function
+        | Ok block_validation_result ->
+            return block_validation_result
+        | Error errs ->
+            failwith
+              "Failed to validate snapshot's target block: %a"
+              pp_print_error
+              errs)
   >>=? fun block_validation_result ->
   fail_unless
     (Context_hash.equal
