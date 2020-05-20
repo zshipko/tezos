@@ -28,26 +28,27 @@
 (** The type for the protocol store. *)
 type t
 
-(** [mem pstore proto_hash] test the existence of the protocol
+(** [mem pstore proto_hash] tests the existence of the protocol
     indexed by [proto_hash] in the store. *)
 val mem : t -> Protocol_hash.t -> bool
 
 (** [all pstore] returns the set of all stored protocols in [pstore]. *)
 val all : t -> Protocol_hash.Set.t
 
-(** [raw_store pstore proto_hash proto_bytes] stores on disk the protocol
-    [proto_bytes] (encoded bytes) indexed as [proto_hash]. Returns
-    [None] if the protocol already exists. *)
+(** [raw_store pstore proto_hash proto_bytes] stores on disk the
+    protocol [proto_bytes] (encoded bytes) indexed as
+    [proto_hash]. Returns [None] if the protocol already exists. *)
 val raw_store : t -> Protocol_hash.t -> bytes -> Protocol_hash.t option Lwt.t
 
-(** [store pstore proto_hash protocol] stores on disk the protocol [protocol]
-    indexed as [proto_hash]. Returns [None] if the protocol already exists. *)
+(** [store pstore proto_hash protocol] stores on disk the protocol
+    [protocol] indexed as [proto_hash]. Returns [None] if the protocol
+    already exists. *)
 val store : t -> Protocol_hash.t -> Protocol.t -> Protocol_hash.t option Lwt.t
 
-(** [read pstore proto_hash] reads from [pstore] and return the
+(** [read pstore proto_hash] reads from [pstore] and returns the
     protocol indexed by [proto_hash]. *)
 val read : t -> Protocol_hash.t -> Protocol.t option Lwt.t
 
-(** [init ~store_dir] create a store relatively to [store_dir] path or
-    load it if it already exists. *)
+(** [init ~store_dir] creates a store relatively to [store_dir] path
+    or loads it if it already exists. *)
 val init : store_dir:string -> t Lwt.t

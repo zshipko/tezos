@@ -30,9 +30,9 @@ let mem {protocols; _} protocol_hash =
 
 let all {protocols; _} = protocols
 
+(* FIXME add proper errors *)
 let raw_store store protocol_hash bytes =
-  let exists = mem store protocol_hash in
-  if exists then Lwt.return_none
+  if mem store protocol_hash then Lwt.return_none
   else
     Lwt_unix.openfile
       Naming.(store.protocol_store_dir // protocol_file protocol_hash)
@@ -58,6 +58,7 @@ let read store protocol_hash =
       Lwt.return (Protocol.of_bytes (Bytes.unsafe_of_string content)))
     (fun _ -> Lwt.return_none)
 
+(* FIXME add proper errors *)
 let init ~store_dir =
   let protocol_store_dir = Naming.(store_dir // protocol_store_directory) in
   Lwt_unix.file_exists protocol_store_dir
