@@ -23,9 +23,9 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-(* Invariant: a maximum of [max_predecessors] predecessors at all time
-   : if a block has fewer than 12 predecessors then it is padded so
-   its size remain constant *)
+(* Invariant: a maximum of [max_predecessors] predecessors at all
+   time: if a block has fewer than 12 predecessors then it is padded
+   so its size remain constant. *)
 module Block_info = struct
   type t = {offset : int; predecessors : Block_hash.t list}
 

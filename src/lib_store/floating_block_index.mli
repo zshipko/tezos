@@ -27,9 +27,9 @@
 
 (** {1 Block info stored in the index map} *)
 
-(** Module [Block_info] represents the values stored in the index used
-    to locate the position of the block in a floating block store and
-    its predecessors. *)
+(** Module [Block_info] represents the values stored in the index
+    which are used to locate the position of a block in a floating
+    block store and its predecessors. *)
 module Block_info : sig
   (** The maximum number of predecessors stored per block. *)
   val max_predecessors : int
@@ -45,6 +45,6 @@ module Block_info : sig
 end
 
 (** Key/value index associated to a floating block store where the key
-   is a {!Block_hash.t} and the value is {!Block_info.t}. *)
+    is a {!Block_hash.t} and the value is {!Block_info.t}. *)
 include
   Index.S with type key = Block_hash.t and type value = Block_info.t
