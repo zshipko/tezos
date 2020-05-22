@@ -409,7 +409,7 @@ let handle_msg state msg =
       Peer_metadata.incr meta @@ Received_request Protocols ;
       Lwt_list.iter_p
         (fun hash ->
-          Store.Protocol.read_protocol state.disk hash
+          Store.Protocol.read state.disk hash
           >>= function
           | None ->
               Peer_metadata.incr meta @@ Unadvertised Protocol ;
