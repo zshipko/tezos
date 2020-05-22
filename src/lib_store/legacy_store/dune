@@ -2,6 +2,7 @@
  (name tezos_legacy_store)
  (public_name tezos-legacy-store)
  (libraries tezos-base
+            tezos-stdlib-unix
             tezos-shell-services
             tezos-stdlib-unix
             tezos-lmdb)
