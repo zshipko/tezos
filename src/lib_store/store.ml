@@ -2156,9 +2156,22 @@ module Unsafe = struct
         Block_store.read_block block_store ~read_metadata:false (Block (bh, 0))
         >>= fun block_opt ->
         match (block_opt, commit_info_opt) with
-        | (None, _) ->
-            (* Ignore unknown blocks *)
-            return_unit
+        | (None, _) -> (
+          match history_mode with
+          | Rolling _ ->
+              (* If we are importing a rolling snapshot then allow the
+               absence of block. *)
+              return_unit
+          | _ ->
+              failwith
+                "restore_from_snapshot: expected block %a originating \
+                 protocol %a to be present for %a"
+                Block_hash.pp
+                bh
+                Protocol_hash.pp
+                protocol
+                History_mode.pp
+                history_mode )
         | (Some _block, None) ->
             (* TODO no commit info : raise a warning *)
             return_unit
@@ -2237,7 +2250,7 @@ module Unsafe = struct
     (* Depending on the history mode, set the caboose properly *)
     ( match history_mode with
     | History_mode.Archive | Full _ ->
-        return (Block_repr.hash genesis_block, Block_repr.level genesis_block)
+        return genesis_block
     | Rolling _ -> (
         Lwt_stream.peek floating_blocks_stream
         >>= function
@@ -2247,8 +2260,9 @@ module Unsafe = struct
               "Store.restore_from_snapshot: could not find the caboose for \
                rolling"
         | Some caboose ->
-            return (Block_repr.hash caboose, Block_repr.level caboose) ) )
-    >>=? fun caboose_descr ->
+            return caboose ) )
+    >>=? fun caboose ->
+    let caboose_descr = Block.descriptor caboose in
     Stored_data.write_file
       ~file:Naming.(chain_dir // Chain_data.caboose)
       Data_encoding.(tup2 Block_hash.encoding int32)
@@ -2297,6 +2311,12 @@ module Unsafe = struct
           }
           empty)
     in
+    Context.checkout_exn
+      context_index
+      (Block.context_hash new_head_with_metadata)
+    >>= fun context ->
+    Context.get_protocol context
+    >>=? fun head_protocol ->
     (* Compute protocol levels and check their correctness *)
     fold_left_s
       (fun proto_levels (transition_level, protocol_hash, commit_info_opt) ->
@@ -2313,19 +2333,48 @@ module Unsafe = struct
           (Block (Block_repr.hash new_head_with_metadata, distance))
         >>= fun block_opt ->
         match (block_opt, commit_info_opt) with
-        | (None, _) ->
-            (* Ignore unknown blocks *)
-            (* FIXME: Ignore protocol which have complete cycle
-               outside the rolling window. For the last cycle (which
-               activates with and unknown block, set the transition
-               level to the caboose of the rolling window.) *)
-            return proto_levels
+        | (None, _) -> (
+          match history_mode with
+          | Rolling _ ->
+              (* Corner-case for when the head protocol's transition
+                 block has been deleted. *)
+              let block =
+                (* Important: we cannot retrieve the protocol
+                   associated to an arbitrary block with a legacy
+                   snapshot, we only know the head's one as it's
+                   written in the context. Therefore, the transition
+                   block is overwritten with either the caboose if
+                   both blocks have the same proto_level or the
+                   current_head otherwise. In the former case, block's
+                   protocol data won't be deserialisable.  *)
+                if
+                  Compare.Int.(
+                    Block.proto_level caboose
+                    = Block.proto_level new_head_with_metadata)
+                then caboose_descr
+                else Block.descriptor new_head_with_metadata
+              in
+              if Protocol_hash.equal protocol_hash head_protocol then
+                return
+                  Protocol_levels.(
+                    add
+                      (Block.proto_level new_head_with_metadata)
+                      {block; protocol = protocol_hash; commit_info = None}
+                      proto_levels)
+              else return proto_levels
+          | _ ->
+              failwith
+                "restore_from_snapshot_legacy: transition block (level: %ld) \
+                 not found for protocol %a"
+                transition_level
+                Protocol_hash.pp
+                protocol_hash )
         | (Some block, None) ->
             (* TODO no commit info: raise a warning *)
             return
               Protocol_levels.(
                 add
-                  (Block_repr.proto_level block)
+                  (Block.proto_level block)
                   {
                     block = Block.descriptor block;
                     protocol = protocol_hash;

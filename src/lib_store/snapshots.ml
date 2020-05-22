@@ -809,6 +809,7 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
     let export_mode = History_mode.Rolling {offset = 0} in
     lwt_emit (Export_info (export_mode, Store.Block.descriptor export_block))
     >>= fun () ->
+    (* Blocks *)
     (* Read the store to gather only the necessary blocks *)
     Store.Block.read_block_by_level chain_store lowest_block_level_needed
     >>=? fun minimum_block ->
@@ -836,17 +837,21 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
              Some {(Store.Unsafe.repr_of_block b) with metadata = None})
            floating_blocks)
     in
+    (* Context *)
     (* We need to dump the context while locking the store, the
-       contexts might get pruned *)
+       contexts might get pruned : this might take a while. *)
     dump_context context_index ~snapshot_dir ~pred_block ~export_block
     >>=? fun written_context_elements ->
-    (* FIXME: If we export only the required protocol (which seems
-       legitimate for a rolling snapshot), we should "prune" the
-       protocols in a bootstrapped rolling node as well. *)
-    (* TODO: Export all the protocols: maybe only export the needed one
-       s.t. forall proto_level. proto_level >= caboose.proto_level ? *)
+    (* Protocols *)
     Store.Chain.all_protocol_levels chain_store
     >>= fun protocol_levels ->
+    (* Filter protocols s.t. forall proto. proto.level >=
+       caboose.proto_level. *)
+    let protocol_levels =
+      Protocol_levels.filter
+        (fun level _ -> Store.Block.proto_level minimum_block >= level)
+        protocol_levels
+    in
     return
       ( export_mode,
         export_block,
