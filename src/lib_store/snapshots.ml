@@ -693,18 +693,20 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
   let table = Array.to_list table_arr in
   (* Check whether the export_block is in the cemented blocks *)
   let export_block_level = Store.Block.level export_block in
-  let last_cemented_level =
-    table_arr.(table_len - 1).Cemented_block_store.end_level
-  in
   let is_cemented =
-    table_len > 0 && Compare.Int32.(export_block_level <= last_cemented_level)
+    table_len > 0
+    && Compare.Int32.(
+         export_block_level
+         <= table_arr.(table_len - 1).Cemented_block_store.end_level)
   in
   if not is_cemented then
     (* Return either an empty list or the list of all cemented files *)
     return (table, None)
   else
     let is_last_cemented_block =
-      Compare.Int32.(export_block_level = last_cemented_level)
+      Compare.Int32.(
+        export_block_level
+        = table_arr.(table_len - 1).Cemented_block_store.end_level)
     in
     if is_last_cemented_block then return (table, Some [])
     else
