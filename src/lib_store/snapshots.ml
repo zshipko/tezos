@@ -371,27 +371,38 @@ let copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir
             i
             nb_cycles)
         (fun notify ->
-          Lwt_list.iter_p
-            (fun ({filename; _} as file) ->
-              Cemented_block_store.iter_cemented_file
-                ~cemented_block_dir:src_cemented_dir
-                (fun block ->
-                  let hash = Block_repr.hash block in
-                  let level = Block_repr.level block in
-                  Cemented_block_level_index.replace
-                    fresh_level_index
-                    hash
-                    level ;
-                  Cemented_block_hash_index.replace fresh_hash_index level hash ;
-                  Lwt.return_unit)
-                file
-              >>= fun () ->
-              let cycle = Naming.(src_cemented_dir // filename) in
-              Lwt_utils_unix.copy_file
-                ~src:cycle
-                ~dst:Naming.(dst_cemented_dir // filename)
-              >>= fun () -> notify ())
-            files)
+          (* Bound the number of copying threads *)
+          let tasks =
+            let rec loop acc l =
+              let (l, r) = List.split_n 20 l in
+              if r = [] then l :: acc else loop (l :: acc) r
+            in
+            loop [] files
+          in
+          Lwt_list.iter_s
+            (Lwt_list.iter_p (fun ({filename; _} as file) ->
+                 Cemented_block_store.iter_cemented_file
+                   ~cemented_block_dir:src_cemented_dir
+                   (fun block ->
+                     let hash = Block_repr.hash block in
+                     let level = Block_repr.level block in
+                     Cemented_block_level_index.replace
+                       fresh_level_index
+                       hash
+                       level ;
+                     Cemented_block_hash_index.replace
+                       fresh_hash_index
+                       level
+                       hash ;
+                     Lwt.return_unit)
+                   file
+                 >>= fun () ->
+                 let cycle = Naming.(src_cemented_dir // filename) in
+                 Lwt_utils_unix.copy_file
+                   ~src:cycle
+                   ~dst:Naming.(dst_cemented_dir // filename)
+                 >>= fun () -> notify ()))
+            tasks)
       >>= fun () ->
       Cemented_block_level_index.close fresh_level_index ;
       Cemented_block_hash_index.close fresh_hash_index ;
