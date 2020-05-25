@@ -112,14 +112,10 @@ let test_from_bootstrapped ~descr (store_dir, context_dir) store
       genesis
     >>=? fun store' ->
     let chain_store' = Store.main_chain_store store' in
-    Format.printf "check flags@." ;
     check_flags descr store' last
     >>=? fun () ->
-    Format.printf "check avial@." ;
     assert_presence_in_store ~with_metadata:true chain_store' baked_blocks
-    >>=? fun () ->
-    Format.printf "closing@." ;
-    Store.close_store store' >>= fun () -> return_unit
+    >>=? fun () -> Store.close_store store' >>= fun () -> return_unit
 
 let make_tests_bootstrapped speed patch_context =
   let history_modes =
@@ -199,7 +195,6 @@ let test_from_snapshot ~descr:_ (store_dir, context_dir) store
         ~snapshot_file
         genesis
       >>=? fun () ->
-      Format.printf "Export ok@." ;
       let block = Some (Block_hash.to_b58check last_hash) in
       Snapshots.import
         ~patch_context
@@ -211,7 +206,6 @@ let test_from_snapshot ~descr:_ (store_dir, context_dir) store
         ~user_activated_protocol_overrides:[]
         genesis
       >>=? fun () ->
-      Format.printf "Import ok@." ;
       Reconstruction.reconstruct
         ~patch_context
         ~store_dir:dst_store_dir
@@ -219,9 +213,7 @@ let test_from_snapshot ~descr:_ (store_dir, context_dir) store
         genesis
         ~user_activated_upgrades:[]
         ~user_activated_protocol_overrides:[]
-      >>=? fun () ->
-      Format.printf "Reconstruct ok@." ;
-      return_false)
+      >>=? fun () -> return_false)
     ~on_error:(function
       | [Reconstruction_errors.(Reconstruction_failure Nothing_to_reconstruct)]
         as e ->
@@ -244,16 +236,12 @@ let test_from_snapshot ~descr:_ (store_dir, context_dir) store
   >>=? fun expected_to_fail ->
   if expected_to_fail then return_unit
   else
-    let () = Format.printf "hey@." in
     Store.init
       ~store_dir:dst_store_dir
       ~context_dir:dst_context_dir
       ~allow_testchains:false
       genesis
     >>=? fun store' ->
-    Format.printf "CHECK FLAGS@." ;
-    (* check_flags descr store' last
-     * >>=? fun () -> *)
     let chain_store' = Store.main_chain_store store' in
     assert_presence_in_store ~with_metadata:true chain_store' baked_blocks
     >>=? fun () -> Store.close_store store' >>= fun () -> return_unit
