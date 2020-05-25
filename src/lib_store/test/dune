@@ -1,5 +1,5 @@
 (executables
- (names test test_legacy)
+ (names test test_legacy legacy_store_maker)
  (libraries tezos-base
             tezos-store
 	    tezos-shell
