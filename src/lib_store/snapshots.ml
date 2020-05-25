@@ -991,7 +991,7 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
        caboose.proto_level. *)
     let protocol_levels =
       Protocol_levels.filter
-        (fun level _ -> Store.Block.proto_level minimum_block >= level)
+        (fun level _ -> level >= Store.Block.proto_level minimum_block)
         protocol_levels
     in
     return
