@@ -97,31 +97,31 @@ let assert_presence new_chain_store previously_baked_blocks ?savepoint ?caboose
 
 let check_flags new_chain_store previously_baked_blocks history_mode =
   let last = List.last_exn previously_baked_blocks in
+  Assert.equal_history_mode
+    ~msg:"history mode consistency: "
+    history_mode
+    (Store.Chain.history_mode new_chain_store) ;
+  Store.Chain.checkpoint new_chain_store
+  >>= fun checkpoint ->
+  Store.Block.get_block_metadata new_chain_store last
+  >>=? fun metadata ->
+  let expected_checkpoint = Store.Block.last_allowed_fork_level metadata in
+  Assert.equal
+    ~prn:(Format.sprintf "%ld")
+    ~msg:"checkpoint consistency: "
+    expected_checkpoint
+    (snd checkpoint) ;
+  Store.Chain.savepoint new_chain_store
+  >>= fun savepoint ->
+  Store.Chain.caboose new_chain_store
+  >>= fun caboose ->
   match history_mode with
   | History_mode.Archive ->
-      Assert.equal_history_mode
-        ~msg:"history mode consistency: "
-        history_mode
-        (Store.Chain.history_mode new_chain_store) ;
-      Store.Chain.checkpoint new_chain_store
-      >>= fun checkpoint ->
-      Store.Block.get_block_metadata new_chain_store last
-      >>=? fun metadata ->
-      let expected_checkpoint = Store.Block.last_allowed_fork_level metadata in
-      Assert.equal
-        ~prn:(Format.sprintf "%ld")
-        ~msg:"checkpoint consistency: "
-        expected_checkpoint
-        (snd checkpoint) ;
-      Store.Chain.savepoint new_chain_store
-      >>= fun savepoint ->
       Assert.equal
         ~prn:(Format.sprintf "%ld")
         ~msg:"savepoint consistency: "
         0l
         (snd savepoint) ;
-      Store.Chain.caboose new_chain_store
-      >>= fun caboose ->
       Assert.equal
         ~prn:(Format.sprintf "%ld")
         ~msg:"caboose consistency: "
@@ -129,29 +129,11 @@ let check_flags new_chain_store previously_baked_blocks history_mode =
         (snd caboose) ;
       assert_presence new_chain_store previously_baked_blocks history_mode
   | Full _ ->
-      Assert.equal_history_mode
-        ~msg:"history mode consistency: "
-        history_mode
-        (Store.Chain.history_mode new_chain_store) ;
-      Store.Chain.checkpoint new_chain_store
-      >>= fun checkpoint ->
-      Store.Block.get_block_metadata new_chain_store last
-      >>=? fun metadata ->
-      let expected_checkpoint = Store.Block.last_allowed_fork_level metadata in
-      Assert.equal
-        ~prn:(Format.sprintf "%ld")
-        ~msg:"checkpoint consistency: "
-        expected_checkpoint
-        (snd checkpoint) ;
-      Store.Chain.savepoint new_chain_store
-      >>= fun savepoint ->
       Assert.equal
         ~prn:(Format.sprintf "%ld")
         ~msg:"savepoint consistency: "
         expected_checkpoint
         (snd savepoint) ;
-      Store.Chain.caboose new_chain_store
-      >>= fun caboose ->
       Assert.equal
         ~prn:(Format.sprintf "%ld")
         ~msg:"caboose consistency: "
@@ -163,29 +145,11 @@ let check_flags new_chain_store previously_baked_blocks history_mode =
         ~savepoint:(snd savepoint)
         history_mode
   | Rolling _ ->
-      Assert.equal_history_mode
-        ~msg:"history mode consistency: "
-        history_mode
-        (Store.Chain.history_mode new_chain_store) ;
-      Store.Chain.checkpoint new_chain_store
-      >>= fun checkpoint ->
-      Store.Block.get_block_metadata new_chain_store last
-      >>=? fun metadata ->
-      let expected_checkpoint = Store.Block.last_allowed_fork_level metadata in
-      Assert.equal
-        ~prn:(Format.sprintf "%ld")
-        ~msg:"checkpoint consistency: "
-        expected_checkpoint
-        (snd checkpoint) ;
-      Store.Chain.savepoint new_chain_store
-      >>= fun savepoint ->
       Assert.equal
         ~prn:(Format.sprintf "%ld")
         ~msg:"savepoint consistency: "
         expected_checkpoint
         (snd savepoint) ;
-      Store.Chain.caboose new_chain_store
-      >>= fun caboose ->
       Store.Block.get_block_metadata new_chain_store last
       >>=? fun metadata ->
       let max_op_ttl = Store.Block.max_operations_ttl metadata in
