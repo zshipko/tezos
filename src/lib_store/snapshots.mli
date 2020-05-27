@@ -23,6 +23,8 @@
 (*                                                                           *)
 (*****************************************************************************)
 
+open Store_types
+
 type error +=
   | Incompatible_history_mode of {
       requested : History_mode.t;
@@ -38,22 +40,37 @@ type error +=
         | `Genesis
         | `Not_enough_pred ];
     }
-  | (* TODO *)
-      Snapshot_import_failure of string
-  | Wrong_protocol_hash of Protocol_hash.t
-  | Inconsistent_operation_hashes of
-      (Operation_list_list_hash.t * Operation_list_list_hash.t)
-  | Invalid_block_specification of string
-  | Cannot_find_protocol_sources of Protocol_hash.t
-  | Protocol_hash_and_protocol_sources_mismatch of {
-      provided_protocol_hash : Protocol_hash.t;
-      computed_protocol_hash : Protocol_hash.t;
+  | Snapshot_file_not_found of string
+  | Inconsistent_operation_hashes of {
+      expected : Operation_list_list_hash.t;
+      got : Operation_list_list_hash.t;
     }
-  | Provided_protocol_sources_and_embedded_protocol_sources_mismatch of {
-      protocol_hash : Protocol_hash.t;
-      computed_protocol_hash : Protocol_hash.t;
-      computed_protocol_hash_from_embedded_sources : Protocol_hash.t;
+  | Inconsistent_protocol_hash of {
+      expected : Protocol_hash.t;
+      got : Protocol_hash.t;
     }
+  | Inconsistent_context_hash of {
+      expected : Context_hash.t;
+      got : Context_hash.t;
+    }
+  | Inconsistent_context of Context_hash.t
+  | Cannot_decode_protocol of string
+  | Cannot_write_metadata of string
+  | Cannot_read_metadata of string
+  | Inconsistent_floating_store of block_descriptor * block_descriptor
+  | Missing_target_block of block_descriptor
+  | Cannot_read_floating_store of string
+  | Cannot_retrieve_block_interval
+  | Invalid_cemented_file of string
+  | Missing_cemented_file of string
+  | Corrupted_floating_store
+  | Invalid_protocol_file of string
+  | Target_block_validation_failed of Block_hash.t * string
+  | Directory_already_exists of string
+  | Empty_floating_store
+  | Inconsistent_predecessors
+  | Snapshot_import_failure of string
+  | Snapshot_export_failure of string
 
 val export :
   ?rolling:bool ->

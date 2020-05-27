@@ -42,21 +42,36 @@ type error +=
         | `Not_enough_pred ];
     }
   | Snapshot_file_not_found of string
+  | Inconsistent_operation_hashes of {
+      expected : Operation_list_list_hash.t;
+      got : Operation_list_list_hash.t;
+    }
+  | Inconsistent_protocol_hash of {
+      expected : Protocol_hash.t;
+      got : Protocol_hash.t;
+    }
+  | Inconsistent_context_hash of {
+      expected : Context_hash.t;
+      got : Context_hash.t;
+    }
+  | Inconsistent_context of Context_hash.t
+  | Cannot_decode_protocol of string
+  | Cannot_write_metadata of string
+  | Cannot_read_metadata of string
+  | Inconsistent_floating_store of block_descriptor * block_descriptor
+  | Missing_target_block of block_descriptor
+  | Cannot_read_floating_store of string
+  | Cannot_retrieve_block_interval
+  | Invalid_cemented_file of string
+  | Missing_cemented_file of string
+  | Corrupted_floating_store
+  | Invalid_protocol_file of string
+  | Target_block_validation_failed of Block_hash.t * string
+  | Directory_already_exists of string
+  | Empty_floating_store
+  | Inconsistent_predecessors
   | Snapshot_import_failure of string
-  | Wrong_protocol_hash of Protocol_hash.t
-  | Inconsistent_operation_hashes of
-      (Operation_list_list_hash.t * Operation_list_list_hash.t)
-  | Invalid_block_specification of string
-  | Cannot_find_protocol_sources of Protocol_hash.t
-  | Protocol_hash_and_protocol_sources_mismatch of {
-      provided_protocol_hash : Protocol_hash.t;
-      computed_protocol_hash : Protocol_hash.t;
-    }
-  | Provided_protocol_sources_and_embedded_protocol_sources_mismatch of {
-      protocol_hash : Protocol_hash.t;
-      computed_protocol_hash : Protocol_hash.t;
-      computed_protocol_hash_from_embedded_sources : Protocol_hash.t;
-    }
+  | Snapshot_export_failure of string
 
 let () =
   let open Data_encoding in
@@ -138,35 +153,7 @@ let () =
     (fun file -> Snapshot_file_not_found file) ;
   register_error_kind
     `Permanent
-    ~id:"SnapshotImportFailure"
-    ~title:"Snapshot import failure"
-    ~description:"The imported snapshot is malformed."
-    ~pp:(fun ppf msg ->
-      Format.fprintf
-        ppf
-        "The data contained in the snapshot is not valid. The import \
-         mechanism failed to validate the file: %s."
-        msg)
-    (obj1 (req "message" string))
-    (function Snapshot_import_failure str -> Some str | _ -> None)
-    (fun str -> Snapshot_import_failure str) ;
-  register_error_kind
-    `Permanent
-    ~id:"WrongProtocolHash"
-    ~title:"Wrong protocol hash"
-    ~description:"Wrong protocol hash"
-    ~pp:(fun ppf p ->
-      Format.fprintf
-        ppf
-        "Wrong protocol hash (%a) found in snapshot. Snapshot is corrupted."
-        Protocol_hash.pp
-        p)
-    (obj1 (req "protocol_hash" Protocol_hash.encoding))
-    (function Wrong_protocol_hash p -> Some p | _ -> None)
-    (fun p -> Wrong_protocol_hash p) ;
-  register_error_kind
-    `Permanent
-    ~id:"InconsistentOperationHashes"
+    ~id:"snapshots.inconsistent_operation_hashes"
     ~title:"Inconsistent operation hashes"
     ~description:"The operations given do not match their hashes."
     ~pp:(fun ppf (oph, oph') ->
@@ -181,125 +168,283 @@ let () =
        (req "expected_operation_hashes" Operation_list_list_hash.encoding)
        (req "received_operation_hashes" Operation_list_list_hash.encoding))
     (function
-      | Inconsistent_operation_hashes (oph, oph') ->
-          Some (oph, oph')
+      | Inconsistent_operation_hashes {expected; got} ->
+          Some (expected, got)
       | _ ->
           None)
-    (fun (oph, oph') -> Inconsistent_operation_hashes (oph, oph')) ;
+    (fun (expected, got) -> Inconsistent_operation_hashes {expected; got}) ;
   register_error_kind
     `Permanent
-    ~id:"InvalidBlockSpecification"
-    ~title:"Invalid block specification"
-    ~description:"Invalid specification of block to import"
-    ~pp:(fun ppf str ->
+    ~id:"snapshots.inconsistent_protocol_hash"
+    ~title:"Inconsistent protocol hash"
+    ~description:"The announced protocol hash doesn't match the computed hash."
+    ~pp:(fun ppf (oph, oph') ->
       Format.fprintf
         ppf
-        "Cannot check the given block to import based on %s. You must specify \
-         a valid block hash."
-        str)
-    (obj1 (req "str" string))
-    (function Invalid_block_specification s -> Some s | _ -> None)
-    (fun s -> Invalid_block_specification s) ;
-  register_error_kind
-    `Permanent
-    ~id:"snapshot.cannot_find_protocol_sources"
-    ~title:"Cannot find protocol sources"
-    ~description:"Cannot find protocol sources when exporting snapshot."
-    ~pp:(fun ppf protocol_hash ->
-      Format.fprintf
-        ppf
-        "Cannot find protocol sources while exporting snapshot when looking \
-         for protocol hash %a."
+        "Inconsistent protocol_hash. Expected: %a, got %a."
         Protocol_hash.pp
-        protocol_hash)
-    (obj1 (req "protocol_hash" Protocol_hash.encoding))
-    (function
-      | Cannot_find_protocol_sources protocol_hash ->
-          Some protocol_hash
-      | _ ->
-          None)
-    (fun protocol_hash -> Cannot_find_protocol_sources protocol_hash) ;
-  register_error_kind
-    `Permanent
-    ~id:"snapshot.protocol_hash_and_protocol_sources_mismatch"
-    ~title:"Protocol hash and protocol sources mismatch"
-    ~description:
-      "The protocol hash computed from protocol sources does not match the \
-       one provided."
-    ~pp:(fun ppf (protocol_hash, computed_protocol_hash) ->
-      Format.fprintf
-        ppf
-        "The protocol hash provided in a snapshot protocol data does not \
-         match the provided sources: computed %a but found %a."
+        oph
         Protocol_hash.pp
-        protocol_hash
-        Protocol_hash.pp
-        computed_protocol_hash)
+        oph')
     (obj2
-       (req "protocol_hash" Protocol_hash.encoding)
-       (req "computed_protocol_hash" Protocol_hash.encoding))
+       (req "expected" Protocol_hash.encoding)
+       (req "got" Protocol_hash.encoding))
     (function
-      | Protocol_hash_and_protocol_sources_mismatch
-          {provided_protocol_hash; computed_protocol_hash} ->
-          Some (provided_protocol_hash, computed_protocol_hash)
+      | Inconsistent_protocol_hash {expected; got} ->
+          Some (expected, got)
       | _ ->
           None)
-    (fun (provided_protocol_hash, computed_protocol_hash) ->
-      Protocol_hash_and_protocol_sources_mismatch
-        {provided_protocol_hash; computed_protocol_hash}) ;
+    (fun (expected, got) -> Inconsistent_protocol_hash {expected; got}) ;
   register_error_kind
     `Permanent
-    ~id:
-      "snapshot.provided_protocol_sources_and_embedded_protocol_sources_mismatch"
-    ~title:"Provided protocol sources and embedded protocol sources mismatch"
-    ~description:
-      "Provided protocol sources and embedded protocol sources mismatch."
-    ~pp:
-      (fun ppf
-           ( protocol_hash,
-             computed_protocol_hash,
-             computed_protocol_hash_from_embedded_sources ) ->
+    ~id:"snapshots.inconsistent_context_hash"
+    ~title:"Inconsistent context hash"
+    ~description:"The announced context hash doesn't match the computed hash."
+    ~pp:(fun ppf (oph, oph') ->
       Format.fprintf
         ppf
-        "@[The protocol sources provided in a snapshot protocol data do not \
-         match the corresponding embedded sources in the node, according to \
-         the provided protocol hash.@.@.Provided protocol hash: \
-         %a@.@.Computed protocol hash from snapshot sources: %a@.@.Computed \
-         protocol hash from embedded sources: %a.@]"
-        Protocol_hash.pp
-        protocol_hash
-        Protocol_hash.pp
-        computed_protocol_hash
-        Protocol_hash.pp
-        computed_protocol_hash_from_embedded_sources)
-    (obj3
-       (req "protocol_hash" Protocol_hash.encoding)
-       (req "computed_protocol_hash" Protocol_hash.encoding)
-       (req
-          "computed_protocol_hash_from_embedded_sources"
-          Protocol_hash.encoding))
+        "Inconsistent context_hash. Expected: %a, got %a."
+        Context_hash.pp
+        oph
+        Context_hash.pp
+        oph')
+    (obj2
+       (req "expected" Context_hash.encoding)
+       (req "got" Context_hash.encoding))
     (function
-      | Provided_protocol_sources_and_embedded_protocol_sources_mismatch
-          { protocol_hash;
-            computed_protocol_hash;
-            computed_protocol_hash_from_embedded_sources } ->
-          Some
-            ( protocol_hash,
-              computed_protocol_hash,
-              computed_protocol_hash_from_embedded_sources )
+      | Inconsistent_context_hash {expected; got} ->
+          Some (expected, got)
       | _ ->
           None)
-    (fun ( protocol_hash,
-           computed_protocol_hash,
-           computed_protocol_hash_from_embedded_sources ) ->
-      Provided_protocol_sources_and_embedded_protocol_sources_mismatch
-        {
-          protocol_hash;
-          computed_protocol_hash;
-          computed_protocol_hash_from_embedded_sources;
-        })
+    (fun (expected, got) -> Inconsistent_context_hash {expected; got}) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.inconsistent_context"
+    ~title:"Inconsistent context"
+    ~description:"Inconsistent context after restore."
+    ~pp:(fun ppf h ->
+      Format.fprintf
+        ppf
+        "Failed to checkout context %a after restoring it."
+        Context_hash.pp
+        h)
+    (obj1 (req "context_hash" Context_hash.encoding))
+    (function Inconsistent_context h -> Some h | _ -> None)
+    (fun h -> Inconsistent_context h) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.cannot_decode_protocol"
+    ~title:"Protocol import cannot decode"
+    ~description:"Failed to decode file when importing protocol"
+    ~pp:(fun ppf filename ->
+      Format.fprintf ppf "Cannot decode the protocol in file: %s" filename)
+    (obj1 (req "filename" string))
+    (function Cannot_decode_protocol filename -> Some filename | _ -> None)
+    (fun filename -> Cannot_decode_protocol filename) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.cannot_write_metadata"
+    ~title:"Cannot write metadata"
+    ~description:"Cannot write metadata while exporting snapshot."
+    ~pp:(fun ppf msg ->
+      Format.fprintf
+        ppf
+        "Cannot write metadata while exporting snapshot: %s."
+        msg)
+    (obj1 (req "msg" string))
+    (function Cannot_write_metadata msg -> Some msg | _ -> None)
+    (fun msg -> Cannot_write_metadata msg) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.cannot_read_metadata"
+    ~title:"Cannot read metadata"
+    ~description:"Cannot read snapshot's metadata."
+    ~pp:(fun ppf msg ->
+      Format.fprintf ppf "Cannot read snapshot's metadata: %s." msg)
+    (obj1 (req "msg" string))
+    (function Cannot_read_metadata msg -> Some msg | _ -> None)
+    (fun msg -> Cannot_read_metadata msg) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.inconsistent_floating_store"
+    ~title:"Inconsistent floating store"
+    ~description:"The floating block store is inconsistent."
+    ~pp:(fun ppf (target_blk, first_blk) ->
+      Format.fprintf
+        ppf
+        "Failed to export floating store, the first block %a is above the \
+         target block %a (broken invariant)."
+        pp_block_descriptor
+        first_blk
+        pp_block_descriptor
+        target_blk)
+    (obj2
+       (req "target" block_descriptor_encoding)
+       (req "first" block_descriptor_encoding))
+    (function
+      | Inconsistent_floating_store (target, first) ->
+          Some (target, first)
+      | _ ->
+          None)
+    (fun (target, first) -> Inconsistent_floating_store (target, first)) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.missing_target_block"
+    ~title:"Missing target block in floating stores"
+    ~description:"Floating stores does not contain the target block."
+    ~pp:(fun ppf target_blk ->
+      Format.fprintf
+        ppf
+        "Failed to export floating blocks as the target block %a cannot be \
+         found."
+        pp_block_descriptor
+        target_blk)
+    (obj1 (req "target" block_descriptor_encoding))
+    (function Missing_target_block descr -> Some descr | _ -> None)
+    (fun descr -> Missing_target_block descr) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.cannot_read_floating_stores"
+    ~title:"Cannot read floating stores"
+    ~description:"Unable to read floating stores."
+    ~pp:(fun ppf msg ->
+      Format.fprintf ppf "Cannot read the floating blocks stores: %s" msg)
+    (obj1 (req "msg" string))
+    (function Cannot_read_floating_store msg -> Some msg | _ -> None)
+    (fun msg -> Cannot_read_floating_store msg) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.cannot_retrieve_block_interval"
+    ~title:"Cannot retrieve block interval"
+    ~description:"Cannot retrieve block interval from store"
+    ~pp:(fun ppf () ->
+      Format.fprintf
+        ppf
+        "Cannot retrieve block interval: failed to retrieve blocks.")
+    unit
+    (function Cannot_retrieve_block_interval -> Some () | _ -> None)
+    (fun () -> Cannot_retrieve_block_interval) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.invalid_cemented_file"
+    ~title:"Invalid cemented file"
+    ~description:
+      "Encountered an invalid cemented file while restoring the cemented store"
+    ~pp:(fun ppf file ->
+      Format.fprintf
+        ppf
+        "Failed to restore cemented blocks. Encountered an invalid file '%s'."
+        file)
+    (obj1 (req "file" string))
+    (function Invalid_cemented_file s -> Some s | _ -> None)
+    (fun s -> Invalid_cemented_file s) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.missing_cemented_file"
+    ~title:"Missing cemented file"
+    ~description:"Cannot find cemented file while restoring cemented store"
+    ~pp:(fun ppf file ->
+      Format.fprintf
+        ppf
+        "Failed to restore cemented blocks. The cycle '%s' is missing."
+        file)
+    (obj1 (req "cycle" string))
+    (function Missing_cemented_file s -> Some s | _ -> None)
+    (fun s -> Missing_cemented_file s) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.corrupted_floating_store"
+    ~title:"Corrupted floating store"
+    ~description:"Failed to read floating store"
+    ~pp:(fun ppf () ->
+      Format.fprintf
+        ppf
+        "Failed to restore floating blocks. The floating store is corrupted.")
+    unit
+    (function Corrupted_floating_store -> Some () | _ -> None)
+    (fun () -> Corrupted_floating_store) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.protocol_import_invalid_file"
+    ~title:"Protocol import invalid file"
+    ~description:"Failed to import protocol as the filename is invalid"
+    ~pp:(fun ppf filename ->
+      Format.fprintf
+        ppf
+        "Failed to import protocol. The protocol file '%s' is invalid"
+        filename)
+    (obj1 (req "filename" string))
+    (function Invalid_protocol_file filename -> Some filename | _ -> None)
+    (fun filename -> Invalid_protocol_file filename) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.target_block_validation_failed"
+    ~title:"target block validation failed"
+    ~description:"Failed to validate the target block."
+    ~pp:(fun ppf (h, errs) ->
+      Format.fprintf ppf "Failed to validate block %a: %s" Block_hash.pp h errs)
+    (obj2 (req "block" Block_hash.encoding) (req "errors" string))
+    (function
+      | Target_block_validation_failed (h, errs) -> Some (h, errs) | _ -> None)
+    (fun (h, errs) -> Target_block_validation_failed (h, errs)) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.directory_already_exists"
+    ~title:"Directory already exists"
+    ~description:"The given data directory already exists."
+    ~pp:(fun ppf s ->
+      Format.fprintf
+        ppf
+        "Failed to import snasphot as the given directory %s already exists."
+        s)
+    (obj1 (req "path" string))
+    (function Directory_already_exists s -> Some s | _ -> None)
+    (fun s -> Directory_already_exists s) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.empty_floating_store"
+    ~title:"Empty floating store"
+    ~description:"Floating store is empty."
+    ~pp:(fun ppf () ->
+      Format.fprintf
+        ppf
+        "Failed to export floating blocks: the floating store does not \
+         contain any blocks (broken invariant).")
+    unit
+    (function Empty_floating_store -> Some () | _ -> None)
+    (fun () -> Empty_floating_store) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshot.inconsistent_predecessors"
+    ~title:"Inconsistent predecessors"
+    ~description:
+      "Inconsistent predecessors while validating a legacy snapshot."
+    ~pp:(fun ppf () ->
+      Format.fprintf
+        ppf
+        "Failed to validate the predecessors: inconsistent hash.")
+    unit
+    (function Inconsistent_predecessors -> Some () | _ -> None)
+    (fun () -> Inconsistent_predecessors) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshots.import_failure"
+    ~title:"Snapshot import failure"
+    ~description:"Generic import process failure."
+    ~pp:(fun ppf msg -> Format.fprintf ppf "Failure during import: %s." msg)
+    (obj1 (req "message" string))
+    (function Snapshot_import_failure str -> Some str | _ -> None)
+    (fun str -> Snapshot_import_failure str) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshots.export_failure"
+    ~title:"Snapshot export failure"
+    ~description:"Generic export process failure."
+    ~pp:(fun ppf msg -> Format.fprintf ppf "Failure during export: %s." msg)
+    (obj1 (req "message" string))
+    (function Snapshot_export_failure str -> Some str | _ -> None)
+    (fun str -> Snapshot_export_failure str)
 
-(* FIXME: add proper error *)
 let write_snapshot_metadata metadata file =
   let metadata_json =
     Data_encoding.Json.construct Snapshot_version.metadata_encoding metadata
@@ -307,41 +452,40 @@ let write_snapshot_metadata metadata file =
   Lwt_utils_unix.Json.write_file file metadata_json
   >>= function
   | Error err ->
-      Format.kasprintf Lwt.fail_with "%a" Error_monad.pp_print_error err
+      Format.kasprintf
+        (fun msg -> fail (Cannot_write_metadata msg))
+        "%a"
+        pp_print_error
+        err
   | Ok () ->
-      Lwt.return_unit
+      return_unit
 
-(* FIXME: add proper error *)
 let read_snapshot_metadata file =
   let filename = Naming.(file // Snapshot.metadata) in
   let read_config json =
     return
       (Data_encoding.Json.destruct Snapshot_version.metadata_encoding json)
   in
-  if Sys.is_directory file then
-    Lwt_utils_unix.Json.read_file filename
-    >>= function
-    | Error err ->
-        failwith
-          "read_snapshot_metadata: cannot read snapshot's metadata - %a"
-          Error_monad.pp_print_error
-          err
-    | Ok json ->
-        read_config json
-  else
-    let ic = Zip.open_in file in
-    try
-      let entry = Zip.find_entry ic Naming.Snapshot.metadata in
-      let s = Zip.read_entry ic entry in
-      match Data_encoding.Json.from_string s with
-      | Ok json ->
-          read_config json
-      | Error err ->
-          failwith
-            "read_snapshot_metadata: cannot read snapshot's metadata - %s"
-            err
-    with _ ->
-      failwith "read_snapshot_metadata: cannot parse snapshot's metadata"
+  protect
+    ~on_error:(fun err ->
+      Format.kasprintf
+        (fun msg -> fail (Cannot_read_metadata msg))
+        "%a"
+        pp_print_error
+        err)
+    (fun () ->
+      if Sys.is_directory file then
+        Lwt_utils_unix.Json.read_file filename
+        >>=? fun json -> read_config json
+      else
+        let ic = Zip.open_in file in
+        let entry = Zip.find_entry ic Naming.Snapshot.metadata in
+        let s = Zip.read_entry ic entry in
+        match Data_encoding.Json.from_string s with
+        | Ok json ->
+            read_config json
+        | Error err ->
+            fail (Cannot_read_metadata err))
 
 let copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir
     (files : Cemented_block_store.cemented_blocks_file list) =
@@ -414,7 +558,9 @@ let write_floating_block fd (block : Block_repr.t) =
   Lwt_utils_unix.write_bytes ~pos:0 ~len fd bytes
 
 let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
-  let (limit_hash, limit_level) = Store.Block.descriptor export_block in
+  let ((limit_hash, limit_level) as export_block_descr) =
+    Store.Block.descriptor export_block
+  in
   let (stream, bpush) = Lwt_stream.create_bounded 1000 in
   (* Retrieve first floating block *)
   Block_repr.read_next_block_opt floating_ro_fd
@@ -428,16 +574,13 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
                 return block
             | None ->
                 (* No block to read *)
-                (* FIXME: proper error *)
-                failwith
-                  " export_floating_blocks: broken invariant, no blocks to \
-                   read in floating stores" ))
+                fail Empty_floating_store ))
   >>=? fun first_block ->
-  if Compare.Int32.(limit_level < Block_repr.level first_block) then
-    (* FIXME: proper error *)
-    failwith
-      " export_floating_blocks: broken invariant, the first floating block is \
-       above the target block"
+  let first_block_level = Block_repr.level first_block in
+  if Compare.Int32.(limit_level < first_block_level) then
+    fail
+      (Inconsistent_floating_store
+         (export_block_descr, (Block_repr.hash first_block, first_block_level)))
   else
     let exception Done in
     let f block =
@@ -461,18 +604,12 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
               Lwt_unix.lseek floating_rw_fd 0 Unix.SEEK_SET
               >>= fun _ ->
               Floating_block_store.iter_raw_fd f floating_rw_fd
-              >>=? fun () ->
-              (* FIXME: proper error *)
-              failwith "floating_export: could not retrieve the target block")
+              >>=? fun () -> fail (Missing_target_block export_block_descr))
             (function
               | Done ->
                   return_unit
               | exn ->
-                  (* FIXME: proper error *)
-                  failwith
-                    "floating_export: error while reading the floating stores \
-                     floating: %s"
-                    (Printexc.to_string exn)))
+                  fail (Cannot_read_floating_store (Printexc.to_string exn))))
         (fun () -> bpush#close ; Lwt.return_unit)
     in
     return (reading_thread, stream)
@@ -755,10 +892,7 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
           ~to_block:export_block
         >>= function
         | None ->
-            (* FIXME: proper error *)
-            failwith
-              "compute_cemented_table_and_extra_cycle: cannot retrieve the \
-               beginning of cycle."
+            fail Cannot_retrieve_block_interval
         | Some floating_blocks ->
             (* Don't forget to add the first block as
                [Chain_traversal.path] does not include the lower-bound
@@ -830,10 +964,7 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
       ~to_block:pred_block
     >>= (function
           | None ->
-              (* FIXME: proper error *)
-              failwith
-                "export_rolling: unable to retrieve the necessary blocks to \
-                 create the snapshot"
+              fail Cannot_retrieve_block_interval
           | Some blocks ->
               (* Don't forget to add the first block as
                  [Chain_traversal.path] does not include the
@@ -1012,8 +1143,9 @@ let zip_snapshot dir out =
       Format.fprintf fmt "Compressing snapshot: %d files treated" i)
     (fun notify ->
       if not (Sys.file_exists dir && Sys.is_directory dir) then
-        (* FIXME: proper error *)
-        Format.ksprintf invalid_arg "zip_directory: %s is not a directory" dir
+        fail
+          (Snapshot_export_failure
+             (Format.sprintf "unable to retrieve snapshot directory %s" dir))
       else
         let oc = Zip.open_out out in
         Lwt.finalize
@@ -1040,50 +1172,46 @@ let zip_snapshot dir out =
                       notify () ))
                 files
             in
-            zip_dir "" dir)
+            zip_dir "" dir >>= return)
           (fun () -> Zip.close_out oc ; Lwt.return_unit))
 
 let unzip_snapshot zipfile path =
-  if not (Sys.file_exists path && Sys.is_directory path) then
-    (* FIXME: proper error *)
-    Format.ksprintf
-      invalid_arg
-      "unzip_directory: path %s is not a directory"
-      path
-  else
-    Lwt_utils_unix.display_progress
-      ~every:1
-      ~pp_print_step:(fun fmt i ->
-        Format.fprintf fmt "Inflating snapshot: %d files decompressed" i)
-      (fun notify ->
-        let ic = Zip.open_in zipfile in
-        Lwt.finalize
-          (fun () ->
-            let entries = Zip.entries ic in
-            let make_path path =
-              if Sys.file_exists path then Lwt.return_unit
-              else
-                String.split_path (Filename.dirname path)
-                |> Lwt_list.iter_s (fun s -> Lwt_utils_unix.create_dir s)
-            in
-            if not (List.length entries > 0) then
-              Lwt.fail_with "unzip_snapshot: invalid snapshot archive"
+  Lwt_utils_unix.display_progress
+    ~every:1
+    ~pp_print_step:(fun fmt i ->
+      Format.fprintf fmt "Inflating snapshot: %d files decompressed" i)
+    (fun notify ->
+      let ic = Zip.open_in zipfile in
+      Lwt.finalize
+        (fun () ->
+          let entries = Zip.entries ic in
+          let make_path path =
+            if Sys.file_exists path then Lwt.return_unit
             else
-              Lwt_list.iter_s
-                (fun entry ->
-                  make_path (Filename.dirname entry.Zip.filename)
-                  >>= fun () ->
-                  if entry.Zip.is_directory then
-                    Lwt_utils_unix.create_dir
-                      (Filename.concat path entry.filename)
-                  else (
-                    Zip.copy_entry_to_file
-                      ic
-                      entry
-                      (Filename.concat path entry.filename) ;
-                    notify () ))
-                entries)
-          (fun () -> Zip.close_in ic ; Lwt.return_unit))
+              String.split_path (Filename.dirname path)
+              |> Lwt_list.iter_s (fun s -> Lwt_utils_unix.create_dir s)
+          in
+          if not (List.length entries > 0) then
+            fail
+              (Snapshot_import_failure
+                 "compressed snapshot does not contain any entries")
+          else
+            Lwt_list.iter_s
+              (fun entry ->
+                make_path (Filename.dirname entry.Zip.filename)
+                >>= fun () ->
+                if entry.Zip.is_directory then
+                  Lwt_utils_unix.create_dir
+                    (Filename.concat path entry.filename)
+                else (
+                  Zip.copy_entry_to_file
+                    ic
+                    entry
+                    (Filename.concat path entry.filename) ;
+                  notify () ))
+              entries
+            >>= return)
+        (fun () -> Zip.close_in ic ; Lwt.return_unit))
 
 let export ?(rolling = false) ?(compress = true) ~block ~store_dir ~context_dir
     ~chain_name ~snapshot_file genesis =
@@ -1136,12 +1264,12 @@ let export ?(rolling = false) ?(compress = true) ~block ~store_dir ~context_dir
       : Snapshot_version.metadata )
   in
   write_snapshot_metadata metadata Naming.(snapshot_dir // Snapshot.metadata)
-  >>= fun () ->
+  >>=? fun () ->
   ( if compress then
     zip_snapshot snapshot_dir snapshot_file
-    >>= fun () -> Lwt_utils_unix.remove_dir snapshot_dir
-  else Lwt_unix.rename snapshot_dir snapshot_file )
-  >>= fun () ->
+    >>=? fun () -> Lwt_utils_unix.remove_dir snapshot_dir >>= return
+  else Lwt_unix.rename snapshot_dir snapshot_file >>= return )
+  >>=? fun () ->
   lwt_emit (Export_success snapshot_file) >>= fun () -> return_unit
 
 let restore_cemented_blocks ?(check_consistency = true) ~should_rename
@@ -1191,16 +1319,14 @@ let restore_cemented_blocks ?(check_consistency = true) ~should_rename
             | _ ->
                 false
           in
-          if not is_valid then
-            (* FIXME: proper error *)
-            failwith "Found an invalid cemented block file: %s" file
+          if not is_valid then fail (Invalid_cemented_file file)
           else return_true)
     files
   >>=? fun cemented_files ->
   let nb_cemented_files = List.length cemented_files in
   ( if (not should_rename) && nb_cemented_files > 0 then
     (* Don't copy anything if it was just a renaming, the archive
-       inflating is enough. *)
+         inflating is enough. *)
     Lwt_utils_unix.display_progress
       ~pp_print_step:(fun fmt i ->
         Format.fprintf
@@ -1231,8 +1357,7 @@ let restore_cemented_blocks ?(check_consistency = true) ~should_rename
                (fun {Cemented_block_store.filename; _} ->
                  Compare.String.equal filename cemented_file)
                (Cemented_block_store.cemented_blocks_files cemented_store))
-          (* FIXME: proper error*)
-        then failwith "Cemented copy error: cannot find file %s" cemented_file
+        then fail (Missing_cemented_file cemented_file)
         else return_unit)
       (List.sort compare cemented_files)
     >>=? fun () ->
@@ -1266,9 +1391,7 @@ let read_floating_blocks ~genesis_hash ~floating_blocks_file =
     Lwt_unix.lseek fd 0 Unix.SEEK_SET
     >>= fun _ ->
     let rec loop ?pred_block nb_bytes_left =
-      if nb_bytes_left < 0 then
-        (* FIXME: proper error *)
-        failwith "read_floating_blocks: corrupted blocks"
+      if nb_bytes_left < 0 then fail Corrupted_floating_store
       else if nb_bytes_left = 0 then return_unit
       else
         Block_repr.read_next_block fd
@@ -1319,8 +1442,7 @@ let restore_protocols ~should_rename ~snapshot_protocol_dir ~dst_protocol_dir =
       | Some ph ->
           return (ph, file)
       | None ->
-          (* FIXME: proper error *)
-          failwith "Invalid protocol filename %s" file)
+          fail (Invalid_protocol_file file))
     protocol_files
   >>=? fun protocols ->
   Lwt_utils_unix.display_progress
@@ -1339,25 +1461,15 @@ let restore_protocols ~should_rename ~snapshot_protocol_dir ~dst_protocol_dir =
         >>= fun protocol_sources ->
         match Protocol.of_bytes (Bytes.unsafe_of_string protocol_sources) with
         | None ->
-            (* FIXME: proper error *)
-            failwith
-              "import_protocol: cannot decode protocol %s"
-              protocol_filename
+            fail (Cannot_decode_protocol protocol_filename)
         | Some p ->
             let hash = Protocol.hash p in
             notify ()
             >>= fun () ->
-            (* FIXME: proper error *)
             fail_unless
               (Protocol_hash.equal expected_hash hash)
-              (Exn
-                 (Failure
-                    (Format.asprintf
-                       "Inconsistent protocol hash: got %a expected %a"
-                       Protocol_hash.pp
-                       hash
-                       Protocol_hash.pp
-                       expected_hash)))
+              (Inconsistent_protocol_hash
+                 {expected = expected_hash; got = hash})
       in
       iter_s validate_and_copy protocols)
   >>=? fun () -> return protocol_levels
@@ -1373,12 +1485,15 @@ let import_log_notice ?snapshot_metadata filename block =
   >>= fun () -> lwt_emit Import_loading
 
 let check_context_hash_consistency validation_store block_header =
-  (* FIXME: proper error *)
   fail_unless
     (Context_hash.equal
        validation_store.Tezos_validation.Block_validation.context_hash
        block_header.Block_header.shell.context)
-    (Snapshot_import_failure "resulting context hash does not match")
+    (Inconsistent_context_hash
+       {
+         expected = block_header.Block_header.shell.context;
+         got = validation_store.Tezos_validation.Block_validation.context_hash;
+       })
 
 let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
     ~user_activated_upgrades ~user_activated_protocol_overrides
@@ -1403,14 +1518,8 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
         | Some ch ->
             return ch
         | None ->
-            (* FIXME: proper error *)
-            failwith
-              "Failed to checkout context with hash %a. Something is wrong \
-               with your storage."
-              Context_hash.pp
-              pred_context_hash)
+            fail (Inconsistent_context pred_context_hash))
   >>=? fun predecessor_context ->
-  (* FIXME: proper error *)
   Tezos_validation.Block_validation.apply
     chain_id
     ~user_activated_upgrades
@@ -1424,8 +1533,12 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
         | Ok block_validation_result ->
             return block_validation_result
         | Error errs ->
-            failwith
-              "Failed to validate snapshot's target block: %a"
+            Format.kasprintf
+              (fun errs ->
+                fail
+                  (Target_block_validation_failed
+                     (Block_header.hash block_header, errs)))
+              "%a"
               pp_print_error
               errs)
   >>=? fun block_validation_result ->
@@ -1439,12 +1552,10 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
 let import ?patch_context ?block:expected_block ?(check_consistency = true)
     ~snapshot_file ~dst_store_dir ~dst_context_dir ~user_activated_upgrades
     ~user_activated_protocol_overrides (genesis : Genesis.t) =
-  if Sys.file_exists dst_store_dir then
-    (* FIXME: proper error *)
-    Format.ksprintf
-      invalid_arg
-      "import: target  %s already exists"
-      dst_store_dir ;
+  fail_when
+    (Sys.file_exists dst_store_dir)
+    (Directory_already_exists dst_store_dir)
+  >>=? fun () ->
   let dst_protocol_dir = Naming.(dst_store_dir // protocol_store_directory) in
   let chain_id = Chain_id.of_block_hash genesis.block in
   let dst_chain_store_dir = Naming.(dst_store_dir // chain_store chain_id) in
@@ -1472,7 +1583,7 @@ let import ?patch_context ?block:expected_block ?(check_consistency = true)
     in
     Lwt_utils_unix.create_dir snapshot_dir
     >>= fun () ->
-    protect (fun () -> unzip_snapshot snapshot_file snapshot_dir >>= return)
+    protect (fun () -> unzip_snapshot snapshot_file snapshot_dir)
     >>=? fun () -> return (true, snapshot_dir) )
   >>=? fun (is_compressed, snapshot_dir) ->
   Context.init ~readonly:false ?patch_context dst_context_dir
@@ -1588,11 +1699,10 @@ let legacy_verify_predecessors header_opt pred_hash =
   | None ->
       return_unit
   | Some header ->
-      (* FIXME: better error *)
       fail_unless
         ( header.Block_header.shell.level >= 2l
         && Block_hash.equal header.shell.predecessor pred_hash )
-        (Snapshot_import_failure "predecessors inconsistency")
+        Inconsistent_predecessors
 
 let legacy_check_operations_consistency block_header operations
     operation_hashes =
@@ -1624,7 +1734,10 @@ let legacy_check_operations_consistency block_header operations
   fail_unless
     are_oph_equal
     (Inconsistent_operation_hashes
-       (computed_hash, block_header.Block_header.shell.operations_hash))
+       {
+         expected = block_header.Block_header.shell.operations_hash;
+         got = computed_hash;
+       })
 
 let legacy_block_validation succ_header_opt header_hash
     {Context.Pruned_block.block_header; operations; operation_hashes} =
@@ -1786,7 +1899,6 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
   Context.checkout_exn context_index pred_context_hash
   >>= fun predecessor_context ->
   let {Context.Block_data_legacy.block_header; operations} = block_data in
-  (* FIXME: proper error *)
   Tezos_validation.Block_validation.apply
     chain_id
     ~user_activated_upgrades
@@ -1801,16 +1913,18 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
         | Ok block_validation_result ->
             return block_validation_result
         | Error errs ->
-            failwith
-              "Failed to validate snapshot's target block: %a"
+            Format.kasprintf
+              (fun errs ->
+                fail
+                  (Target_block_validation_failed
+                     (Block_header.hash block_header, errs)))
+              "%a"
               pp_print_error
               errs)
   >>=? fun block_validation_result ->
-  fail_unless
-    (Context_hash.equal
-       block_validation_result.validation_store.Block_validation.context_hash
-       block_header.Block_header.shell.context)
-    (Snapshot_import_failure "Resulting context hash does not match")
+  check_context_hash_consistency
+    block_validation_result.validation_store
+    block_header
   >>=? fun () ->
   let {Block_validation.validation_store; block_metadata; ops_metadata; _} =
     block_validation_result
