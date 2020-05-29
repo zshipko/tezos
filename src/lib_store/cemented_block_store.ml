@@ -609,12 +609,12 @@ let trigger_gc cemented_store = function
               (fun _exn -> Lwt.return_unit))
           files_to_remove
 
-let iter_cemented_file ~cemented_block_dir f {filename; start_level; end_level}
+let iter_cemented_file ~cemented_blocks_dir f {filename; start_level; end_level}
     =
   Lwt_io.with_file
     ~flags:[Unix.O_RDONLY]
     ~mode:Lwt_io.Input
-    Naming.(cemented_block_dir // filename)
+    Naming.(cemented_blocks_dir // filename)
     (fun channel ->
       let nb_blocks = Int32.(succ (sub end_level start_level)) in
       Lwt_io.BE.read_int channel

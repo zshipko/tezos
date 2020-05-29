@@ -526,7 +526,7 @@ let copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir
           Lwt_list.iter_s
             (Lwt_list.iter_p (fun ({filename; _} as file) ->
                  Cemented_block_store.iter_cemented_file
-                   ~cemented_block_dir:src_cemented_dir
+                   ~cemented_blocks_dir:src_cemented_dir
                    (fun block ->
                      let hash = Block_repr.hash block in
                      let level = Block_repr.level block in

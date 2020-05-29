@@ -233,7 +233,7 @@ val trigger_gc : t -> History_mode.t -> unit Lwt.t
     the cemented [block_file] located in [cemented_block_dir] and
     applies [f] on every block. *)
 val iter_cemented_file :
-  cemented_block_dir:string ->
+  cemented_blocks_dir:string ->
   (Block_repr.block -> unit Lwt.t) ->
   cemented_blocks_file ->
   unit Lwt.t
