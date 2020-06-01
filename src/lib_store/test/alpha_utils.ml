@@ -279,8 +279,7 @@ module Forge = struct
     in
     Block_header.{shell; protocol_data = {contents; signature}} |> return
 
-  let forge_header ctxt ?(policy = By_priority 0) ?timestamp ?(operations = [])
-      pred =
+  let forge_header ctxt ?(policy = By_priority 0) ?timestamp ~operations pred =
     let proto_level = Store.Block.proto_level pred in
     dispatch_policy ctxt policy pred
     >>=? fun (pkh, priority, _timestamp) ->
@@ -307,9 +306,11 @@ module Forge = struct
            | {expected_commitment = false; _} ->
                None)
     >>=? fun seed_nonce_hash ->
-    let hashes = List.map Operation.hash_packed operations in
     let operations_hash =
-      Operation_list_list_hash.compute [Operation_list_hash.compute hashes]
+      Operation_list_list_hash.compute
+        (List.map
+           Operation_list_hash.compute
+           (List.map (List.map Operation.hash_packed) operations))
     in
     let shell =
       make_shell
@@ -424,7 +425,10 @@ let default_patch_context ctxt =
 
 (********* Baking *************)
 
-let apply ctxt chain_id ~policy ~operations pred =
+let nb_validation_passes = List.length Main.validation_passes
+
+let apply ctxt chain_id ~policy
+    ?(operations = List.init nb_validation_passes (fun _ -> [])) pred =
   Forge.forge_header ctxt ?policy ~operations pred
   >>=? fun {shell; contents; baker} ->
   let protocol_data = {Block_header.contents; signature = Signature.zero} in
@@ -444,7 +448,7 @@ let apply ctxt chain_id ~policy ~operations pred =
     (fun vstate op ->
       apply_operation vstate op >>=? fun (state, _result) -> return state)
     vstate
-    operations
+    (List.concat operations)
   >>=? fun vstate -> Main.finalize_block vstate)
   >|= Environment.wrap_error
   >>=? fun (validation, block_header_metadata) ->
@@ -477,7 +481,8 @@ let apply ctxt chain_id ~policy ~operations pred =
   in
   return (block_header, block_header_metadata, validation)
 
-let apply_and_store chain_store ?policy ?(operations = []) pred =
+let apply_and_store chain_store ?policy
+    ?(operations = List.init nb_validation_passes (fun _ -> [])) pred =
   Store.Block.context chain_store pred
   >>=? fun ctxt ->
   let chain_id = Store.Chain.chain_id chain_store in
@@ -497,10 +502,17 @@ let apply_and_store chain_store ?policy ?(operations = []) pred =
       ops_metadata = List.init 4 (fun _ -> []);
     }
   in
+  let operations =
+    List.map
+      (List.map (fun op ->
+           let op = Data_encoding.Binary.to_bytes_exn Operation.encoding op in
+           Data_encoding.Binary.of_bytes_exn Tezos_base.Operation.encoding op))
+      operations
+  in
   Store.Block.store_block
     chain_store
     ~block_header
-    ~operations:(List.init 4 (fun _ -> []))
+    ~operations
     validation_result
   >>=? function
   | Some b ->
