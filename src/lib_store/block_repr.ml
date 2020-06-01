@@ -181,6 +181,19 @@ let check_block_consistency ?genesis_hash ?pred_block block =
                  (hash pred_block)
                  Block_hash.pp
                  (predecessor block)))))
+  >>=? fun () ->
+  let computed_operations_hash =
+    Operation_list_list_hash.compute
+      (List.map
+         Operation_list_hash.compute
+         (List.map (List.map Operation.hash) (operations block)))
+  in
+  fail_unless
+    (Operation_list_list_hash.equal
+       computed_operations_hash
+       (operations_hash block))
+    (Store_errors.Inconsistent_operations_hash
+       {expected = operations_hash block; got = computed_operations_hash})
   >>=? fun () -> return_unit
 
 let read_next_block fd =
