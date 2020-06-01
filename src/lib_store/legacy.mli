@@ -64,7 +64,7 @@ type error += Failed_to_upgrade of string
 val raw_upgrade :
   Distributed_db_version.Name.t ->
   new_store:Store.t ->
-  old_store:Legacy_store.t ->
+  legacy_state:Legacy_state.t ->
   History_mode.t ->
   Genesis.t ->
   unit tzresult Lwt.t

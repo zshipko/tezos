@@ -189,11 +189,8 @@ let check_flags new_chain_store previously_baked_blocks history_mode =
       Store.Block.get_block_metadata new_chain_store last
       >>=? fun metadata ->
       let max_op_ttl = Store.Block.max_operations_ttl metadata in
-      let min_caboose = if snd checkpoint = 0l then 0l else 1l in
       let expected_caboose =
-        max
-          min_caboose
-          Int32.(add (sub expected_checkpoint (of_int max_op_ttl)) 1l)
+        max 0l Int32.(add (sub expected_checkpoint (of_int max_op_ttl)) 0l)
       in
       Assert.equal
         ~prn:(Format.sprintf "%ld")
