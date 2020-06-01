@@ -231,6 +231,57 @@ type wrong_block_export_kind =
 
 type error += Wrong_block_export of wrong_block_export_kind
 
+let pp_wrong_block_export_kind ppf = function
+  | Pruned h ->
+      Format.fprintf ppf "block %a because it is pruned" Block_hash.pp h
+  | Too_few_predecessors h ->
+      Format.fprintf
+        ppf
+        "block %a because it does not have enough predecessors"
+        Block_hash.pp
+        h
+  | Unknown_block str ->
+      Format.fprintf ppf "block %s because it cannot be found" str
+
+let wrong_block_export_kind_encoding =
+  let open Data_encoding in
+  union
+    [ case
+        (Tag 0)
+        ~title:"pruned"
+        Block_hash.encoding
+        (function Pruned h -> Some h | _ -> None)
+        (fun h -> Pruned h);
+      case
+        (Tag 1)
+        ~title:"too_few_predecessors"
+        Block_hash.encoding
+        (function Too_few_predecessors h -> Some h | _ -> None)
+        (fun h -> Too_few_predecessors h);
+      case
+        (Tag 2)
+        ~title:"unknown_hash"
+        string
+        (function Unknown_block s -> Some s | _ -> None)
+        (fun s -> Unknown_block s) ]
+
+let () =
+  register_error_kind
+    `Permanent
+    ~id:"WrongBlockExport"
+    ~title:"Wrong block export"
+    ~description:"The block to export in the snapshot is not valid."
+    ~pp:(fun ppf kind ->
+      Format.fprintf
+        ppf
+        "Fails to export snapshot using the %a."
+        pp_wrong_block_export_kind
+        kind)
+    Data_encoding.(
+      obj1 (req "wrong_block_export" wrong_block_export_kind_encoding))
+    (function Wrong_block_export kind -> Some kind | _ -> None)
+    (fun kind -> Wrong_block_export kind)
+
 let compute_export_limit block_store chain_data_store block_header
     export_rolling =
   let block_hash = Block_header.hash block_header in
@@ -256,16 +307,8 @@ let compute_export_limit block_store chain_data_store block_header
       (Wrong_block_export (Too_few_predecessors block_hash))
     >>=? fun () -> return limit
 
-type data = {
-  info : Context.Protocol_data.info;
-  protocol_hash : Protocol_hash.t;
-  test_chain_status : Test_chain_status.t;
-  data_key : Context_hash.t;
-  parents : Context_hash.t list;
-}
-
 let get_protocol_data_from_header index block_header =
-  let open Context in
+  let open Context.Protocol_data_legacy in
   let level = block_header.Block_header.shell.level in
   Context.retrieve_commit_info index block_header
   >>=? fun ( protocol,
@@ -275,7 +318,7 @@ let get_protocol_data_from_header index block_header =
              test_chain_status,
              context_hash,
              parents ) ->
-  let info = {Protocol_data.timestamp; author; message} in
+  let info = {timestamp; author; message} in
   return
     ( level,
       {
@@ -292,7 +335,7 @@ let get_protocol_data_from_header index block_header =
 let pruned_block_iterator index block_store limit header =
   if header.Block_header.shell.level <= limit then
     get_protocol_data_from_header index header
-    >>= fun protocol_data -> return (None, Some protocol_data)
+    >>=? fun protocol_data -> return (None, Some protocol_data)
   else
     let pred_hash = header.Block_header.shell.predecessor in
     Legacy_state.Block.Header.read (block_store, pred_hash)
@@ -312,7 +355,7 @@ let pruned_block_iterator index block_store limit header =
     let pred_header_proto_level = pred_header.Block_header.shell.proto_level in
     if header_proto_level <> pred_header_proto_level then
       get_protocol_data_from_header index header
-      >>= fun proto_data -> return (Some pruned_block, Some proto_data)
+      >>=? fun proto_data -> return (Some pruned_block, Some proto_data)
     else return (Some pruned_block, None)
 
 let export ?(export_rolling = false) ~context_root ~store_root ~genesis
@@ -369,15 +412,11 @@ let export ?(export_rolling = false) ~context_root ~store_root ~genesis
               pruned_block_iterator context_index block_store export_limit
             in
             let block_data =
-              {
-                Context.Block_data.block_header;
-                operations;
-                predecessor_header = pred_block_header;
-              }
+              {Context.Block_data_legacy.block_header; operations}
             in
             return (pred_block_header, block_data, export_mode, iterator))
-  >>=? fun (_, data_to_dump, _, _) ->
-  Context.dump_context context_index data_to_dump ~context_file_path:filename
+  >>=? fun data_to_dump ->
+  Context.dump_legacy_snapshot context_index data_to_dump ~filename
   >>=? fun _ ->
   lwt_emit (Export_success filename)
   >>= fun () ->

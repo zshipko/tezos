@@ -210,6 +210,17 @@ module type S_legacy = sig
 
   type protocol_data
 
+  (** {b Warning} Used only to create legacy snapshots (testing purposes) *)
+  val dump_contexts_fd :
+    index ->
+    block_header
+    * block_data
+    * History_mode.Legacy.t
+    * (block_header ->
+      (pruned_block option * protocol_data option) tzresult Lwt.t) ->
+    fd:Lwt_unix.file_descr ->
+    unit tzresult Lwt.t
+
   val restore_context_fd :
     index ->
     fd:Lwt_unix.file_descr ->

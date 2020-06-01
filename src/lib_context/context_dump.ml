@@ -333,6 +333,17 @@ module type S_legacy = sig
 
   type protocol_data
 
+  (* testing purposes only *)
+  val dump_contexts_fd :
+    index ->
+    block_header
+    * block_data
+    * History_mode.Legacy.t
+    * (block_header ->
+      (pruned_block option * protocol_data option) tzresult Lwt.t) ->
+    fd:Lwt_unix.file_descr ->
+    unit tzresult Lwt.t
+
   val restore_context_fd :
     index ->
     fd:Lwt_unix.file_descr ->
@@ -832,6 +843,177 @@ module Make_legacy (I : Dump_interface) = struct
     fail_when
       (v.version <> current_version)
       (Invalid_snapshot_version (v.version, current_version))
+
+  let set_int64 buf i =
+    let b = Bytes.create 8 in
+    EndianBytes.BigEndian.set_int64 b 0 i ;
+    Buffer.add_bytes buf b
+
+  let set_mbytes buf b =
+    set_int64 buf (Int64.of_int (Bytes.length b)) ;
+    Buffer.add_bytes buf b
+
+  (* Getter and setters *)
+
+  let set_root buf block_header info parents block_data =
+    let root = Root {block_header; info; parents; block_data} in
+    let bytes = Data_encoding.Binary.to_bytes_exn command_encoding root in
+    set_mbytes buf bytes
+
+  let set_node buf contents =
+    let bytes =
+      Data_encoding.Binary.to_bytes_exn command_encoding (Node contents)
+    in
+    set_mbytes buf bytes
+
+  let set_blob buf data =
+    let bytes =
+      Data_encoding.Binary.to_bytes_exn command_encoding (Blob data)
+    in
+    set_mbytes buf bytes
+
+  let set_proot buf pruned_block =
+    let proot = Proot pruned_block in
+    let bytes = Data_encoding.Binary.to_bytes_exn command_encoding proot in
+    set_mbytes buf bytes
+
+  let set_loot buf protocol_data =
+    let loot = Loot protocol_data in
+    let bytes = Data_encoding.Binary.to_bytes_exn command_encoding loot in
+    set_mbytes buf bytes
+
+  let set_end buf =
+    let bytes = Data_encoding.Binary.to_bytes_exn command_encoding End in
+    set_mbytes buf bytes
+
+  let write_snapshot_metadata ~mode buf =
+    let version = {version = current_version; mode} in
+    let bytes =
+      Data_encoding.(Binary.to_bytes_exn snapshot_metadata_encoding version)
+    in
+    set_mbytes buf bytes
+
+  (* testing purposes only *)
+  let dump_contexts_fd idx data ~fd =
+    (* Dumping *)
+    let buf = Buffer.create 1_000_000 in
+    let written = ref 0 in
+    let flush () =
+      let contents = Buffer.contents buf in
+      Buffer.clear buf ;
+      written := !written + String.length contents ;
+      Lwt_utils_unix.write_string fd contents
+    in
+    let maybe_flush () =
+      if Buffer.length buf > 1_000_000 then flush () else Lwt.return_unit
+    in
+    (* Noting the visited hashes *)
+    let visited_hash = Hashtbl.create 1000 in
+    let visited h = Hashtbl.mem visited_hash h in
+    let set_visit h = Hashtbl.add visited_hash h () in
+    (* Folding through a node *)
+    let fold_tree_path ctxt tree =
+      let cpt = ref 0 in
+      let rec fold_tree_path ctxt tree =
+        I.tree_list tree
+        >>= fun keys ->
+        let keys = List.sort (fun (a, _) (b, _) -> String.compare a b) keys in
+        Lwt_list.map_s
+          (fun (name, kind) ->
+            I.sub_tree tree [name]
+            >>= function
+            | None ->
+                assert false
+            | Some sub_tree ->
+                let hash = I.tree_hash sub_tree in
+                ( if visited hash then Lwt.return_unit
+                else (
+                  Tezos_stdlib_unix.Utils.display_progress
+                    ~refresh_rate:(!cpt, 1_000)
+                    "Context: %dK elements, %dMiB written%!"
+                    (!cpt / 1_000)
+                    (!written / 1_048_576) ;
+                  incr cpt ;
+                  set_visit hash ;
+                  (* There cannot be a cycle *)
+                  match kind with
+                  | `Node ->
+                      fold_tree_path ctxt sub_tree
+                  | `Contents -> (
+                      I.tree_content sub_tree
+                      >>= function
+                      | None ->
+                          assert false
+                      | Some data ->
+                          set_blob buf data ; maybe_flush () ) ) )
+                >|= fun () -> (name, hash))
+          keys
+        >>= fun sub_keys -> set_node buf sub_keys ; maybe_flush ()
+      in
+      fold_tree_path ctxt tree
+    in
+    Lwt.catch
+      (fun () ->
+        let (bh, block_data, mode, pruned_iterator) = data in
+        write_snapshot_metadata ~mode buf ;
+        I.get_context idx bh
+        >>= function
+        | None ->
+            fail @@ Context_not_found (I.Block_header.to_bytes bh)
+        | Some ctxt ->
+            let tree = I.context_tree ctxt in
+            fold_tree_path ctxt tree
+            >>= fun () ->
+            Tezos_stdlib_unix.Utils.display_progress_end () ;
+            let parents = I.context_parents ctxt in
+            set_root buf bh (I.context_info ctxt) parents block_data ;
+            (* Dump pruned blocks *)
+            let dump_pruned cpt pruned =
+              Tezos_stdlib_unix.Utils.display_progress
+                ~refresh_rate:(cpt, 1_000)
+                "History: %dK block, %dMiB written"
+                (cpt / 1_000)
+                (!written / 1_048_576) ;
+              set_proot buf pruned ;
+              maybe_flush ()
+            in
+            let rec aux cpt acc header =
+              pruned_iterator header
+              >>=? function
+              | (None, None) ->
+                  return acc (* assert false *)
+              | (None, Some protocol_data) ->
+                  return (protocol_data :: acc)
+              | (Some pred_pruned, Some protocol_data) ->
+                  dump_pruned cpt pred_pruned
+                  >>= fun () ->
+                  aux
+                    (succ cpt)
+                    (protocol_data :: acc)
+                    (I.Pruned_block.header pred_pruned)
+              | (Some pred_pruned, None) ->
+                  dump_pruned cpt pred_pruned
+                  >>= fun () ->
+                  aux (succ cpt) acc (I.Pruned_block.header pred_pruned)
+            in
+            let starting_block_header = I.Block_data.header block_data in
+            aux 0 [] starting_block_header
+            >>=? fun protocol_datas ->
+            (* Dump protocol data *)
+            Lwt_list.iter_s
+              (fun proto -> set_loot buf proto ; maybe_flush ())
+              protocol_datas
+            >>= fun () ->
+            Tezos_stdlib_unix.Utils.display_progress_end () ;
+            return_unit
+            >>=? fun () ->
+            set_end buf ;
+            flush () >>= fun () -> return_unit)
+      (function
+        | Unix.Unix_error (e, _, _) ->
+            fail @@ System_write_error (Unix.error_message e)
+        | err ->
+            Lwt.fail err)
 
   (* Restoring legacy *)
 

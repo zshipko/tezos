@@ -267,3 +267,16 @@ val check_protocol_commit_consistency :
   data_merkle_root:Context_hash.t ->
   parents_contexts:Context_hash.t list ->
   bool Lwt.t
+
+(**/**)
+
+(** {b Warning} For testing purposes only *)
+val dump_legacy_snapshot :
+  index ->
+  Block_header.t
+  * Block_data_legacy.t
+  * History_mode.Legacy.t
+  * (Block_header.t ->
+    (Pruned_block.t option * Protocol_data_legacy.t option) tzresult Lwt.t) ->
+  filename:string ->
+  unit tzresult Lwt.t
