@@ -1232,11 +1232,14 @@ let restore_context_legacy ?expected_block idx ~snapshot_file ~handle_block
 
 (* (for testing purposes only) *)
 let dump_legacy_snapshot idx datas ~filename =
-  let file_init () =
-    Lwt_unix.openfile filename Lwt_unix.[O_WRONLY; O_CREAT; O_TRUNC] 0o666
-    >>= return
-  in
-  Lwt.catch file_init (function
+  Lwt.catch
+    (fun () ->
+      Lwt_unix.openfile filename Lwt_unix.[O_WRONLY; O_CREAT; O_TRUNC] 0o666
+      >>= fun fd ->
+      Lwt.finalize
+        (fun () -> Context_dumper_legacy.dump_contexts_fd idx datas ~fd)
+        (fun () -> Lwt_unix.close fd))
+    (function
       | Unix.Unix_error (e, _, _) ->
           fail @@ Cannot_create_file (Unix.error_message e)
       | exc ->
@@ -1244,4 +1247,3 @@ let dump_legacy_snapshot idx datas ~filename =
             Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
           in
           fail (Cannot_create_file msg))
-  >>=? fun fd -> Context_dumper_legacy.dump_contexts_fd idx datas ~fd

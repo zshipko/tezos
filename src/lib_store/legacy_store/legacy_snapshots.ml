@@ -300,12 +300,13 @@ let compute_export_limit block_store chain_data_store block_header
       Int32.(
         sub block_header.Block_header.shell.level (of_int max_operations_ttl))
     in
-    (* fails when the limit exceeds the genesis or the genesis is
-       included in the export limit *)
-    fail_when
-      (limit <= 0l)
-      (Wrong_block_export (Too_few_predecessors block_hash))
-    >>=? fun () -> return limit
+    (* (\* fails when the limit exceeds the genesis or the genesis is
+     *    included in the export limit *\)
+     * fail_when
+     *   (limit <= 0l)
+     *   (Wrong_block_export (Too_few_predecessors block_hash))
+     * >>=? fun () -> *)
+    return (max 1l limit)
 
 let get_protocol_data_from_header index block_header =
   let open Context.Protocol_data_legacy in

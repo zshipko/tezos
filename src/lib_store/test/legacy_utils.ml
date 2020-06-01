@@ -403,11 +403,11 @@ let wrap_test_legacy ?(keep_dir = false) test : string Alcotest_lwt.test_case =
           ~legacy_store_builder_exe
           ()
         >>=? fun (store, (legacy_store_dir, legacy_state), blocks) ->
-        Lwt.catch
+        Lwt.finalize
           (fun () -> test store (legacy_store_dir, legacy_state) blocks)
-          (fun exn ->
+          (fun () ->
             Legacy_state.close legacy_state
-            >>= fun () -> Store.close_store store >>= fun () -> Lwt.fail exn))
+            >>= fun () -> Store.close_store store))
   in
   Alcotest_lwt.test_case name speed (fun x exe ->
       test x exe

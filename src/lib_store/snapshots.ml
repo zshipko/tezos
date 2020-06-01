@@ -1742,203 +1742,226 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
   >>= fun () ->
   Context.init ~readonly:false ?patch_context dst_context_dir
   >>= fun context_index ->
-  (* Start by commiting genesis in the context *)
-  Context.commit_genesis
-    context_index
-    ~chain_id
-    ~time:genesis.Genesis.time
-    ~protocol:genesis.protocol
-  >>=? fun genesis_context_hash ->
-  let cycle_length = Legacy.Hardcoded.cycle_length ~chain_name in
-  Cemented_block_store.init
-    ~cemented_blocks_dir:dst_cemented_dir
-    ~readonly:false
-  >>=? fun cemented_store ->
-  let floating_blocks = ref [] in
-  let current_blocks = ref [] in
-  let has_reached_cemented = ref false in
-  let genesis_block =
-    Store.Chain.create_genesis_block ~genesis genesis_context_hash
-  in
-  let handle_block ((hash : Block_hash.t), (block : Context.Pruned_block.t)) =
-    (* We are given blocks in a reverse order ! *)
-    (let proj (hash, (block : Context.Pruned_block.t)) =
-       let contents =
-         {
-           Block_repr.header = block.block_header;
-           operations = List.map (fun (_, l) -> l) block.operations;
-         }
-       in
-       {Block_repr.hash; contents; metadata = None}
-     in
-     let block = proj (hash, block) in
-     match Block_repr.level block with
-     (* Hardcoded special treatment for the first two blocks. *)
-     | 0l ->
-         (* No genesis in previous format *) assert false
-     | 1l ->
-         (* Cement from genesis to this block *)
-         if !current_blocks <> [] then (
-           assert (!floating_blocks = []) ;
-           current_blocks := !floating_blocks ) ;
-         Cemented_block_store.cement_blocks
-           ~check_consistency:false
-           cemented_store
-           ~write_metadata:false
-           [Store.Unsafe.repr_of_block genesis_block; block]
-     | level ->
-         (* 4 cases :
+  Lwt.finalize
+    (fun () ->
+      (* Start by commiting genesis in the context *)
+      Context.commit_genesis
+        context_index
+        ~chain_id
+        ~time:genesis.Genesis.time
+        ~protocol:genesis.protocol
+      >>=? fun genesis_context_hash ->
+      let cycle_length = Legacy.Hardcoded.cycle_length ~chain_name in
+      let floating_blocks = ref [] in
+      let current_blocks = ref [] in
+      let has_reached_cemented = ref false in
+      let partial_protocol_levels = ref [] in
+      let genesis_block =
+        Store.Chain.create_genesis_block ~genesis genesis_context_hash
+      in
+      Cemented_block_store.init
+        ~cemented_blocks_dir:dst_cemented_dir
+        ~readonly:false
+      >>=? fun cemented_store ->
+      Lwt.finalize
+        (fun () ->
+          let handle_block snapshot_history_mode =
+            let is_rolling =
+              snapshot_history_mode = History_mode.Legacy.Rolling
+            in
+            fun ((hash : Block_hash.t), (block : Context.Pruned_block.t)) ->
+              (let proj (hash, (block : Context.Pruned_block.t)) =
+                 let contents =
+                   {
+                     Block_repr.header = block.block_header;
+                     operations = List.map (fun (_, l) -> l) block.operations;
+                   }
+                 in
+                 {Block_repr.hash; contents; metadata = None}
+               in
+               let block = proj (hash, block) in
+               (* Blocks are stored in reverse order in legacy snapshots so
+          consing them puts them back in correct order. *)
+               if is_rolling then (
+                 current_blocks := block :: !current_blocks ;
+                 return_unit )
+               else
+                 (* Full snapshot *)
+                 match Block_repr.level block with
+                 (* Hardcoded special treatment for the first two blocks. *)
+                 | 0l ->
+                     (* No genesis in previous format *) assert false
+                 | 1l ->
+                     (* Cement from genesis to this block *)
+                     if !current_blocks <> [] then (
+                       assert (!floating_blocks = []) ;
+                       current_blocks := !floating_blocks ) ;
+                     Cemented_block_store.cement_blocks
+                       ~check_consistency:false
+                       cemented_store
+                       ~write_metadata:false
+                       [Store.Unsafe.repr_of_block genesis_block; block]
+                 | level ->
+                     (* 4 cases :
              - in future floating blocks => after the cementing part
              - at the end of a cycle
              - in the middle of a cycle
              - at the dawn of a cycle
             *)
-         let is_end_of_a_cycle =
-           Compare.Int32.equal 1l Int32.(rem level (of_int cycle_length))
-         in
-         if is_end_of_a_cycle then (
-           if not !has_reached_cemented then (
-             has_reached_cemented := true ;
-             (* All current blocks should be written in floating *)
-             (* We will write them later on *)
-             floating_blocks := !current_blocks ) ;
-           (* Start building up the cycle to cement *)
-           current_blocks := [block] ;
-           return_unit )
-         else
-           let is_dawn_of_a_cycle =
-             Compare.Int32.equal 2l Int32.(rem level (of_int cycle_length))
-           in
-           if is_dawn_of_a_cycle && !has_reached_cemented then (
-             (* Cycle is complete, cement it *)
-             Cemented_block_store.cement_blocks
-               ~check_consistency:false
-               cemented_store
-               ~write_metadata:false
-               (block :: !current_blocks)
-             >>=? fun () ->
-             current_blocks := [] ;
-             return_unit )
-           else (
-             current_blocks := block :: !current_blocks ;
-             return_unit ))
-    >>=? fun () -> return_unit
-  in
-  let partial_protocol_levels :
-      (int32 * Protocol_hash.t * Protocol_levels.commit_info option) list ref =
-    ref []
-  in
-  let handle_protocol_data (transition_level, protocol) =
-    let open Context.Protocol_data_legacy in
-    let open Protocol_levels in
-    let { info = {author; message; _};
-          protocol_hash;
-          test_chain_status;
-          data_key;
-          parents } =
-      protocol
-    in
-    let commit_info =
-      {
-        author;
-        message;
-        test_chain_status;
-        data_merkle_root = data_key;
-        parents_contexts = parents;
-      }
-    in
-    partial_protocol_levels :=
-      (transition_level, protocol_hash, Some commit_info)
-      :: !partial_protocol_levels ;
-    return_unit
-  in
-  (* Restore context and fetch data *)
-  Context.restore_context_legacy
-    ?expected_block
-    context_index
-    ~snapshot_file
-    ~handle_block
-    ~handle_protocol_data
-    ~block_validation:legacy_block_validation
-  >>=? fun ( pred_block_header,
-             block_data,
-             _oldest_header_opt,
-             legacy_history_mode ) ->
-  let history_mode = History_mode.convert legacy_history_mode in
-  (* Floating blocks should be initialized now *)
-  let floating_blocks =
-    if not !has_reached_cemented then !current_blocks else !floating_blocks
-  in
-  (* Apply pred block *)
-  let pred_context_hash = pred_block_header.shell.context in
-  Context.checkout_exn context_index pred_context_hash
-  >>= fun predecessor_context ->
-  let {Context.Block_data_legacy.block_header; operations} = block_data in
-  Tezos_validation.Block_validation.apply
-    chain_id
-    ~user_activated_upgrades
-    ~user_activated_protocol_overrides
-    ~max_operations_ttl:
-      (Int32.to_int pred_block_header.shell.level) (* Allows old operations *)
-    ~predecessor_block_header:pred_block_header
-    ~predecessor_context
-    ~block_header
-    operations
-  >>= (function
-        | Ok block_validation_result ->
-            return block_validation_result
-        | Error errs ->
-            Format.kasprintf
-              (fun errs ->
-                fail
-                  (Target_block_validation_failed
-                     (Block_header.hash block_header, errs)))
-              "%a"
-              pp_print_error
-              errs)
-  >>=? fun block_validation_result ->
-  check_context_hash_consistency
-    block_validation_result.validation_store
-    block_header
-  >>=? fun () ->
-  let {Block_validation.validation_store; block_metadata; ops_metadata; _} =
-    block_validation_result
-  in
-  let contents = {Block_repr.header = block_header; operations} in
-  let {Block_validation.message; max_operations_ttl; last_allowed_fork_level; _}
-      =
-    validation_store
-  in
-  let metadata =
-    Some
-      {
-        Block_repr.message;
-        max_operations_ttl;
-        last_allowed_fork_level;
-        block_metadata;
-        operations_metadata = ops_metadata;
-      }
-  in
-  let new_head_with_metadata =
-    ( {hash = Block_header.hash block_header; contents; metadata}
-      : Block_repr.block )
-  in
-  (* Append the new head with the floating blocks *)
-  Lwt_utils_unix.display_progress
-    ~every:100
-    ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Storing floating blocks: %d blocks wrote" i)
-    (fun notify ->
-      Store.Unsafe.restore_from_legacy_snapshot
-        ~notify
-        ~store_dir:dst_store_dir
-        ~context_index
-        ~genesis
-        ~genesis_context_hash
-        ~floating_blocks_stream:(Lwt_stream.of_list floating_blocks)
-        ~new_head_with_metadata
-        ~partial_protocol_levels:!partial_protocol_levels
-        ~history_mode)
+                     let is_end_of_a_cycle =
+                       Compare.Int32.equal
+                         1l
+                         Int32.(rem level (of_int cycle_length))
+                     in
+                     if is_end_of_a_cycle then (
+                       if not !has_reached_cemented then (
+                         has_reached_cemented := true ;
+                         (* All current blocks should be written in floating *)
+                         (* We will write them later on *)
+                         floating_blocks := !current_blocks ) ;
+                       (* Start building up the cycle to cement *)
+                       current_blocks := [block] ;
+                       return_unit )
+                     else
+                       let is_dawn_of_a_cycle =
+                         Compare.Int32.equal
+                           2l
+                           Int32.(rem level (of_int cycle_length))
+                       in
+                       if is_dawn_of_a_cycle && !has_reached_cemented then (
+                         (* Cycle is complete, cement it *)
+                         Cemented_block_store.cement_blocks
+                           ~check_consistency:false
+                           cemented_store
+                           ~write_metadata:false
+                           (block :: !current_blocks)
+                         >>=? fun () ->
+                         current_blocks := [] ;
+                         return_unit )
+                       else (
+                         current_blocks := block :: !current_blocks ;
+                         return_unit ))
+              >>=? fun () -> return_unit
+          in
+          let handle_protocol_data (transition_level, protocol) =
+            let open Context.Protocol_data_legacy in
+            let open Protocol_levels in
+            let { info = {author; message; _};
+                  protocol_hash;
+                  test_chain_status;
+                  data_key;
+                  parents } =
+              protocol
+            in
+            let commit_info =
+              {
+                author;
+                message;
+                test_chain_status;
+                data_merkle_root = data_key;
+                parents_contexts = parents;
+              }
+            in
+            partial_protocol_levels :=
+              (transition_level, protocol_hash, Some commit_info)
+              :: !partial_protocol_levels ;
+            return_unit
+          in
+          (* Restore context and fetch data *)
+          Context.restore_context_legacy
+            ?expected_block
+            context_index
+            ~snapshot_file
+            ~handle_block
+            ~handle_protocol_data
+            ~block_validation:legacy_block_validation)
+        (fun () ->
+          Cemented_block_store.close cemented_store ;
+          Lwt.return_unit)
+      >>=? fun ( pred_block_header,
+                 block_data,
+                 _oldest_header_opt,
+                 legacy_history_mode ) ->
+      let history_mode = History_mode.convert legacy_history_mode in
+      (* Floating blocks should be initialized now *)
+      let floating_blocks =
+        if not !has_reached_cemented then !current_blocks else !floating_blocks
+      in
+      (* Apply pred block *)
+      let pred_context_hash = pred_block_header.shell.context in
+      Context.checkout_exn context_index pred_context_hash
+      >>= fun predecessor_context ->
+      let {Context.Block_data_legacy.block_header; operations} = block_data in
+      Tezos_validation.Block_validation.apply
+        chain_id
+        ~user_activated_upgrades
+        ~user_activated_protocol_overrides
+        ~max_operations_ttl:
+          (Int32.to_int pred_block_header.shell.level)
+          (* Allows old operations *)
+        ~predecessor_block_header:pred_block_header
+        ~predecessor_context
+        ~block_header
+        operations
+      >>= (function
+            | Ok block_validation_result ->
+                return block_validation_result
+            | Error errs ->
+                Format.kasprintf
+                  (fun errs ->
+                    fail
+                      (Target_block_validation_failed
+                         (Block_header.hash block_header, errs)))
+                  "%a"
+                  pp_print_error
+                  errs)
+      >>=? fun block_validation_result ->
+      check_context_hash_consistency
+        block_validation_result.validation_store
+        block_header
+      >>=? fun () ->
+      let {Block_validation.validation_store; block_metadata; ops_metadata; _}
+          =
+        block_validation_result
+      in
+      let contents = {Block_repr.header = block_header; operations} in
+      let { Block_validation.message;
+            max_operations_ttl;
+            last_allowed_fork_level;
+            _ } =
+        validation_store
+      in
+      let metadata =
+        Some
+          {
+            Block_repr.message;
+            max_operations_ttl;
+            last_allowed_fork_level;
+            block_metadata;
+            operations_metadata = ops_metadata;
+          }
+      in
+      let new_head_with_metadata =
+        ( {hash = Block_header.hash block_header; contents; metadata}
+          : Block_repr.block )
+      in
+      (* Append the new head with the floating blocks *)
+      Lwt_utils_unix.display_progress
+        ~every:100
+        ~pp_print_step:(fun fmt i ->
+          Format.fprintf fmt "Storing floating blocks: %d blocks wrote" i)
+        (fun notify ->
+          Store.Unsafe.restore_from_legacy_snapshot
+            ~notify
+            ~store_dir:dst_store_dir
+            ~context_index
+            ~genesis
+            ~genesis_context_hash
+            ~floating_blocks_stream:(Lwt_stream.of_list floating_blocks)
+            ~new_head_with_metadata
+            ~partial_protocol_levels:!partial_protocol_levels
+            ~history_mode))
+    (fun () -> Context.close context_index)
   >>=? fun () ->
   (* Protocol will be stored next time the store is loaded *)
   lwt_emit (Import_success snapshot_file) >>= fun () -> return_unit

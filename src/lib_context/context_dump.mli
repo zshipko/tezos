@@ -225,7 +225,9 @@ module type S_legacy = sig
     index ->
     fd:Lwt_unix.file_descr ->
     ?expected_block:string ->
-    handle_block:(Block_hash.t * pruned_block -> unit tzresult Lwt.t) ->
+    handle_block:(History_mode.Legacy.t ->
+                 Block_hash.t * pruned_block ->
+                 unit tzresult Lwt.t) ->
     handle_protocol_data:(protocol_data -> unit tzresult Lwt.t) ->
     block_validation:(block_header option ->
                      Block_hash.t ->

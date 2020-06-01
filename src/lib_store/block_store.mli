@@ -271,7 +271,7 @@ val merge_stores :
   unit ->
   unit Lwt.t
 
-(** [create ~chain_dir ~genesis_block] instantiates a fresh block_store
+(** [create ~chain_dir ~genesis_block] instantiates a fresh [block_store]
     in directory [chain_dir] and stores the [genesis_block] in it. *)
 val create :
   chain_dir:string -> genesis_block:Block_repr.t -> block_store tzresult Lwt.t

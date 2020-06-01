@@ -230,7 +230,9 @@ val restore_context_legacy :
   ?expected_block:string ->
   index ->
   snapshot_file:string ->
-  handle_block:(Block_hash.t * Pruned_block.t -> unit tzresult Lwt.t) ->
+  handle_block:(History_mode.Legacy.t ->
+               Block_hash.t * Pruned_block.t ->
+               unit tzresult Lwt.t) ->
   handle_protocol_data:(Protocol_data_legacy.t -> unit tzresult Lwt.t) ->
   block_validation:(Block_header.t option ->
                    Block_hash.t ->

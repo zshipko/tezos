@@ -348,7 +348,9 @@ module type S_legacy = sig
     index ->
     fd:Lwt_unix.file_descr ->
     ?expected_block:string ->
-    handle_block:(Block_hash.t * pruned_block -> unit tzresult Lwt.t) ->
+    handle_block:(History_mode.Legacy.t ->
+                 Block_hash.t * pruned_block ->
+                 unit tzresult Lwt.t) ->
     handle_protocol_data:(protocol_data -> unit tzresult Lwt.t) ->
     block_validation:(block_header option ->
                      Block_hash.t ->
@@ -1028,7 +1030,7 @@ module Make_legacy (I : Dump_interface) = struct
       >>= function
       | None -> fail Restore_context_failure | Some tree -> return tree
     in
-    let restore () =
+    let restore history_mode =
       let rec first_pass ctxt batch notify =
         notify ()
         >>= fun () ->
@@ -1074,7 +1076,7 @@ module Make_legacy (I : Dump_interface) = struct
               let hash = Block_header.hash header in
               block_validation pred_header hash pruned_block
               >>=? fun () ->
-              handle_block (hash, pruned_block)
+              handle_block history_mode (hash, pruned_block)
               >>=? fun () -> notify () >>= fun () -> loop (Some header)
           | Loot protocol_data ->
               handle_protocol_data protocol_data
@@ -1115,7 +1117,7 @@ module Make_legacy (I : Dump_interface) = struct
         >>=? fun version ->
         check_version version
         >>=? fun () ->
-        restore ()
+        restore version.mode
         >>=? fun (pred_block_header, export_block_data, oldest_header_opt) ->
         return
           ( pred_block_header,

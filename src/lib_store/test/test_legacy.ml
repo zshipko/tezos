@@ -168,7 +168,7 @@ let check_flags new_chain_store previously_baked_blocks history_mode =
         ~savepoint:expected_checkpoint
         history_mode
 
-let test store (legacy_dir, (legacy_state : Legacy_state.t)) blocks =
+let test_upgrade store (legacy_dir, (legacy_state : Legacy_state.t)) blocks =
   let patch_context ctxt = Alpha_utils.default_patch_context ctxt in
   let chain_store = Store.main_chain_store store in
   let genesis = Store.Chain.genesis chain_store in
@@ -225,7 +225,103 @@ let test store (legacy_dir, (legacy_state : Legacy_state.t)) blocks =
       >>=? fun _ -> return_unit)
     (fun () -> Store.close_store upgraded_store)
 
-let make_test_cases speed : string Alcotest_lwt.test_case list =
+let test_snapshot legacy_snapshot_history_mode store
+    (legacy_dir, (legacy_state : Legacy_state.t)) blocks =
+  let patch_context ctxt = Alpha_utils.default_patch_context ctxt in
+  let chain_store = Store.main_chain_store store in
+  let genesis = Store.Chain.genesis chain_store in
+  Lwt_utils_unix.create_dir legacy_dir
+  >>= fun () ->
+  let chain_name = Distributed_db_version.Name.of_string "TEZOS" in
+  Legacy_state.Chain.get_exn legacy_state (Store.Chain.chain_id chain_store)
+  >>= fun legacy_chain ->
+  Lwt_list.map_p
+    (fun block ->
+      let descr = Store.Block.descriptor block in
+      Legacy_state.Block.known legacy_chain (fst descr)
+      >>= fun known -> Lwt.return (descr, known))
+    blocks
+  >>= fun present_blocks_in_legacy ->
+  Legacy_chain.head legacy_chain
+  >>= fun legacy_head ->
+  let snapshot_file = legacy_dir // "legacy_snapshot" in
+  let head_hash = Legacy_state.Block.hash legacy_head in
+  Legacy_snapshots.export
+    ~export_rolling:(legacy_snapshot_history_mode = History_mode.Legacy.Rolling)
+    ~store_root:(legacy_dir // "store")
+    ~context_root:(legacy_dir // "context")
+    ~genesis
+    snapshot_file
+    head_hash
+  >>=? fun () ->
+  let root_dir = Store.directory store // ".." // "imported_store" in
+  let dst_store_dir = root_dir // "store" in
+  let dst_context_dir = legacy_dir // "context" in
+  Format.printf "import from legacy snapshot : %s@." snapshot_file ;
+  Snapshots.import_legacy
+    ~patch_context
+    ~block:(Block_hash.to_b58check head_hash)
+    ~dst_store_dir
+    ~dst_context_dir
+    ~chain_name
+    ~user_activated_upgrades:[]
+    ~user_activated_protocol_overrides:[]
+    ~snapshot_file
+    genesis
+  >>=? fun () ->
+  Format.printf "init store after import@." ;
+  let history_mode = History_mode.convert legacy_snapshot_history_mode in
+  Store.init
+    ~patch_context
+    ~history_mode
+    ~readonly:false
+    ~store_dir:dst_store_dir
+    ~context_dir:dst_context_dir
+    ~allow_testchains:true
+    genesis
+  >>=? fun imported_store ->
+  let imported_chain_store = Store.main_chain_store imported_store in
+  Lwt.finalize
+    (fun () ->
+      Format.printf "sanity checks@." ;
+      Lwt_list.iter_s
+        (fun ((hash, level), is_known) ->
+          Store.Block.is_known imported_chain_store hash
+          >>= fun is_known' ->
+          if is_known && not is_known' then (
+            Store.Chain.caboose imported_chain_store
+            >>= fun (_, caboose_level) ->
+            Assert.is_true
+              ~msg:"check block absence consistency with history mode"
+              ( match history_mode with
+              | Rolling _ ->
+                  caboose_level > level
+              | _ ->
+                  false ) ;
+            Lwt.return_unit )
+          else (
+            Assert.equal
+              ~msg:
+                (Format.asprintf
+                   "check %a existence after upgrade"
+                   Block_hash.pp
+                   hash)
+              is_known
+              is_known' ;
+            Lwt.return_unit ))
+        present_blocks_in_legacy
+      >>= fun () ->
+      Test_utils.check_invariants imported_chain_store
+      >>= fun () ->
+      (* Try baking a bit after importing... *)
+      Store.Chain.current_head imported_chain_store
+      >>= fun head ->
+      Alpha_utils.bake_until_n_cycle_end imported_chain_store 10 head
+      >>=? fun _ -> return_unit)
+    (fun () -> Store.close_store imported_store)
+
+let make_upgrade_test_cases ?(keep_dir = false) speed :
+    string Alcotest_lwt.test_case list =
   let history_modes =
     History_mode.[Legacy.Archive; Legacy.Full; Legacy.Rolling]
   in
@@ -248,13 +344,49 @@ let make_test_cases speed : string Alcotest_lwt.test_case list =
           speed;
           legacy_history_mode;
           nb_blocks = `Blocks nb_blocks_to_bake;
-          test;
+          test = test_upgrade;
         }
       in
-      wrap_test_legacy ~keep_dir:true test)
+      wrap_test_legacy ~keep_dir test)
     permutations
 
-let tests : string Alcotest_lwt.test list =
+let make_snapshot_test_cases ?(keep_dir = false) ~history_modes
+    ~snapshot_history_modes ~nb_blocks_to_bake =
+  let permutations =
+    List.(
+      product nb_blocks_to_bake (product history_modes snapshot_history_modes))
+    |> List.filter
+         (fun (_, (legacy_history_mode, legacy_snapshot_history_mode)) ->
+           if legacy_history_mode = History_mode.Legacy.Rolling then
+             legacy_snapshot_history_mode = History_mode.Legacy.Rolling
+           else true)
+    |> List.sort_uniq compare
+  in
+  List.map
+    (fun ( nb_blocks_to_bake,
+           (legacy_history_mode, legacy_snapshot_history_mode) ) ->
+      let name =
+        Format.asprintf
+          "Import legacy snapshot in %a from %a with %d blocks"
+          History_mode.Legacy.pp
+          legacy_snapshot_history_mode
+          History_mode.Legacy.pp
+          legacy_history_mode
+          nb_blocks_to_bake
+      in
+      let test =
+        {
+          name;
+          speed = `Quick;
+          legacy_history_mode;
+          nb_blocks = `Blocks nb_blocks_to_bake;
+          test = test_snapshot legacy_snapshot_history_mode;
+        }
+      in
+      wrap_test_legacy ~keep_dir test)
+    permutations
+
+let upgrade_tests : string Alcotest_lwt.test list =
   let speed =
     try
       let s = Sys.getenv "SLOW_TEST" in
@@ -265,8 +397,21 @@ let tests : string Alcotest_lwt.test list =
           `Quick
     with Not_found -> `Quick
   in
-  let cases = make_test_cases speed in
-  [("legacy store upgrade", cases)]
+  let upgrade_cases = make_upgrade_test_cases ~keep_dir:false speed in
+  let history_modes =
+    History_mode.[Legacy.Archive; Legacy.Full; Legacy.Rolling]
+  in
+  let snapshot_history_modes = History_mode.[Legacy.Full; Legacy.Rolling] in
+  let nb_blocks_to_bake = [40; 57; 89; 101] in
+  let snapshots_cases =
+    make_snapshot_test_cases
+      ~keep_dir:false
+      ~history_modes
+      ~snapshot_history_modes
+      ~nb_blocks_to_bake
+  in
+  [ ("legacy store upgrade", upgrade_cases);
+    ("legacy snapshot import", snapshots_cases) ]
 
 let () =
   let open Cmdliner in
@@ -276,4 +421,5 @@ let () =
       & opt (some string) None
       & info ~docv:"[LEGACY_STORE_BUILDER_PATH]" ["builder-path"])
   in
-  Lwt_main.run (Alcotest_lwt.run_with_args "tezos-store-legacy" arg tests)
+  Lwt_main.run
+    (Alcotest_lwt.run_with_args "tezos-store-legacy" arg upgrade_tests)
