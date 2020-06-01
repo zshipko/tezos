@@ -25,6 +25,7 @@
 
 open Snapshots_events
 open Store_types
+open Store_errors
 
 type error +=
   | Incompatible_history_mode of {
@@ -42,10 +43,6 @@ type error +=
         | `Not_enough_pred ];
     }
   | Snapshot_file_not_found of string
-  | Inconsistent_operation_hashes of {
-      expected : Operation_list_list_hash.t;
-      got : Operation_list_list_hash.t;
-    }
   | Inconsistent_protocol_hash of {
       expected : Protocol_hash.t;
       got : Protocol_hash.t;
@@ -151,28 +148,6 @@ let () =
     (obj1 (req "given_snapshot_file" string))
     (function Snapshot_file_not_found file -> Some file | _ -> None)
     (fun file -> Snapshot_file_not_found file) ;
-  register_error_kind
-    `Permanent
-    ~id:"snapshots.inconsistent_operation_hashes"
-    ~title:"Inconsistent operation hashes"
-    ~description:"The operations given do not match their hashes."
-    ~pp:(fun ppf (oph, oph') ->
-      Format.fprintf
-        ppf
-        "Inconsistent operation hashes. Expected: %a, got %a."
-        Operation_list_list_hash.pp
-        oph
-        Operation_list_list_hash.pp
-        oph')
-    (obj2
-       (req "expected_operation_hashes" Operation_list_list_hash.encoding)
-       (req "received_operation_hashes" Operation_list_list_hash.encoding))
-    (function
-      | Inconsistent_operation_hashes {expected; got} ->
-          Some (expected, got)
-      | _ ->
-          None)
-    (fun (expected, got) -> Inconsistent_operation_hashes {expected; got}) ;
   register_error_kind
     `Permanent
     ~id:"snapshots.inconsistent_protocol_hash"
@@ -1733,7 +1708,7 @@ let legacy_check_operations_consistency block_header operations
   in
   fail_unless
     are_oph_equal
-    (Inconsistent_operation_hashes
+    (Inconsistent_operations_hash
        {
          expected = block_header.Block_header.shell.operations_hash;
          got = computed_hash;

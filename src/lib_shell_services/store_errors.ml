@@ -43,6 +43,12 @@ type error +=
 
 type error += Inconsistent_store_state of string
 
+type error +=
+  | Inconsistent_operations_hash of {
+      expected : Operation_list_list_hash.t;
+      got : Operation_list_list_hash.t;
+    }
+
 let () =
   register_error_kind
     `Permanent
@@ -144,4 +150,27 @@ let () =
       Format.fprintf ppf "The store is in an unexpected state: %s" msg)
     Data_encoding.(obj1 (req "message" string))
     (function Inconsistent_store_state msg -> Some msg | _ -> None)
-    (fun msg -> Inconsistent_store_state msg)
+    (fun msg -> Inconsistent_store_state msg) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshots.inconsistent_operation_hashes"
+    ~title:"Inconsistent operation hashes"
+    ~description:"The operations given do not match their hashes."
+    ~pp:(fun ppf (oph, oph') ->
+      Format.fprintf
+        ppf
+        "Inconsistent operation hashes. Expected: %a, got %a."
+        Operation_list_list_hash.pp
+        oph
+        Operation_list_list_hash.pp
+        oph')
+    Data_encoding.(
+      obj2
+        (req "expected_operation_hashes" Operation_list_list_hash.encoding)
+        (req "received_operation_hashes" Operation_list_list_hash.encoding))
+    (function
+      | Inconsistent_operations_hash {expected; got} ->
+          Some (expected, got)
+      | _ ->
+          None)
+    (fun (expected, got) -> Inconsistent_operations_hash {expected; got})

@@ -41,10 +41,6 @@ type error +=
         | `Not_enough_pred ];
     }
   | Snapshot_file_not_found of string
-  | Inconsistent_operation_hashes of {
-      expected : Operation_list_list_hash.t;
-      got : Operation_list_list_hash.t;
-    }
   | Inconsistent_protocol_hash of {
       expected : Protocol_hash.t;
       got : Protocol_hash.t;
