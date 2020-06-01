@@ -120,6 +120,9 @@ let timestamp blk = blk.contents.header.Block_header.shell.timestamp
 let validation_passes blk =
   blk.contents.header.Block_header.shell.validation_passes
 
+let operations_hash blk =
+  blk.contents.header.Block_header.shell.operations_hash
+
 let fitness blk = blk.contents.header.Block_header.shell.fitness
 
 let context blk = blk.contents.header.Block_header.shell.context

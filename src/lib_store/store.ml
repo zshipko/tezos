@@ -499,6 +499,8 @@ module Block = struct
 
   let timestamp blk = Block_repr.timestamp blk
 
+  let operations_hash blk = Block_repr.operations_hash blk
+
   let validation_passes blk = Block_repr.validation_passes blk
 
   let fitness blk = Block_repr.fitness blk

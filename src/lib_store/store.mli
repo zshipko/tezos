@@ -456,15 +456,17 @@ module Block : sig
 
   val proto_level : block -> int
 
-  val predecessor : block -> Block_hash.t
+  val predecessor : t -> Block_hash.t
 
-  val timestamp : block -> Time.Protocol.t
+  val timestamp : t -> Time.Protocol.t
 
-  val validation_passes : block -> int
+  val validation_passes : t -> int
 
-  val fitness : block -> Fitness.t
+  val operations_hash : t -> Operation_list_list_hash.t
 
-  val context_hash : block -> Context_hash.t
+  val fitness : t -> Fitness.t
+
+  val context_hash : t -> Context_hash.t
 
   val protocol_data : block -> bytes
 

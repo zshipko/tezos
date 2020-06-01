@@ -103,15 +103,17 @@ val level : t -> Int32.t
 
 val proto_level : t -> int
 
-val predecessor : t -> Tezos_crypto.Block_hash.t
+val predecessor : t -> Block_hash.t
 
-val timestamp : t -> Tezos_base.Time.Protocol.t
+val timestamp : t -> Time.Protocol.t
 
 val validation_passes : t -> int
 
-val fitness : t -> Tezos_base.Fitness.t
+val operations_hash : t -> Operation_list_list_hash.t
 
-val context : t -> Tezos_crypto.Context_hash.t
+val fitness : t -> Fitness.t
+
+val context : t -> Context_hash.t
 
 val protocol_data : t -> Bytes.t
 
