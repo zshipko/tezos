@@ -2,12 +2,14 @@
  (names test test_legacy)
  (libraries tezos-base
             tezos-store
+	    tezos-shell
 	    tezos-legacy-store
             tezos-stdlib-unix
             tezos-embedded-protocol-genesis
             tezos-embedded-protocol-demo-noops
             tezos-embedded-protocol-alpha
             tezos-protocol-alpha-parameters
+            tezos-protocol-genesis
             tezos-validation
             alcotest-lwt)
  (flags (:standard -open Tezos_base__TzPervasives

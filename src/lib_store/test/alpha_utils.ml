@@ -244,7 +244,8 @@ module Forge = struct
       ~priority ~seed_nonce_hash () =
     Block_header.{priority; proof_of_work_nonce; seed_nonce_hash}
 
-  let make_shell ~level ~predecessor ~timestamp ~fitness ~operations_hash =
+  let make_shell ~level ~predecessor ~timestamp ~fitness ~operations_hash
+      ~proto_level =
     Tezos_base.Block_header.
       {
         level;
@@ -252,7 +253,7 @@ module Forge = struct
         timestamp;
         fitness;
         operations_hash;
-        proto_level = 0;
+        proto_level;
         validation_passes = List.length Main.validation_passes;
         context = Context_hash.zero (* to update later *);
       }
@@ -280,6 +281,7 @@ module Forge = struct
 
   let forge_header ctxt ?(policy = By_priority 0) ?timestamp ?(operations = [])
       pred =
+    let proto_level = Store.Block.proto_level pred in
     dispatch_policy ctxt policy pred
     >>=? fun (pkh, priority, _timestamp) ->
     Alpha_services.Delegate.Minimal_valid_time.get
@@ -316,6 +318,7 @@ module Forge = struct
         ~timestamp
         ~fitness
         ~operations_hash
+        ~proto_level
     in
     let contents = make_contents ~priority ~seed_nonce_hash () in
     return {baker = pkh; shell; contents}

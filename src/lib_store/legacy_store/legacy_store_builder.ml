@@ -95,7 +95,7 @@ let generate identity_file pow =
 
 let dump_config data_dir =
   (* version *)
-  let data_version = "0.0.5" in
+  let data_version = "0.0.4" in
   let version_file_name = "version.json" in
   let version_file data_dir = data_dir // version_file_name in
   let write_version_file data_dir =
@@ -120,43 +120,6 @@ let dump_config data_dir =
   (* TODO protocols ? *)
   let _protocol_dir data_dir = data_dir // "protocol" in
   return_unit
-
-let patch_context json genesis ctxt =
-  let shell =
-    {
-      Tezos_base.Block_header.level = 0l;
-      proto_level = 0;
-      predecessor = genesis.Genesis.block;
-      timestamp = genesis.time;
-      validation_passes = 0;
-      operations_hash = Operation_list_list_hash.empty;
-      fitness = [];
-      context = Context_hash.zero;
-    }
-  in
-  (* Necessary for alpha to initialize *)
-  (* FIXME use Tezos_shell.Patch_context.patch_context: needs to start from genesis *)
-  (* ^ this is not compatible with the alpha-only test framework *)
-  Context.set ctxt ["version"] (MBytes.of_string "genesis")
-  >>= fun ctxt ->
-  ( match json with
-  | Some proto_params ->
-      let proto_params =
-        Data_encoding.Binary.to_bytes_exn Data_encoding.json proto_params
-      in
-      Context.set ctxt ["protocol_parameters"] proto_params
-  | None ->
-      Lwt.return ctxt )
-  >>= fun ctxt ->
-  let ctxt = Tezos_shell_context.Shell_context.wrap_disk_context ctxt in
-  Registered_protocol.get_result genesis.protocol
-  >>=? fun (module P) ->
-  P.init ctxt shell
-  >>= function
-  | Error _ ->
-      assert false
-  | Ok {context; _} ->
-      return (Tezos_shell_context.Shell_context.unwrap_disk_context context)
 
 let run () =
   let ok msg =
@@ -198,7 +161,12 @@ let run () =
                   genesis;
                   user_activated_upgrades;
                   user_activated_protocol_overrides } ) ->
-      let patch_context ctxt = patch_context sandbox_parameters genesis ctxt in
+      let sandbox_param =
+        Option.map ~f:(fun p -> ("sandbox_parameter", p)) sandbox_parameters
+      in
+      let patch_context ctxt =
+        Tezos_shell.Patch_context.patch_context genesis sandbox_param ctxt
+      in
       (* TODO parametrize this *)
       Legacy_state.init
         ~patch_context
@@ -292,6 +260,24 @@ let run () =
                    | result ->
                        Lwt.return result)
             >>=? fun ({validation_store; block_metadata; ops_metadata} as res) ->
+            Context.checkout context_index validation_store.context_hash
+            >>= (function
+                  | Some context ->
+                      return context
+                  | None ->
+                      fail
+                        (Block_validator_errors.Failed_to_checkout_context
+                           validation_store.context_hash))
+            >>=? fun commited_context ->
+            Context.get_protocol_exn commited_context
+            >>= fun protocol_hash ->
+            Legacy_state.Chain.update_level_indexed_protocol_store
+              chain
+              chain_id
+              block_header.shell.proto_level
+              protocol_hash
+              block_header
+            >>= fun () ->
             Legacy_state.Block.store
               chain
               block_header
