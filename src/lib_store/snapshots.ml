@@ -1031,9 +1031,12 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
     (* Filter protocols s.t. forall proto. proto.level >=
        caboose.proto_level. *)
     let protocol_levels =
-      Protocol_levels.filter
-        (fun level _ -> level >= Store.Block.proto_level minimum_block)
-        protocol_levels
+      Protocol_levels.(
+        filter
+          (fun level {block; _} ->
+            level >= Store.Block.proto_level minimum_block
+            || Store.Block.is_genesis chain_store (fst block))
+          protocol_levels)
     in
     return
       ( export_mode,
