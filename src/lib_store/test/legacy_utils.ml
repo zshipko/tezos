@@ -90,7 +90,7 @@ let make_legacy_store ?(user_activated_upgrades = [])
       (fun () -> loop ())
       (function
         | End_of_file ->
-            Format.printf "[Legacy store builder] Terminating@." ;
+            Format.printf "[Legacy store builder] Terminating@.@." ;
             Lwt.return_unit
         | exn ->
             Lwt.fail exn)
@@ -215,9 +215,9 @@ let make_activation_block genesis_block =
       : Tezos_protocol_genesis.Protocol.block_header_data ) )
 
 let init_store ~base_dir ~patch_context ~history_mode k =
-  let base_dir = base_dir // "new_store" in
-  let store_dir = base_dir // "store" in
-  let context_dir = base_dir // "context" in
+  let new_store_dir = base_dir // "new_store" in
+  let store_dir = new_store_dir // "store" in
+  let context_dir = new_store_dir // "context" in
   Store.init
     ~patch_context
     ~history_mode
@@ -328,7 +328,7 @@ let build_new_store nb_blocks ~base_dir ~patch_context ~history_mode =
   init_store ~base_dir ~patch_context ~history_mode k
 
 let build_old_store ~genesis ~genesis_block ~legacy_history_mode:history_mode
-    ~store ~legacy_store_dir ~legacy_store_builder_exe blocks =
+    ~store ~legacy_data_dir ~legacy_store_builder_exe blocks =
   make_legacy_store
     ~legacy_store_builder_exe
     ~genesis_block
@@ -336,13 +336,13 @@ let build_old_store ~genesis ~genesis_block ~legacy_history_mode:history_mode
     store
     genesis
     blocks
-    ~output_dir:legacy_store_dir
+    ~output_dir:legacy_data_dir
   >>= fun () ->
   Legacy_state.init
     ~readonly:false
     ~history_mode
-    ~store_root:(legacy_store_dir // "store")
-    ~context_root:(legacy_store_dir // "context")
+    ~store_root:(legacy_data_dir // "store")
+    ~context_root:(legacy_data_dir // "context")
     genesis
 
 let store_builder ?(legacy_history_mode = History_mode.Legacy.Full)
@@ -350,17 +350,17 @@ let store_builder ?(legacy_history_mode = History_mode.Legacy.Full)
   let history_mode = History_mode.convert legacy_history_mode in
   build_new_store nb_blocks ~base_dir ~patch_context ~history_mode
   >>=? fun (store, genesis, genesis_block, blocks) ->
-  let legacy_store_dir = base_dir // "store_to_upgrade" in
+  let legacy_data_dir = base_dir // "store_to_upgrade" in
   build_old_store
     ~genesis
     ~genesis_block
     ~legacy_history_mode
     ~store
-    ~legacy_store_dir
+    ~legacy_data_dir
     ~legacy_store_builder_exe
     blocks
   >>=? fun (legacy_state, _, _, _) ->
-  return (store, (legacy_store_dir, legacy_state), blocks)
+  return (store, (legacy_data_dir, legacy_state), blocks)
 
 type test = {
   name : string;
