@@ -314,7 +314,7 @@ module type S = sig
 
   val restore_context_fd :
     index ->
-    ?expected_block:string ->
+    ?expected_block:Block_hash.t ->
     fd:Lwt_unix.file_descr ->
     target_block:Block_hash.t ->
     nb_context_elements:int ->
@@ -619,8 +619,7 @@ module Make (I : Dump_interface) = struct
               Block_header.hash imported_block_header
             in
             ( match expected_block with
-            | Some str ->
-                let bh = Block_hash.of_b58check_exn str in
+            | Some bh ->
                 fail_unless
                   (Block_hash.equal bh imported_block_hash)
                   (Inconsistent_imported_block (imported_block_hash, bh))

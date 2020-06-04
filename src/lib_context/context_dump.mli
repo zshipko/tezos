@@ -182,7 +182,7 @@ module type S = sig
 
   val restore_context_fd :
     index ->
-    ?expected_block:string ->
+    ?expected_block:Block_hash.t ->
     fd:Lwt_unix.file_descr ->
     target_block:Block_hash.t ->
     nb_context_elements:int ->

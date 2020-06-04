@@ -121,9 +121,8 @@ let export_import ~test_descr (store_dir, context_dir) chain_store
   let dir = store_dir // "imported_store" in
   let dst_store_dir = dir // "store" in
   let dst_context_dir = dir // "context" in
-  let block = Option.map ~f:Block_hash.to_b58check exported_block_hash in
   Snapshots.import
-    ?block
+    ?block:exported_block_hash
     ~snapshot_file:snapshot_name
     ~dst_store_dir
     ~dst_context_dir

@@ -99,7 +99,7 @@ val export :
 
 val import :
   ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->
-  ?block:string ->
+  ?block:Block_hash.t ->
   ?check_consistency:bool ->
   snapshot_file:string ->
   dst_store_dir:string ->
@@ -111,7 +111,7 @@ val import :
 
 val import_legacy :
   ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->
-  ?block:string ->
+  ?block:Block_hash.t ->
   dst_store_dir:string ->
   dst_context_dir:string ->
   chain_name:Distributed_db_version.Name.t ->

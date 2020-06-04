@@ -260,7 +260,7 @@ let test_snapshot legacy_snapshot_history_mode store
   Format.printf "import from legacy snapshot : %s@." snapshot_file ;
   Snapshots.import_legacy
     ~patch_context
-    ~block:(Block_hash.to_b58check head_hash)
+    ~block:head_hash
     ~dst_store_dir
     ~dst_context_dir
     ~chain_name

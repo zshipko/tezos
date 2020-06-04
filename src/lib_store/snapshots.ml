@@ -1927,7 +1927,8 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
           in
           (* Restore context and fetch data *)
           Context.restore_context_legacy
-            ?expected_block
+            ?expected_block:
+              (Option.map ~f:(fun b -> Block_hash.to_b58check b) expected_block)
             context_index
             ~snapshot_file
             ~handle_block

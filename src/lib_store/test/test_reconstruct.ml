@@ -195,10 +195,9 @@ let test_from_snapshot ~descr:_ (store_dir, context_dir) store
         ~snapshot_file
         genesis
       >>=? fun () ->
-      let block = Some (Block_hash.to_b58check last_hash) in
       Snapshots.import
         ~patch_context
-        ?block
+        ~block:last_hash
         ~snapshot_file
         ~dst_store_dir
         ~dst_context_dir

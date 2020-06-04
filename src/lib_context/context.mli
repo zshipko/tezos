@@ -220,7 +220,7 @@ val dump_context :
   index -> Block_data.t -> context_file_path:string -> int tzresult Lwt.t
 
 val restore_context :
-  ?expected_block:string ->
+  ?expected_block:Block_hash.t ->
   index ->
   context_file_path:string ->
   target_block:Block_hash.t ->
