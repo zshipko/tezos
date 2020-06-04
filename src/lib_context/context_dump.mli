@@ -184,7 +184,8 @@ module type S = sig
     index ->
     ?expected_block:string ->
     fd:Lwt_unix.file_descr ->
-    metadata:Snapshot_version.metadata ->
+    target_block:Block_hash.t ->
+    nb_context_elements:int ->
     block_data tzresult Lwt.t
 end
 

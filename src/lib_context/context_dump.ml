@@ -316,7 +316,8 @@ module type S = sig
     index ->
     ?expected_block:string ->
     fd:Lwt_unix.file_descr ->
-    metadata:Snapshot_version.metadata ->
+    target_block:Block_hash.t ->
+    nb_context_elements:int ->
     block_data tzresult Lwt.t
 end
 
@@ -596,7 +597,8 @@ module Make (I : Dump_interface) = struct
 
   (* Restoring *)
 
-  let restore_context_fd index ?expected_block ~fd ~metadata =
+  let restore_context_fd index ?expected_block ~fd ~target_block
+      ~nb_context_elements =
     let read = ref 0 in
     let rbuf = ref (fd, Bytes.empty, 0, read) in
     (* Editing the repository *)
@@ -606,8 +608,7 @@ module Make (I : Dump_interface) = struct
       >>= function
       | None -> fail Restore_context_failure | Some tree -> return tree
     in
-    let restore (metadata : Snapshot_version.metadata) =
-      let context_elements = metadata.context_elements in
+    let restore () =
       let first_pass () =
         get_command rbuf
         >>=? function
@@ -628,9 +629,8 @@ module Make (I : Dump_interface) = struct
             >>=? fun () ->
             (* Checks that the block hash of the metadata is the expected one *)
             fail_unless
-              (Block_hash.equal metadata.block_hash imported_block_hash)
-              (Inconsistent_imported_block
-                 (imported_block_hash, metadata.block_hash))
+              (Block_hash.equal target_block imported_block_hash)
+              (Inconsistent_imported_block (imported_block_hash, target_block))
             >>=? fun () -> return block_data
         | _ ->
             fail Inconsistent_snapshot_data
@@ -670,8 +670,8 @@ module Make (I : Dump_interface) = struct
             fmt
             "Writing context: %dK/%dK (%d%%) elements, %s read"
             (i / 1_000)
-            (context_elements / 1_000)
-            (100 * i / context_elements)
+            (nb_context_elements / 1_000)
+            (100 * i / nb_context_elements)
             ( if !read > 1_048_576 then
               Format.asprintf "%dMiB" (!read / 1_048_576)
             else Format.asprintf "%dKiB" (!read / 1_024) ))
@@ -681,7 +681,7 @@ module Make (I : Dump_interface) = struct
       >>=? fun () -> check_eof () >>=? fun () -> return block_data
     in
     Lwt.catch
-      (fun () -> restore metadata)
+      (fun () -> restore ())
       (function
         | Unix.Unix_error (e, _, _) ->
             fail @@ System_read_error (Unix.error_message e)

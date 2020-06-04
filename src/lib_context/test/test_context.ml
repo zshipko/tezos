@@ -285,7 +285,6 @@ let test_dump {idx; block3b; _} =
   Lwt_utils_unix.with_tempdir "tezos_test_" (fun base_dir2 ->
       let dumpfile = base_dir2 // "dump" in
       let ctxt_hash = block3b in
-      let history_mode = Tezos_shell_services.History_mode.default in
       let mk_empty_block_header context =
         Block_header.
           {
@@ -311,24 +310,18 @@ let test_dump {idx; block3b; _} =
           operations = [];
         }
       in
-      let metadata =
-        ( {
-            snapshot_version = "tezos-snapshot-1.0.0";
-            chain_name;
-            history_mode;
-            block_hash = Block_header.hash empty_block_header;
-            level = empty_block_header.shell.level;
-            timestamp = empty_block_header.shell.timestamp;
-            context_elements = 0;
-          }
-          : Tezos_shell_services.Snapshot_version.metadata )
-      in
+      let target_block = Block_header.hash empty_block_header in
+      let nb_context_elements = 0 in
       Context.dump_context idx bhs ~context_file_path:dumpfile
       >>=? fun _ ->
       let root = base_dir2 // "context" in
       Context.init ?patch_context:None root
       >>= fun idx2 ->
-      Context.restore_context idx2 ~context_file_path:dumpfile ~metadata
+      Context.restore_context
+        idx2
+        ~context_file_path:dumpfile
+        ~target_block
+        ~nb_context_elements
       >>=? fun imported ->
       let {Block_data.block_header; _} = imported in
       let expected_ctxt_hash = block_header.Block_header.shell.context in

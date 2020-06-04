@@ -68,6 +68,24 @@ type error +=
   | Snapshot_import_failure of string
   | Snapshot_export_failure of string
 
+val current_version : int
+
+type metadata = {
+  version : int;
+  chain_name : Distributed_db_version.Name.t;
+  history_mode : History_mode.t;
+  block_hash : Block_hash.t;
+  level : Int32.t;
+  timestamp : Time.Protocol.t;
+  context_elements : int;
+}
+
+val metadata_encoding : metadata Data_encoding.t
+
+val pp_metadata : Format.formatter -> metadata -> unit
+
+val read_snapshot_metadata : snapshot_file:string -> metadata tzresult Lwt.t
+
 val export :
   ?rolling:bool ->
   ?compress:bool ->
@@ -90,8 +108,6 @@ val import :
   user_activated_protocol_overrides:User_activated.protocol_overrides ->
   Genesis.t ->
   unit tzresult Lwt.t
-
-val snapshot_info : snapshot_file:string -> unit tzresult Lwt.t
 
 val import_legacy :
   ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->

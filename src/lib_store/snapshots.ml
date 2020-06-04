@@ -27,6 +27,8 @@ open Snapshots_events
 open Store_types
 open Store_errors
 
+let current_version = 2
+
 type error +=
   | Incompatible_history_mode of {
       requested : History_mode.t;
@@ -420,9 +422,74 @@ let () =
     (function Snapshot_export_failure str -> Some str | _ -> None)
     (fun str -> Snapshot_export_failure str)
 
+type metadata = {
+  version : int;
+  chain_name : Distributed_db_version.Name.t;
+  history_mode : History_mode.t;
+  block_hash : Block_hash.t;
+  level : Int32.t;
+  timestamp : Time.Protocol.t;
+  context_elements : int;
+}
+
+let metadata_encoding =
+  let open Data_encoding in
+  conv
+    (fun { version;
+           chain_name;
+           history_mode;
+           block_hash;
+           level;
+           timestamp;
+           context_elements } ->
+      ( version,
+        chain_name,
+        history_mode,
+        block_hash,
+        level,
+        timestamp,
+        context_elements ))
+    (fun ( version,
+           chain_name,
+           history_mode,
+           block_hash,
+           level,
+           timestamp,
+           context_elements ) ->
+      {
+        version;
+        chain_name;
+        history_mode;
+        block_hash;
+        level;
+        timestamp;
+        context_elements;
+      })
+    (obj7
+       (req "version" int31)
+       (req "chain_name" Distributed_db_version.Name.encoding)
+       (req "mode" History_mode.encoding)
+       (req "block_hash" Block_hash.encoding)
+       (req "level" int32)
+       (req "timestamp" Time.Protocol.encoding)
+       (req "context_elements" int31))
+
+let pp_metadata ppf {version; chain_name; history_mode; block_hash; level; _} =
+  Format.fprintf
+    ppf
+    "chain %a, block hash %a at level %ld in %a (snapshot version %d)"
+    Distributed_db_version.Name.pp
+    chain_name
+    Block_hash.pp
+    block_hash
+    level
+    History_mode.pp
+    history_mode
+    version
+
 let write_snapshot_metadata metadata file =
   let metadata_json =
-    Data_encoding.Json.construct Snapshot_version.metadata_encoding metadata
+    Data_encoding.Json.construct metadata_encoding metadata
   in
   Lwt_utils_unix.Json.write_file file metadata_json
   >>= function
@@ -435,11 +502,10 @@ let write_snapshot_metadata metadata file =
   | Ok () ->
       return_unit
 
-let read_snapshot_metadata file =
-  let filename = Naming.(file // Snapshot.metadata) in
+let read_snapshot_metadata ~snapshot_file =
+  let filename = Naming.(snapshot_file // Snapshot.metadata) in
   let read_config json =
-    return
-      (Data_encoding.Json.destruct Snapshot_version.metadata_encoding json)
+    return (Data_encoding.Json.destruct metadata_encoding json)
   in
   protect
     ~on_error:(fun err ->
@@ -449,11 +515,11 @@ let read_snapshot_metadata file =
         pp_print_error
         err)
     (fun () ->
-      if Sys.is_directory file then
+      if Sys.is_directory snapshot_file then
         Lwt_utils_unix.Json.read_file filename
         >>=? fun json -> read_config json
       else
-        let ic = Zip.open_in file in
+        let ic = Zip.open_in snapshot_file in
         let entry = Zip.find_entry ic Naming.Snapshot.metadata in
         let s = Zip.read_entry ic entry in
         match Data_encoding.Json.from_string s with
@@ -1227,16 +1293,15 @@ let export ?(rolling = false) ?(compress = true) ~block ~store_dir ~context_dir
     ~dst_dir:dst_protocol_dir
   >>=? fun () ->
   let metadata =
-    ( {
-        snapshot_version = Snapshot_version.current_version;
-        chain_name;
-        history_mode = export_mode;
-        block_hash = Store.Block.hash export_block;
-        level = Store.Block.level export_block;
-        timestamp = Store.Block.timestamp export_block;
-        context_elements = written_context_elements;
-      }
-      : Snapshot_version.metadata )
+    {
+      version = current_version;
+      chain_name;
+      history_mode = export_mode;
+      block_hash = Store.Block.hash export_block;
+      level = Store.Block.level export_block;
+      timestamp = Store.Block.timestamp export_block;
+      context_elements = written_context_elements;
+    }
   in
   write_snapshot_metadata metadata Naming.(snapshot_dir // Snapshot.metadata)
   >>=? fun () ->
@@ -1450,7 +1515,12 @@ let restore_protocols ~should_rename ~snapshot_protocol_dir ~dst_protocol_dir =
   >>=? fun () -> return protocol_levels
 
 let import_log_notice ?snapshot_metadata filename block =
-  lwt_emit (Import_info (filename, snapshot_metadata))
+  let metadata =
+    Option.map
+      ~f:(fun metadata -> Format.asprintf "%a" pp_metadata metadata)
+      snapshot_metadata
+  in
+  lwt_emit (Import_info {filename; metadata})
   >>= fun () ->
   ( match block with
   | None ->
@@ -1471,8 +1541,8 @@ let check_context_hash_consistency validation_store block_header =
        })
 
 let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
-    ~user_activated_upgrades ~user_activated_protocol_overrides
-    snapshot_metadata genesis chain_id =
+    ~user_activated_upgrades ~user_activated_protocol_overrides metadata
+    genesis chain_id =
   (* Start by committing genesis *)
   Context.commit_genesis
     context_index
@@ -1485,7 +1555,8 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
     context_index
     ?expected_block
     ~context_file_path:Naming.(snapshot_dir // Snapshot.context)
-    ~metadata:snapshot_metadata
+    ~target_block:metadata.block_hash
+    ~nb_context_elements:metadata.context_elements
   >>=? fun ({block_header; operations; predecessor_header} as block_data) ->
   let pred_context_hash = predecessor_header.shell.context in
   Context.checkout context_index pred_context_hash
@@ -1545,7 +1616,7 @@ let import ?patch_context ?block:expected_block ?(check_consistency = true)
     (Sys.file_exists snapshot_file)
     (Snapshot_file_not_found snapshot_file)
   >>=? fun () ->
-  read_snapshot_metadata snapshot_file
+  read_snapshot_metadata ~snapshot_file
   >>=? fun snapshot_metadata ->
   import_log_notice ~snapshot_metadata snapshot_file expected_block
   >>= fun () ->
@@ -1653,19 +1724,6 @@ let import ?patch_context ?block:expected_block ?(check_consistency = true)
   else Lwt.return_unit )
   >>= fun () ->
   lwt_emit (Import_success snapshot_dir) >>= fun () -> return_unit
-
-let snapshot_info ~snapshot_file =
-  fail_unless
-    (Sys.file_exists snapshot_file)
-    (Snapshot_file_not_found snapshot_file)
-  >>=? fun () ->
-  read_snapshot_metadata snapshot_file
-  >>=? fun metadata ->
-  Format.printf
-    "@[<v 2>Snapshot information:@ %a@]@."
-    Snapshot_version.metadata_pp
-    metadata ;
-  return_unit
 
 (* Legacy import *)
 

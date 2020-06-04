@@ -195,7 +195,13 @@ module Term = struct
                   .user_activated_protocol_overrides
           else return_unit
       | Info ->
-          Snapshots.snapshot_info ~snapshot_file:snapshot_path
+          Snapshots.read_snapshot_metadata ~snapshot_file:snapshot_path
+          >>=? fun metadata ->
+          Format.printf
+            "@[<v 2>Snapshot information:@ %a@]@."
+            Snapshots.pp_metadata
+            metadata ;
+          return_unit
     in
     match Lwt_main.run run with
     | Ok () ->

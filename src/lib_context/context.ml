@@ -1171,7 +1171,8 @@ let dump_context idx data ~context_file_path =
     (fun () -> Context_dumper.dump_context_fd idx data ~context_fd)
     (fun () -> Lwt_unix.close context_fd)
 
-let restore_context ?expected_block idx ~context_file_path ~metadata =
+let restore_context ?expected_block idx ~context_file_path ~target_block
+    ~nb_context_elements =
   Lwt.catch
     (fun () ->
       Lwt_unix.openfile context_file_path Lwt_unix.[O_RDONLY] 0o444 >>= return)
@@ -1186,7 +1187,12 @@ let restore_context ?expected_block idx ~context_file_path ~metadata =
   >>=? fun fd ->
   Lwt.finalize
     (fun () ->
-      Context_dumper.restore_context_fd idx ~fd ?expected_block ~metadata
+      Context_dumper.restore_context_fd
+        idx
+        ~fd
+        ?expected_block
+        ~target_block
+        ~nb_context_elements
       >>=? fun result ->
       Lwt_unix.lseek fd 0 Lwt_unix.SEEK_CUR
       >>= fun current ->

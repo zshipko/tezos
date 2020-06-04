@@ -32,7 +32,7 @@ type status =
   | Export_info of History_mode.t * block_descriptor
   | Export_success of string
   | Set_history_mode of History_mode.t
-  | Import_info of (string * Snapshot_version.metadata option)
+  | Import_info of {filename : string; metadata : string option}
   | Import_unspecified_hash
   | Import_loading
   | Set_head of Block_hash.t
@@ -61,13 +61,13 @@ let status_pp ppf = function
       Format.fprintf ppf "Successful export: %s" filename
   | Set_history_mode hm ->
       Format.fprintf ppf "Setting history-mode to %a" History_mode.pp hm
-  | Import_info (filename, metadata) ->
+  | Import_info {filename; metadata} ->
       Format.fprintf
         ppf
         "Importing data from snapshot %s%a."
         filename
         (Option.pp ~default:"." (fun fmt metadata ->
-             Format.fprintf fmt ": %a" Snapshot_version.metadata_pp metadata))
+             Format.fprintf fmt ": %s" metadata))
         metadata
   | Import_unspecified_hash ->
       Format.fprintf
@@ -131,9 +131,13 @@ module Definition = struct
            case
              (Tag 4)
              ~title:"Import_info"
-             (tup2 string (option Snapshot_version.metadata_encoding))
-             (function Import_info (s, m) -> Some (s, m) | _ -> None)
-             (fun (s, m) -> Import_info (s, m));
+             (tup2 string (option string))
+             (function
+               | Import_info {filename; metadata} ->
+                   Some (filename, metadata)
+               | _ ->
+                   None)
+             (fun (filename, metadata) -> Import_info {filename; metadata});
            case
              (Tag 5)
              ~title:"Import_unspecified_hash"

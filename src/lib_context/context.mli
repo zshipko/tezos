@@ -223,7 +223,8 @@ val restore_context :
   ?expected_block:string ->
   index ->
   context_file_path:string ->
-  metadata:Snapshot_version.metadata ->
+  target_block:Block_hash.t ->
+  nb_context_elements:int ->
   Block_data.t tzresult Lwt.t
 
 val restore_context_legacy :
