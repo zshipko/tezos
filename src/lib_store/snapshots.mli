@@ -23,6 +23,52 @@
 (*                                                                           *)
 (*****************************************************************************)
 
+(** Snapshots for the store
+
+    Snapshots are canonical representations of the store and its
+    associated context. Its main purposes it to save and load a
+    current state with the minimal necessary amount of
+    information. This snapshot may also be shared by third parties to
+    facilitate the bootstrap process.
+
+
+    A snapshot of a block [B] is composed of:
+    - Metadata of the snapshot; A single context containing every key
+    - that the block [B-1] needs (see below); The set of blocks and
+    - their operations from the genesis block up
+      to [B] -- it might contain less blocks if the snapshot is
+      created from a store using a [Rolling] history mode of if it is
+      created as a [Rolling] snapshot. Block's metadata are not
+      exported ;
+    - The set of necessary Tezos protocols.
+
+
+    Exporting a snapshot will generate such a file (or a directory, if
+    the snapshot is not compressed). Importing a snapshot will
+    initialize a fresh store with the data contained in the
+    snapshot. As snapshots may be shared between users, checks are
+    made to ensure that no malicious datais loaded. For instance, we
+    export the context of block [B-1] to make sure that the
+    application of the block [B], given its predecessor's context, is
+    valid.
+
+    Depending on the history mode, a snapshot might contain less
+    blocks. In full, all blocks are present and importing such a
+    snapshot will populate the {!Cemented_store} with every cycle up
+    to the snapshot's target block. Meanwhile, in [Rolling], only a
+    few previous blocks will be exported ([max_op_ttl] from the target
+    block), only populating a {!Floating_block_store}. Thus, the
+    snapshot sizegreatly differs depending on the history mode used.
+
+    Snapshots may be created concurrently with a running node. It
+    might impact the node for a few seconds to retrieve the necessary
+    consistent information to producethe snapshot.
+
+    (LEGACY) Snapshots from the previous version (1) of the store are
+    fully retro-compatible and might be used to initializea new store with
+    the previous snapshot format.
+*)
+
 open Store_types
 
 type error +=
@@ -68,8 +114,10 @@ type error +=
   | Snapshot_import_failure of string
   | Snapshot_export_failure of string
 
+(** Current version of snapshots *)
 val current_version : int
 
+(** The type of the snapshot [metadata]. *)
 type metadata = {
   version : int;
   chain_name : Distributed_db_version.Name.t;
@@ -80,12 +128,23 @@ type metadata = {
   context_elements : int;
 }
 
+(** Encoding of a snapshot's {!metadata} *)
 val metadata_encoding : metadata Data_encoding.t
 
+(** Pretty-printer of a snapshot's {!metadata} *)
 val pp_metadata : Format.formatter -> metadata -> unit
 
+(** [read_snapshot_metadata ~snapshot_file] reads [snapshot_file]'s
+    metadata. *)
 val read_snapshot_metadata : snapshot_file:string -> metadata tzresult Lwt.t
 
+(** [export ?rolling ?compress ~block ~store_dir ~context_dir
+    ~chain_name ~snapshot_file genesis] reads from the [store_dir] and
+    [context_dir] the current state of the node and produces a
+    snapshot in [snapshot_file]. If [compress] is set, the snapshot is
+    compressed using zip format, otherwise, it is output as a
+    directory. If [rolling] is set, only the necessary blocks will be
+    exported. *)
 val export :
   ?rolling:bool ->
   ?compress:bool ->
@@ -97,6 +156,17 @@ val export :
   Genesis.t ->
   unit tzresult Lwt.t
 
+(** [import ?patch_context ?block ?check_consistency ~snapshot_file
+   ~dst_store_dir ~dst_context_dir ~user_activated_upgrades
+   ~user_activated_protocol_overrides genesis]
+
+    populates [dst_store_dir] and [dst_context_dir] with the data
+    contained in the [snapshot_file]. If [check_consistency] is unset,
+    less security checks will be made and the import process will be
+    more efficient. If [block] is set, the import process will make
+    sure that the block is the correct one we load. [patch_context],
+    [user_activated_upgrades] and [user_activated_protocol_overrides]
+    are passed to the validator in order to validate the target block. *)
 val import :
   ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->
   ?block:Block_hash.t ->
@@ -109,6 +179,15 @@ val import :
   Genesis.t ->
   unit tzresult Lwt.t
 
+(** [import_legacy ?patch_context ?block ~dst_store_dir
+   ~dst_context_dir ~chain_name ~user_activated_upgrades
+   ~user_activated_protocol_overrides ~snapshot_file genesis]
+
+    same as import but expect [snapshot_file] to be in the format of
+    version 1. The {!Cemented_block_store} will be artificially
+    reconstructed using hard-coded values of most common networks
+    (i.e. mainnet, carthagenet, sandbox). Fails if the [chain_name]
+    cannot be associated to one of the hard-coded supported network. *)
 val import_legacy :
   ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->
   ?block:Block_hash.t ->
