@@ -464,18 +464,14 @@ let test_is_valid_checkpoint chain_store table =
   >>= fun _prev_head ->
   Store.Chain.set_checkpoint chain_store (block_hash, level)
   >>=? fun () ->
-  Store.Chain.checkpoint chain_store
-  >>= fun checkpoint ->
   (* "b3" is valid because:
      a1 - a2 (checkpoint) - b1 - b2 - b3
-     it is not valid when the checkpoint change to a pick different than a2.
   *)
   let b3 = vblock table "B3" in
   Store.Chain.is_valid_for_checkpoint
     chain_store
-    ~checkpoint
     Store.Block.(hash b3, level b3)
-  >>= fun is_valid ->
+  >>=? fun is_valid ->
   if is_valid then return_unit else Assert.fail_msg "invalid checkpoint"
 
 (* return a block with the best fitness amongst the known blocks which
@@ -619,7 +615,7 @@ let not_may_update_checkpoint chain_store checkpoint =
       return_unit
   | Some checkpoint ->
       Store.Chain.best_known_head_for_checkpoint chain_store ~checkpoint
-      >>= fun best_head ->
+      >>=? fun best_head ->
       Store.Chain.set_head chain_store best_head
       >>= fun _ -> Store.Chain.set_checkpoint chain_store checkpoint
 

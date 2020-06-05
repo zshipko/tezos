@@ -688,15 +688,11 @@ module Chain : sig
       is an ancestor of [chain_store]'s current head. *)
   val is_in_chain : chain_store -> block_descriptor -> bool Lwt.t
 
-  (** [is_valid_for_checkpoint chain_store ~checkpoint block_descr]
-      checks that [block_descr] is a valid checkpoint relatively to
-      the given [checkpoint] in [chain_store]. Uses [Chain.checkpoint]
-      as [checkpoint] in normal cases. *)
+  (** [is_valid_for_checkpoint chain_store block] checks that [block]
+      is a valid checkpoint relatively to the actual
+      [chain_store]. *)
   val is_valid_for_checkpoint :
-    chain_store ->
-    checkpoint:block_descriptor ->
-    block_descriptor ->
-    bool Lwt.t
+    chain_store -> block_descriptor -> bool tzresult Lwt.t
 
   (** [is_acceptable_block chain_store block_descr] checks if
       [block_descr] would be a valid block to be stored in
@@ -707,7 +703,7 @@ module Chain : sig
       the fittest block among known heads in [chain_store] to be
       promoted as checkpoint. *)
   val best_known_head_for_checkpoint :
-    chain_store -> checkpoint:block_descriptor -> Block.t Lwt.t
+    chain_store -> checkpoint:block_descriptor -> Block.t tzresult Lwt.t
 
   (** [set_checkpoint chain_store checkpoint_descr] sets the
       checkpoint for [chain_store]. Fails if the given

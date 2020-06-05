@@ -198,11 +198,15 @@ module Block = struct
     (* FIXME: Propagate?*)
     >>= function Ok k -> Lwt.return k | Error _ -> Lwt.return_false
 
+  let locked_is_known_invalid chain_state hash =
+    let {invalid_blocks; _} = chain_state in
+    Stored_data.read invalid_blocks
+    >>= fun invalid_blocks ->
+    Lwt.return (Block_hash.Map.mem hash invalid_blocks)
+
   let is_known_invalid {chain_state; _} hash =
-    Shared.use chain_state (fun {invalid_blocks; _} ->
-        Stored_data.read invalid_blocks
-        >>= fun invalid_blocks ->
-        Lwt.return (Block_hash.Map.mem hash invalid_blocks))
+    Shared.use chain_state (fun chain_state ->
+        locked_is_known_invalid chain_state hash)
 
   let is_known chain_store hash =
     is_known_valid chain_store hash
@@ -890,8 +894,7 @@ module Chain = struct
        (Block.hash new_head)
      >>= function
      | None ->
-         fail
-           (Inconsistent_cemented_store (Missing_lafl (Block.hash new_head)))
+         fail Missing_last_allowed_fork_level_block
      | Some hash ->
          return (hash, new_head_lafl))
     >>=? fun to_block -> return (from_block, to_block)
@@ -1148,84 +1151,104 @@ module Chain = struct
              (Block.level head)
              alternate_heads))
 
-  let is_valid_for_checkpoint chain_store
-      ~checkpoint:(current_checkpoint_hash, current_checkpoint_level)
+  let locked_is_valid_for_checkpoint chain_store chain_state
       (given_checkpoint_hash, given_checkpoint_level) =
-    if Compare.Int32.(given_checkpoint_level < current_checkpoint_level) then
-      Lwt.return_false
+    Stored_data.read chain_state.current_head
+    >>= fun current_head ->
+    Block.get_block_metadata chain_store current_head
+    >>=? fun current_head_metadata ->
+    let head_lafl = Block.last_allowed_fork_level current_head_metadata in
+    if Compare.Int32.(given_checkpoint_level <= head_lafl) then
+      (* Cannot set a checkpoint before the current head's last
+         allowed fork level *)
+      return_false
     else
-      read_ancestor_hash
-        chain_store
-        ~distance:
-          Int32.(to_int (sub given_checkpoint_level current_checkpoint_level))
-        given_checkpoint_hash
+      Block.is_known_valid chain_store given_checkpoint_hash
       >>= function
-      | None -> (
-          (* <=> checkpoint not found or no ancestor found =>
-             the checkpoint must be in the future and therefore not yet known *)
-          Block.is_known chain_store given_checkpoint_hash
+      | false ->
+          (* Given checkpoint is in the future: valid *)
+          return_true
+      | true -> (
+          read_ancestor_hash
+            chain_store
+            ~distance:Int32.(to_int (sub given_checkpoint_level head_lafl))
+            given_checkpoint_hash
           >>= function
-          | true ->
-              Lwt.return false
-          | false ->
-              (* Checkpoint in the future *)
-              Lwt.return_true )
-      | Some ancestor ->
-          Lwt.return (Block_hash.equal ancestor current_checkpoint_hash)
+          | None ->
+              (* The last allowed fork level is unknown, thus different from current head's lafl *)
+              return_false
+          | Some ancestor -> (
+              read_ancestor_hash
+                chain_store
+                ~distance:
+                  Int32.(to_int (sub (Block.level current_head) head_lafl))
+                (Block.hash current_head)
+              >>= function
+              | None ->
+                  fail Missing_last_allowed_fork_level_block
+              | Some lafl_hash ->
+                  return (Block_hash.equal lafl_hash ancestor) ) )
 
-  let set_checkpoint chain_store new_checkpoint =
-    Shared.use chain_store.chain_state (fun {checkpoint; _} ->
-        is_valid_for_checkpoint chain_store ~checkpoint new_checkpoint
+  let is_valid_for_checkpoint chain_store given_checkpoint =
+    Shared.use chain_store.chain_state (fun chain_state ->
+        Block.locked_is_known_invalid chain_state (fst given_checkpoint)
         >>= function
-        | false ->
-            fail
-              (Cannot_set_checkpoint
-                 {current_checkpoint = checkpoint; new_checkpoint})
         | true ->
-            return_unit)
-    >>=? fun () ->
+            return_false
+        | false ->
+            locked_is_valid_for_checkpoint
+              chain_store
+              chain_state
+              given_checkpoint)
+
+  let set_checkpoint chain_store given_checkpoint =
     Shared.update_with chain_store.chain_state (fun chain_state ->
-        (* FIXME: potential data-race if called during a merge *)
-        Stored_data.write chain_state.checkpoint_data new_checkpoint
-        >>= fun () ->
-        return (Some {chain_state with checkpoint = new_checkpoint}, ()))
+        Block.locked_is_known_invalid chain_state (fst given_checkpoint)
+        >>= function
+        | true ->
+            fail (Cannot_set_checkpoint given_checkpoint)
+        | false -> (
+            locked_is_valid_for_checkpoint
+              chain_store
+              chain_state
+              given_checkpoint
+            >>=? function
+            | false ->
+                fail (Cannot_set_checkpoint given_checkpoint)
+            | true ->
+                Stored_data.write chain_state.checkpoint_data given_checkpoint
+                >>= fun () ->
+                return
+                  (Some {chain_state with checkpoint = given_checkpoint}, ()) ))
 
   let is_acceptable_block chain_store block_descr =
     Shared.use chain_store.chain_state (fun chain_state ->
         locked_is_acceptable_block chain_store chain_state block_descr)
 
   let best_known_head_for_checkpoint chain_store ~checkpoint =
-    (* TODO: is this really correct ? check legacy *)
     let (_, checkpoint_level) = checkpoint in
     current_head chain_store
     >>= fun current_head ->
     is_valid_for_checkpoint
       chain_store
-      ~checkpoint
       (Block.hash current_head, Block.level current_head)
-    >>= fun valid ->
-    if valid then Lwt.return current_head
+    >>=? fun valid ->
+    if valid then return current_head
     else
       let find_valid_predecessor hash =
-        (* FIXME: add proper error*)
-        (* TODO : remove assert *)
-        Block.read_block_opt chain_store hash
-        >|= Option.unopt_assert ~loc:__POS__
-        >>= fun block ->
+        Block.read_block chain_store hash
+        >>=? fun block ->
         if Compare.Int32.(Block_repr.level block < checkpoint_level) then
-          Lwt.return block
+          return block
         else
           (* Read the checkpoint's predecessor *)
-          Block.read_block_opt
+          Block.read_block
             chain_store
             hash
             ~distance:
               ( 1
               + ( Int32.to_int
                 @@ Int32.sub (Block_repr.level block) checkpoint_level ) )
-          >>= fun pred ->
-          let pred = Option.unopt_assert ~loc:__POS__ pred in
-          Lwt.return pred
       in
       known_heads chain_store
       >>= fun heads ->
@@ -1236,14 +1259,13 @@ module Chain = struct
         (fun hash _level best ->
           let valid_predecessor_t = find_valid_predecessor hash in
           best
-          >>= fun best ->
+          >>=? fun best ->
           valid_predecessor_t
-          >>= fun pred ->
-          if Fitness.(Block.fitness pred > Block.fitness best) then
-            Lwt.return pred
-          else Lwt.return best)
+          >>=? fun pred ->
+          if Fitness.(Block.fitness pred > Block.fitness best) then return pred
+          else return best)
         heads
-        (Lwt.return best)
+        (return best)
 
   (* Create / Load / Close *)
 
