@@ -549,7 +549,7 @@ module Chain : sig
       the [chain_store].
 
       The checkpoint is a block descriptor
-      ({Store_types.block_descriptor}) pointing to a block that must be
+      ({!Store_types.block_descriptor}) pointing to a block that must be
       part of the chain. The checkpoint maintains the set of following
       invariants:
 
@@ -578,7 +578,7 @@ module Chain : sig
       [chain_store].
 
       The savepoint is a block descriptor
-      ({Store_types.block_descriptor}) pointing to the lowest level
+      ({!Store_types.block_descriptor}) pointing to the lowest level
       block that has its metadata and/or context pruned with the
       following invariant:
 
@@ -597,7 +597,7 @@ module Chain : sig
       [chain_store].
 
       The caboose is a block descriptor
-      ({Store_types.block_descriptor}) pointing to the lowest level
+      ({!Store_types.block_descriptor}) pointing to the lowest level
       block that we know present in the chain store, if the history
       mode is {b not} Archive, it might not contain its metadata
       depending on the current savepoint:
