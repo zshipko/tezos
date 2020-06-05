@@ -145,7 +145,7 @@ let build_raw_rpc_directory ~user_activated_upgrades
       Store.Chain.compute_live_blocks chain_store ~block
       >>=? fun (live_blocks, _) -> return live_blocks) ;
   (* block metadata *)
-  let metadata chain_store block =
+  let block_metadata chain_store block =
     Store.Block.get_block_metadata chain_store block
     >>=? fun metadata ->
     let protocol_data =
@@ -170,17 +170,24 @@ let build_raw_rpc_directory ~user_activated_upgrades
             Next_proto.validation_passes;
       }
   in
+  let block_metadata_opt chain_store block =
+    protect
+      (fun () -> block_metadata chain_store block >>=? return_some)
+      ~on_error:(fun _ -> return_none)
+  in
   register0 S.metadata (fun (chain_store, block) () () ->
-      metadata chain_store block) ;
+      block_metadata chain_store block) ;
   (* operations *)
-  let convert chain_id (op : Operation.t) metadata : Block_services.operation =
+  let convert_with_metadata chain_id (op : Operation.t) op_metadata :
+      Block_services.operation =
     let protocol_data =
       Data_encoding.Binary.of_bytes_exn Proto.operation_data_encoding op.proto
     in
     let receipt =
-      Data_encoding.Binary.of_bytes_exn
-        Proto.operation_receipt_encoding
-        metadata
+      Some
+        (Data_encoding.Binary.of_bytes_exn
+           Proto.operation_receipt_encoding
+           op_metadata)
     in
     {
       Block_services.chain_id;
@@ -190,13 +197,33 @@ let build_raw_rpc_directory ~user_activated_upgrades
       receipt;
     }
   in
+  let convert_without_metadata chain_id (op : Operation.t) =
+    let protocol_data =
+      Data_encoding.Binary.of_bytes_exn Proto.operation_data_encoding op.proto
+    in
+    {
+      Block_services.chain_id;
+      hash = Operation.hash op;
+      shell = op.shell;
+      protocol_data;
+      receipt = None;
+    }
+  in
   let operations chain_store block =
-    let ops = Store.Block.operations block in
-    Store.Block.get_block_metadata chain_store block
-    >>=? fun metadata ->
-    let ops_metadata = Store.Block.operations_metadata metadata in
     let chain_id = Store.Chain.chain_id chain_store in
-    return (List.map2 (List.map2 (convert chain_id)) ops ops_metadata)
+    let ops = Store.Block.operations block in
+    Store.Block.get_block_metadata_opt chain_store block
+    >>= fun metadata_opt ->
+    match metadata_opt with
+    | None ->
+        return (List.map (List.map (convert_without_metadata chain_id)) ops)
+    | Some metadata ->
+        let ops_metadata = Store.Block.operations_metadata metadata in
+        return
+          (List.map2
+             (List.map2 (convert_with_metadata chain_id))
+             ops
+             ops_metadata)
   in
   register0 S.Operations.operations (fun (chain_store, block) () () ->
       operations chain_store block) ;
@@ -209,26 +236,26 @@ let build_raw_rpc_directory ~user_activated_upgrades
         Store.Block.get_block_metadata_opt chain_store block
         >>= function
         | None ->
-            Lwt.fail Not_found
+            return (List.map (convert_without_metadata chain_id) ops)
         | Some metadata ->
             let opss_metadata = Store.Block.operations_metadata metadata in
             let ops_metadata = List.nth opss_metadata i in
-            return (List.map2 (convert chain_id) ops ops_metadata)
+            return
+              (List.map2 (convert_with_metadata chain_id) ops ops_metadata)
       with _ -> Lwt.fail Not_found) ;
   register2 S.Operations.operation (fun (chain_store, block) i j () () ->
       let chain_id = Store.Chain.chain_id chain_store in
-      ( try
-          let (ops, _path) = Store.Block.operations_path block i in
-          Store.Block.get_block_metadata_opt chain_store block
-          >>= function
-          | None ->
-              Lwt.fail Not_found
-          | Some metadata ->
-              let opss_metadata = Store.Block.operations_metadata metadata in
-              let ops_metadata = List.nth opss_metadata i in
-              return (List.nth ops j, List.nth ops_metadata j)
-        with _ -> Lwt.fail Not_found )
-      >>=? fun (op, md) -> return (convert chain_id op md)) ;
+      let (ops, _path) = Store.Block.operations_path block i in
+      let op = List.nth ops j in
+      Store.Block.get_block_metadata_opt chain_store block
+      >>= function
+      | None ->
+          return (convert_without_metadata chain_id op)
+      | Some metadata ->
+          let opss_metadata = Store.Block.operations_metadata metadata in
+          let ops_metadata = List.nth opss_metadata i in
+          let op_metadata = List.nth ops_metadata j in
+          return (convert_with_metadata chain_id op op_metadata)) ;
   (* operation_hashes *)
   register0 S.Operation_hashes.operation_hashes (fun (_, block) () () ->
       return (Store.Block.all_operation_hashes block)) ;
@@ -268,9 +295,8 @@ let build_raw_rpc_directory ~user_activated_upgrades
           Proto.block_header_data_encoding
           header.protocol_data
       in
-      metadata chain_store block
+      block_metadata_opt chain_store block
       >>=? fun metadata ->
-      (* FIXME: handle pruned metadata *)
       operations chain_store block
       >>=? fun operations ->
       return
