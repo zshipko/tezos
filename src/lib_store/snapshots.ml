@@ -564,8 +564,8 @@ let copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir
             in
             loop [] files
           in
-          Lwt_list.iter_s
-            (Lwt_list.iter_p (fun ({filename; _} as file) ->
+          Error_monad.iter_s
+            (Error_monad.iter_p (fun ({filename; _} as file) ->
                  Cemented_block_store.iter_cemented_file
                    ~cemented_blocks_dir:src_cemented_dir
                    (fun block ->
@@ -581,14 +581,14 @@ let copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir
                        hash ;
                      Lwt.return_unit)
                    file
-                 >>= fun () ->
+                 >>=? fun () ->
                  let cycle = Naming.(src_cemented_dir // filename) in
                  Lwt_utils_unix.copy_file
                    ~src:cycle
                    ~dst:Naming.(dst_cemented_dir // filename)
-                 >>= fun () -> notify ()))
+                 >>= fun () -> notify () >>= fun () -> return_unit))
             tasks)
-      >>= fun () ->
+      >>=? fun () ->
       Cemented_block_level_index.close fresh_level_index ;
       Cemented_block_hash_index.close fresh_hash_index ;
       return_unit)
@@ -1134,7 +1134,8 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
       (fun exn ->
         Lwt_utils_unix.safe_close ro_fd
         >>= fun () ->
-        Lwt_utils_unix.safe_close rw_fd >>= fun () -> Lwt.fail exn)
+        Lwt_utils_unix.safe_close rw_fd
+        >>= fun () -> Lwt.return (error_exn exn))
   in
   Store.Unsafe.open_for_snapshot_export
     ~store_dir
@@ -1692,12 +1693,11 @@ let import ?patch_context ?block:expected_block ?(check_consistency = true)
     ( {hash = Block_header.hash block_data.block_header; contents; metadata}
       : Block_repr.block )
   in
-  (* TODO: parametrize this *)
-  (* Set the history mode with the default offset*)
+  (* Set the history mode with the default offset *)
   (let open History_mode in
   match snapshot_metadata.history_mode with
   | Archive ->
-      failwith "unexpected history mode found in snapshot"
+      assert false
   | Rolling _ ->
       return (Rolling {offset = default_offset})
   | Full _ ->

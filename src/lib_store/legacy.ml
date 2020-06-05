@@ -787,4 +787,5 @@ let upgrade_0_0_4 ~data_dir ?patch_context
                new_lmdb_path)
       | Error errors ->
           upgrade_cleaner data_dir >>= fun () -> Lwt.return (Error errors))
-    (fun exn -> upgrade_cleaner data_dir >>= fun () -> Lwt.fail exn)
+    (fun exn ->
+      upgrade_cleaner data_dir >>= fun () -> Lwt.return (error_exn exn))

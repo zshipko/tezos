@@ -90,7 +90,8 @@ val append_block : t -> Block_hash.t list -> Block_repr.t -> unit Lwt.t
 (** [append_all floating_store chunk] stores the [chunk] of
     (predecessors × blocks) in [floating_store] updating its index
     accordingly. *)
-val append_all : t -> (Block_hash.t list * Block_repr.t) list -> unit Lwt.t
+val append_all :
+  t -> (Block_hash.t list * Block_repr.t) list -> unit tzresult Lwt.t
 
 (** [iter_raw_fd f fd] unsafe sequential iterator on a file descriptor
     [fd]. Applies [f] on every block encountered.

@@ -23,6 +23,8 @@
 (*                                                                           *)
 (*****************************************************************************)
 
+open Store_errors
+
 type contents = {header : Block_header.t; operations : Operation.t list list}
 
 type metadata = {
@@ -144,7 +146,6 @@ let block_metadata metadata = metadata.block_metadata
 let operations_metadata metadata = metadata.operations_metadata
 
 let check_block_consistency ?genesis_hash ?pred_block block =
-  (* TODO add proper errors *)
   let block_header = header block in
   let block_hash = hash block in
   let result_hash = Block_header.hash block_header in
@@ -154,33 +155,24 @@ let check_block_consistency ?genesis_hash ?pred_block block =
          ~f:(fun genesis_hash -> Block_hash.equal block_hash genesis_hash)
          ~default:false
          genesis_hash )
-    (Exn
-       (Failure
-          (Format.asprintf
-             "Inconsistent block: inconsistent hash found for block %ld. \
-              Expected %a, got %a"
-             (level block)
-             Block_hash.pp
-             block_hash
-             Block_hash.pp
-             result_hash)))
+    (Inconsistent_block_hash
+       {
+         level = level block;
+         expected_hash = block_hash;
+         computed_hash = result_hash;
+       })
   >>=? fun () ->
   Option.unopt_map pred_block ~default:return_unit ~f:(fun pred_block ->
       fail_unless
         ( Block_hash.equal (hash pred_block) (predecessor block)
         && Compare.Int32.(level block = Int32.succ (level pred_block)) )
-        (Exn
-           (Failure
-              (Format.asprintf
-                 "Inconsistent block: inconsistent predecessor found for \
-                  block %a (%ld) - expected: %a vs got: %a"
-                 Block_hash.pp
-                 block_hash
-                 (level block)
-                 Block_hash.pp
-                 (hash pred_block)
-                 Block_hash.pp
-                 (predecessor block)))))
+        (Inconsistent_block_predecessor
+           {
+             block_hash;
+             level = level block;
+             expected_hash = hash pred_block;
+             computed_hash = predecessor block;
+           }))
   >>=? fun () ->
   let computed_operations_hash =
     Operation_list_list_hash.compute
@@ -196,6 +188,7 @@ let check_block_consistency ?genesis_hash ?pred_block block =
        {expected = operations_hash block; got = computed_operations_hash})
   >>=? fun () -> return_unit
 
+(* FIXME handle I/O errors *)
 let read_next_block fd =
   (* Read length *)
   let length_bytes = Bytes.create 4 in

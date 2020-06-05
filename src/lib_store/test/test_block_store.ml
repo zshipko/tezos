@@ -34,7 +34,7 @@ let assert_presence_in_block_store ?(with_metadata = false) block_store blocks
     (fun b ->
       let hash = Block_repr.hash b in
       Block_store.mem block_store (Block (hash, 0))
-      >>= fun is_known ->
+      >>=? fun is_known ->
       if not is_known then
         Alcotest.failf
           "assert_presence_in_block_store: block %a in not known"
@@ -44,7 +44,7 @@ let assert_presence_in_block_store ?(with_metadata = false) block_store blocks
         ~read_metadata:with_metadata
         block_store
         (Block (hash, 0))
-      >>= function
+      >>=? function
       | None ->
           Alcotest.failf
             "assert_presence_in_block_store: cannot find block %a"
@@ -67,7 +67,7 @@ let assert_absence_in_block_store block_store blocks =
     (fun b ->
       let hash = Block_repr.hash b in
       Block_store.mem block_store (Block (hash, 0))
-      >>= function
+      >>=? function
       | true ->
           Alcotest.failf
             "assert_absence_in_block_store: found unexpected block %a"
@@ -84,14 +84,14 @@ let test_storing_and_access_predecessors block_store =
   >>= fun () ->
   assert_presence_in_block_store block_store blocks
   >>=? fun () ->
-  Lwt_list.iter_s
+  Error_monad.iter_s
     (fun b ->
       let hash = Block_repr.hash b in
       let level = Block_repr.level b in
-      Lwt_list.iter_s
+      Error_monad.iter_s
         (fun distance ->
           Block_store.get_hash block_store (Block (hash, distance))
-          >>= function
+          >>=? function
           | None ->
               Alcotest.fail "expected predecessor but none found"
           | Some h ->
@@ -105,10 +105,10 @@ let test_storing_and_access_predecessors block_store =
                    level)
                 h
                 (List.nth blocks (Int32.to_int level - distance)).hash ;
-              Lwt.return_unit)
+              return_unit)
         (0 -- (Int32.to_int level - 1)))
     blocks
-  >>= fun () -> return_unit
+  >>=? fun () -> return_unit
 
 let test_consecutive_concurrent_merges block_store =
   let nb_blocks = 400 in

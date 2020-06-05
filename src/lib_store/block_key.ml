@@ -37,4 +37,4 @@ let encoded_size = Block_hash.size (* in bytes *)
 
 let decode str off =
   let str = String.sub str off encoded_size in
-  Block_hash.of_string_opt str |> Option.unopt_assert ~loc:__POS__
+  Block_hash.of_string_exn str

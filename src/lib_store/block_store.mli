@@ -178,23 +178,26 @@ val floating_block_stores : block_store -> Floating_block_store.t list
 
 (** [mem block_store key] tests the existence of the block [key] in
     [block_store]. *)
-val mem : block_store -> key -> bool Lwt.t
+val mem : block_store -> key -> bool tzresult Lwt.t
 
 (** [get_hash block_store key] retrieves the hash of [key] in
     [block_store]. Return [None] if the block is unknown. *)
-val get_hash : block_store -> key -> Block_hash.t option Lwt.t
+val get_hash : block_store -> key -> Block_hash.t option tzresult Lwt.t
 
 (** [read_block ~read_metadata block_store key] reads the block [key]
     in [block_store] if present. Return [None] if the block is
     unknown. *)
 val read_block :
-  read_metadata:bool -> block_store -> key -> Block_repr.t option Lwt.t
+  read_metadata:bool ->
+  block_store ->
+  key ->
+  Block_repr.t option tzresult Lwt.t
 
 (** [read_block_metadata block_store key] reads the metadata for the
     block [key] in [block_store] if present. Return [None] if the the
     block is unknown or if the metadata are not present. *)
 val read_block_metadata :
-  block_store -> key -> Block_repr.metadata option Lwt.t
+  block_store -> key -> Block_repr.metadata option tzresult Lwt.t
 
 (** [store_block block_store block] store the [block] in the current
     [RW] floating store. *)

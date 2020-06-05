@@ -48,13 +48,13 @@ let encoding : chain_config Data_encoding.t =
   Data_encoding.With_version.encoding ~name:"store.config" initial_encoding
 
 let write ~chain_dir chain_config =
-  (* TODO proper error *)
+  (* FIXME handle I/O errors *)
   let config_json = Data_encoding.Json.construct encoding chain_config in
   Lwt_utils_unix.Json.write_file
     Naming.(chain_dir // chain_config_file)
     config_json
 
 let load ~chain_dir =
-  (* TODO proper error *)
+  (* FIXME handle I/O errors *)
   Lwt_utils_unix.Json.read_file Naming.(chain_dir // chain_config_file)
   >>=? fun config -> return (Data_encoding.Json.destruct encoding config)

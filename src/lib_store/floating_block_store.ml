@@ -23,6 +23,8 @@
 (*                                                                           *)
 (*****************************************************************************)
 
+open Store_errors
+
 type floating_kind = Naming.floating_kind = RO | RW | RW_TMP | RO_TMP
 
 type t = {
@@ -87,14 +89,10 @@ let read_block floating_store hash =
 let locked_write_block floating_store ~offset ~block ~predecessors =
   ( match Data_encoding.Binary.to_bytes_opt Block_repr.encoding block with
   | None ->
-      Format.kasprintf
-        Lwt.fail_invalid_arg
-        "floating_block_store.write_block: cannot encode block %a"
-        Block_hash.pp
-        block.Block_repr.hash
+      fail (Cannot_encode_block block.Block_repr.hash)
   | Some bytes ->
-      Lwt.return bytes )
-  >>= fun block_bytes ->
+      return bytes )
+  >>=? fun block_bytes ->
   let block_length = Bytes.length block_bytes in
   Lwt_utils_unix.write_bytes
     ~pos:0
@@ -106,7 +104,7 @@ let locked_write_block floating_store ~offset ~block ~predecessors =
     floating_store.floating_block_index
     block.Block_repr.hash
     {offset; predecessors} ;
-  Lwt.return block_length
+  return block_length
 
 let append_block floating_store predecessors (block : Block_repr.t) =
   Lwt_idle_waiter.when_idle floating_store.scheduler (fun () ->
@@ -122,15 +120,15 @@ let append_all floating_store
   Lwt_idle_waiter.when_idle floating_store.scheduler (fun () ->
       Lwt_unix.lseek floating_store.fd 0 Unix.SEEK_END
       >>= fun eof_offset ->
-      Lwt_list.fold_left_s
+      Error_monad.fold_left_s
         (fun offset (predecessors, block) ->
           locked_write_block floating_store ~offset ~block ~predecessors
-          >>= fun written_len -> Lwt.return (offset + written_len))
+          >>=? fun written_len -> return (offset + written_len))
         eof_offset
         blocks
-      >>= fun _last_offset ->
+      >>=? fun _last_offset ->
       Floating_block_index.flush floating_store.floating_block_index ;
-      Lwt.return_unit)
+      return_unit)
 
 let iter_raw_fd f fd =
   Lwt_unix.lseek fd 0 Unix.SEEK_END

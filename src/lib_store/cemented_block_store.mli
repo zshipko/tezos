@@ -236,7 +236,7 @@ val iter_cemented_file :
   cemented_blocks_dir:string ->
   (Block_repr.block -> unit Lwt.t) ->
   cemented_blocks_file ->
-  unit Lwt.t
+  unit tzresult Lwt.t
 
 (** [check_indexes_consistency ?post_step ?genesis_hash cemented_store
     history_mode] iterates over a partially initialized

@@ -23,6 +23,8 @@
 (*                                                                           *)
 (*****************************************************************************)
 
+open Store_errors
+
 (* Cemented files overlay:
 
    | <n> x <offset (4 bytes)> | <n> x <blocks> |
@@ -106,11 +108,7 @@ let load_table ~cemented_blocks_dir =
   fail_unless
     ( Sys.file_exists cemented_blocks_dir
     && Sys.is_directory cemented_blocks_dir )
-    (Exn
-       (Invalid_argument
-          (Format.sprintf
-             "load_table: directory %s does not exist"
-             cemented_blocks_dir)))
+    (Cannot_load_table cemented_blocks_dir)
   >>=? fun () ->
   Lwt_unix.opendir cemented_blocks_dir
   >>= fun dir_handle ->
@@ -172,11 +170,7 @@ let init ~cemented_blocks_dir ~readonly =
   if Sys.file_exists cemented_blocks_dir then
     fail_unless
       (Sys.is_directory cemented_blocks_dir)
-      (Exn
-         (Failure
-            (Format.sprintf
-               "Cemented_block_store.init: file %s is not a directory"
-               cemented_blocks_dir)))
+      (Failed_to_init_cemented_block_store cemented_blocks_dir)
     >>=? fun () ->
     load ~readonly ~cemented_blocks_dir >>=? fun res -> return res
   else create ~cemented_blocks_dir >>= fun res -> return res
@@ -308,14 +302,12 @@ let cement_blocks_metadata cemented_store blocks =
         | false ->
             Lwt_utils_unix.create_dir cemented_metadata_dir)
   >>= fun () ->
-  fail_unless
-    (blocks <> [])
-    (Exn (Invalid_argument "cement_blocks_metadata: empty list of blocks"))
+  fail_unless (blocks <> []) (Cannot_cement_blocks_metadata `Empty)
   >>=? fun () ->
   find_block_file cemented_store (Block_repr.level (List.hd blocks))
   |> function
   | None ->
-      failwith "cement_blocks_metadata: given blocks are not cemented"
+      fail (Cannot_cement_blocks_metadata `Not_cemented)
   | Some {filename; _} ->
       let metadata_file =
         Naming.(
@@ -347,7 +339,7 @@ let cement_blocks_metadata cemented_store blocks =
         return_unit )
       else return_unit
 
-(* TODO catch & add proper errors *)
+(* FIXME handle I/O errors *)
 let read_block fd block_number =
   Lwt_unix.lseek fd (block_number * offset_length) Unix.SEEK_SET
   >>= fun _ofs ->
@@ -379,7 +371,7 @@ let get_highest_cemented_level cemented_store =
   else (* No cemented blocks*)
     None
 
-(* TODO catch & add proper errors *)
+(* FIXME handle I/O errors *)
 let get_cemented_block_by_level (cemented_store : t) ~read_metadata level =
   match get_highest_cemented_level cemented_store with
   | None ->
@@ -427,15 +419,13 @@ let get_cemented_block_by_hash ~read_metadata (cemented_store : t) hash =
    - If the first block has metadata, metadata are written
      and all blocks are expected to have metadata.
 *)
-(* TODO catch & add proper errors *)
+(* FIXME handle I/O errors *)
 let cement_blocks ?(check_consistency = true) (cemented_store : t)
     ~write_metadata (blocks : Block_repr.t list) =
   let nb_blocks = List.length blocks in
   let preamble_length = nb_blocks * offset_length in
-  ( if nb_blocks = 0 then
-    Lwt.fail_invalid_arg "cement_blocks: empty list of blocks to cement"
-  else Lwt.return_unit )
-  >>= fun () ->
+  fail_when (nb_blocks = 0) (Cannot_cement_blocks `Empty)
+  >>=? fun () ->
   let first_block = List.hd blocks in
   let first_block_level = Block_repr.level first_block in
   let last_block_level =
@@ -444,18 +434,14 @@ let cement_blocks ?(check_consistency = true) (cemented_store : t)
   ( if check_consistency then
     match get_highest_cemented_level cemented_store with
     | None ->
-        Lwt.return_unit
+        return_unit
     | Some highest_cemented_block ->
-        if
+        fail_when
           Compare.Int32.(
             first_block_level <> Int32.succ highest_cemented_block)
-        then
-          Lwt.fail_invalid_arg
-            "cement_blocks: previously cemented blocks have higher level than \
-             the given blocks"
-        else Lwt.return_unit
-  else Lwt.return_unit )
-  >>= fun () ->
+          (Cannot_cement_blocks `Higher_cemented)
+  else return_unit )
+  >>=? fun () ->
   let filename =
     Naming.cemented_block_filename
       ~start_level:first_block_level
@@ -466,10 +452,8 @@ let cement_blocks ?(check_consistency = true) (cemented_store : t)
   let file =
     Naming.((cemented_store.cemented_blocks_dir // "tmp_") ^ filename)
   in
-  ( if Sys.file_exists final_file then
-    Format.kasprintf Lwt.fail_with "cement_blocks: file %s already exists" file
-  else Lwt.return_unit )
-  >>= fun () ->
+  fail_when (Sys.file_exists final_file) (Temporary_cemented_file_exists file)
+  >>=? fun () ->
   Lwt_unix.openfile file Unix.[O_CREAT; O_TRUNC; O_RDWR] 0o644
   >>= fun fd ->
   (* Blit the offset preamble *)
@@ -636,11 +620,11 @@ let iter_cemented_file ~cemented_blocks_dir f {filename; start_level; end_level}
           >>= fun () -> loop (pred n)
       in
       Lwt.catch
-        (fun () -> loop (Int32.to_int nb_blocks))
+        (fun () -> loop (Int32.to_int nb_blocks) >>= fun () -> return_unit)
         (fun exn ->
           Format.kasprintf
-            Lwt.fail_with
-            "iter_cemented_file: unexpected failure : %s"
+            (fun trace -> fail (Inconsistent_cemented_file (filename, trace)))
+            "%s"
             (Printexc.to_string exn)))
 
 let check_indexes_consistency ?(post_step = fun () -> Lwt.return_unit)
@@ -653,12 +637,12 @@ let check_indexes_consistency ?(post_step = fun () -> Lwt.return_unit)
       fail_unless
         Compare.Int32.(
           Int32.succ table.(i).end_level = table.(i + 1).start_level)
-        (Exn
-           (Failure
-              (Format.asprintf
-                 "Inconsistent cemented store: missing cycle between %s and %s"
-                 table.(i).filename
-                 table.(i + 1).filename)))
+        (Inconsistent_cemented_store
+           (Missing_cycle
+              {
+                low_cycle = table.(i).filename;
+                high_cycle = table.(i + 1).filename;
+              }))
       >>=? fun () -> check_contiguity (succ i)
   in
   check_contiguity 0
@@ -691,47 +675,33 @@ let check_indexes_consistency ?(post_step = fun () -> Lwt.return_unit)
           >>= fun cur_offset ->
           fail_unless
             Compare.Int.(cur_offset = offsets.(n))
-            (Exn
-               (Failure
-                  (Format.asprintf
-                     "Inconsistent cemented store: bad offset found for block \
-                      #%d in cycle %s"
-                     n
-                     filename)))
+            (Inconsistent_cemented_store
+               (Bad_offset {level = n; cycle = filename}))
           >>=? fun () ->
           Block_repr.read_next_block fd
           >>= fun (block, _) ->
           fail_unless
             Compare.Int32.(Block_repr.level block = Int32.(add inf (of_int n)))
-            (Exn
-               (Failure
-                  (Format.asprintf
-                     "Inconsistent cemented store: bad level found for block \
-                      %a - expected %ld got %ld"
-                     Block_hash.pp
-                     (Block_repr.hash block)
-                     Int32.(add inf (of_int n))
-                     (Block_repr.level block))))
+            (Inconsistent_cemented_store
+               (Unexpected_level
+                  {
+                    block_hash = Block_repr.hash block;
+                    expected = Int32.(add inf (of_int n));
+                    got = Block_repr.level block;
+                  }))
           >>=? fun () ->
           Block_repr.check_block_consistency ?genesis_hash ?pred_block block
           >>=? fun () ->
           let level = Block_repr.level block in
           let hash = Block_repr.hash block in
-          ( if
-            not
-              ( Cemented_block_level_index.mem
-                  cemented_store.cemented_block_level_index
-                  hash
-              && Cemented_block_hash_index.mem
-                   cemented_store.cemented_block_hash_index
-                   level )
-          then
-            failwith
-              "corrupted index in snapshot: %a is not found in the imported \
-               store."
-              Block_hash.pp
-              hash
-          else return_unit )
+          fail_unless
+            ( Cemented_block_level_index.mem
+                cemented_store.cemented_block_level_index
+                hash
+            && Cemented_block_hash_index.mem
+                 cemented_store.cemented_block_hash_index
+                 level )
+            (Inconsistent_cemented_store (Corrupted_index hash))
           >>=? fun () -> iter_blocks ~pred_block:block (succ n)
       in
       Lwt.finalize

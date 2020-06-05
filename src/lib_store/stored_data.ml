@@ -23,6 +23,8 @@
 (*                                                                           *)
 (*****************************************************************************)
 
+open Store_errors
+
 type 'a t = {
   mutable cache : 'a;
   file : string;
@@ -77,17 +79,13 @@ let update_with v f =
         write_file ~file:v.file v.encoding new_data ))
 
 let load ~file encoding =
-  let file = file in
   read_file encoding file
   >>= function
   | Some cache ->
       let scheduler = Lwt_idle_waiter.create () in
-      Lwt.return {cache; file; encoding; scheduler}
+      return {cache; file; encoding; scheduler}
   | None ->
-      Format.kasprintf
-        Lwt.fail_invalid_arg
-        "Stored_data.load: no corresponding data found in file %s"
-        file
+      fail (Missing_stored_data file)
 
 (* FIXME: redundant.*)
 
@@ -97,4 +95,7 @@ let load ~file encoding =
 let init ~file encoding ~initial_data =
   Lwt_unix.file_exists file
   >>= function
-  | true -> load ~file encoding | false -> create ~file encoding initial_data
+  | true ->
+      load ~file encoding
+  | false ->
+      create ~file encoding initial_data >>= return

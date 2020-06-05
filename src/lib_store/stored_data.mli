@@ -54,9 +54,10 @@ val update_with : 'a t -> ('a -> 'a Lwt.t) -> unit Lwt.t
 
 (** [load ~file encoding] reads from [file] the data and decode it
     using [encoding]. *)
-val load : file:string -> 'a Data_encoding.t -> 'a t Lwt.t
+val load : file:string -> 'a Data_encoding.t -> 'a t tzresult Lwt.t
 
 (** [init ~file encoding ~initial_data] creates or load an on-disk
     data. If the file already exists, then the data is read from the
     file. Otherwise, [initial_data] is used. *)
-val init : file:string -> 'a Data_encoding.t -> initial_data:'a -> 'a t Lwt.t
+val init :
+  file:string -> 'a Data_encoding.t -> initial_data:'a -> 'a t tzresult Lwt.t
