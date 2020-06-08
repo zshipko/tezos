@@ -987,7 +987,7 @@ let export_floating_block_stream ~snapshot_dir floating_block_stream =
 
 let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
     genesis =
-  let export_rolling_f (chain_store, context_index) =
+  let export_rolling_f (chain_store, _context_index) =
     check_history_mode chain_store ~rolling
     >>=? fun () ->
     retrieve_export_block chain_store block
@@ -1020,11 +1020,6 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
              Some {(Store.Unsafe.repr_of_block b) with metadata = None})
            floating_blocks)
     in
-    (* Context *)
-    (* We need to dump the context while locking the store, the
-       contexts might get pruned : this might take a while. *)
-    dump_context context_index ~snapshot_dir ~pred_block ~export_block
-    >>=? fun written_context_elements ->
     (* Protocols *)
     Store.Chain.all_protocol_levels chain_store
     >>= fun protocol_levels ->
@@ -1041,8 +1036,8 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
     return
       ( export_mode,
         export_block,
+        pred_block,
         protocol_levels,
-        written_context_elements,
         (return_unit, floating_block_stream) )
   in
   Store.Unsafe.open_for_snapshot_export
@@ -1050,6 +1045,25 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
     ~context_dir
     genesis
     ~locked_f:export_rolling_f
+  >>=? fun ( export_mode,
+             export_block,
+             pred_block,
+             protocol_levels,
+             (return_unit, floating_block_stream) ) ->
+  (* TODO: when the context's GC is implemented, make sure a context
+     pruning cannot occur while the dump context is being run. For
+     now, it is performed outside the lock to allow the node from
+     getting stuck while waiting a merge. *)
+  Context.init ~readonly:true context_dir
+  >>= fun context_index ->
+  dump_context context_index ~snapshot_dir ~pred_block ~export_block
+  >>=? fun written_context_elements ->
+  return
+    ( export_mode,
+      export_block,
+      protocol_levels,
+      written_context_elements,
+      (return_unit, floating_block_stream) )
 
 let filter_indexes ~dst_cemented_dir limit =
   let open Cemented_block_store in
@@ -1076,7 +1090,7 @@ let filter_indexes ~dst_cemented_dir limit =
 
 let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
     ~rolling genesis =
-  let export_full_f (chain_store, context_index) =
+  let export_full_f (chain_store, _context_index) =
     check_history_mode chain_store ~rolling
     >>=? fun () ->
     retrieve_export_block chain_store block
@@ -1106,10 +1120,6 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
         >>=? fun (cemented_table, extra_floating_blocks) ->
         Store.Chain.all_protocol_levels chain_store
         >>= fun protocol_levels ->
-        (* Dump the context while the store is locked to avoid reading on
-           pruning *)
-        dump_context context_index ~snapshot_dir ~pred_block ~export_block
-        >>=? fun written_context_elements ->
         let block_store = Store.Unsafe.get_block_store chain_store in
         let cemented_store = Block_store.cemented_block_store block_store in
         let should_filter_indexes =
@@ -1125,8 +1135,8 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
         return
           ( export_mode,
             export_block,
+            pred_block,
             protocol_levels,
-            written_context_elements,
             (src_cemented_dir, cemented_table),
             (ro_fd, rw_fd),
             extra_floating_blocks,
@@ -1144,12 +1154,20 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
     ~locked_f:export_full_f
   >>=? fun ( export_mode,
              export_block,
+             pred_block,
              protocol_levels,
-             written_context_elements,
              (src_cemented_dir, cemented_table),
              (floating_ro_fd, floating_rw_fd),
              extra_floating_blocks,
              should_filter_indexes ) ->
+  (* TODO: when the context's GC is implemented, make sure a context
+     pruning cannot occur while the dump context is being run. For
+     now, it is performed outside the lock to allow the node from
+     getting stuck while waiting a merge. *)
+  Context.init ~readonly:true context_dir
+  >>= fun context_index ->
+  dump_context context_index ~snapshot_dir ~pred_block ~export_block
+  >>=? fun written_context_elements ->
   copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir cemented_table
   >>=? fun () ->
   if should_filter_indexes then
