@@ -68,7 +68,7 @@ let check_invariants chain_store =
   Block.read_block_opt chain_store (fst savepoint)
   >>= fun savepoint_b_opt ->
   Block.read_block_metadata chain_store (fst savepoint)
-  >>= fun savepoint_metadata_opt ->
+  >>=? fun savepoint_metadata_opt ->
   ( match (savepoint_b_opt, savepoint_metadata_opt) with
   | (Some _, Some _) ->
       Lwt.return_unit
@@ -87,10 +87,10 @@ let check_invariants chain_store =
   Block.read_block_opt chain_store (fst caboose)
   >>= fun caboose_b_opt ->
   Block.read_block_metadata chain_store (fst caboose)
-  >>= fun caboose_metadata_opt ->
+  >>=? fun caboose_metadata_opt ->
   match (caboose_b_opt, caboose_metadata_opt) with
   | (Some _, (Some _ | None)) ->
-      Lwt.return_unit
+      return_unit
   | (None, _) ->
       Format.eprintf "caboose lvl : %ld@." (snd caboose) ;
       Assert.fail_msg "check_invariant: could not find the caboose block"
@@ -159,7 +159,7 @@ let wrap_store_init ?(patch_context = dummy_patch_context)
           >>=? fun () ->
           Format.printf "Invariants check before closing@." ;
           check_invariants (Store.main_chain_store store)
-          >>= fun () ->
+          >>=? fun () ->
           Store.close_store store
           >>= fun () ->
           Store.init
@@ -173,7 +173,7 @@ let wrap_store_init ?(patch_context = dummy_patch_context)
           Lwt.finalize
             (fun () -> check_invariants (Store.main_chain_store store'))
             (fun () -> Store.close_store store' >>= fun _ -> Lwt.return_unit)
-          >>= fun () -> return_unit))
+          >>=? fun () -> return_unit))
   >>= function
   | Error err ->
       Format.printf "@\nTest failed:@\n%a@." Error_monad.pp_print_error err ;

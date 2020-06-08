@@ -176,10 +176,10 @@ let test_pred (base_dir : string) : unit tzresult Lwt.t =
       chain_store
       (Store.Block.hash head_block)
       ~distance
-    >>= fun exp_res ->
+    >>=? fun exp_res ->
     match (lin_res, exp_res) with
     | (None, None) ->
-        Lwt.return_unit
+        return_unit
     | (None, Some _) | (Some _, None) ->
         Assert.fail_msg "mismatch between exponential and linear predecessor_n"
     | (Some lin_res, Some exp_res) ->
@@ -195,7 +195,7 @@ let test_pred (base_dir : string) : unit tzresult Lwt.t =
         let level_start = Int32.to_int (Store.Block.level head) in
         (* check distance using the level *)
         assert (level_start - distance = level_pred) ;
-        Lwt.return_unit
+        return_unit
   in
   let _ = Random.self_init () in
   let range = size_chain + (size_chain / 10) in

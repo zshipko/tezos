@@ -217,7 +217,7 @@ let test_upgrade store (legacy_dir, (legacy_state : Legacy_state.t)) blocks =
       check_flags upgraded_chain_store blocks history_mode
       >>=? fun () ->
       Test_utils.check_invariants upgraded_chain_store
-      >>= fun () ->
+      >>=? fun () ->
       (* Try baking a bit after upgrading... *)
       Store.Chain.current_head upgraded_chain_store
       >>= fun head ->
@@ -312,7 +312,7 @@ let test_snapshot legacy_snapshot_history_mode store
         present_blocks_in_legacy
       >>= fun () ->
       Test_utils.check_invariants imported_chain_store
-      >>= fun () ->
+      >>=? fun () ->
       (* Try baking a bit after importing... *)
       Store.Chain.current_head imported_chain_store
       >>= fun head ->

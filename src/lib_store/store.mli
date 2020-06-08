@@ -321,6 +321,14 @@ module Block : sig
       {b Warning} If the block is already read, prefer the usage of
       [get_block_metadata] which will memoize the result. *)
   val read_block_metadata :
+    ?distance:int ->
+    chain_store ->
+    Block_hash.t ->
+    metadata option tzresult Lwt.t
+
+  (** [read_block_metadata_opt ?distance chain_store bh] same as
+      [read_block_metadata] but returns [None] in case of errors. *)
+  val read_block_metadata_opt :
     ?distance:int -> chain_store -> Block_hash.t -> metadata option Lwt.t
 
   (** [get_block_metadata chain_store block] reads in the
@@ -352,6 +360,14 @@ module Block : sig
       [chain_store] the hash of the ancestor of the block [bh] at
       [distance] if it exists. Returns [None] otherwise. *)
   val read_ancestor_hash :
+    chain_store ->
+    distance:int ->
+    Block_hash.t ->
+    Block_hash.t option tzresult Lwt.t
+
+  (** [read_ancestor_hash_opt chain_store ~distance bh] same as
+      [read_ancestor_hash] but returns [None] on errors. *)
+  val read_ancestor_hash_opt :
     chain_store -> distance:int -> Block_hash.t -> Block_hash.t option Lwt.t
 
   (** [read_ancestor_opt chain_store block] optional version of
@@ -536,6 +552,10 @@ module Chain : sig
   (** [current_head chain_store] returns the current head of the
       [chain_store]. *)
   val current_head : chain_store -> Block.t Lwt.t
+
+  (** [current_head_metadata chain_store] returns the current head's
+      metadata of the [chain_store]. *)
+  val current_head_metadata : chain_store -> Block.metadata Lwt.t
 
   (** [create_genesis_block ~genesis context_hash] computes a default
       genesis block for the given [genesis] and its [context_hash]. *)

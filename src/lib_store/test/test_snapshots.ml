@@ -96,7 +96,7 @@ let check_import_invariants ~test_descr ~rolling
 let export_import ~test_descr (store_dir, context_dir) chain_store
     ~previously_baked_blocks ?exported_block_hash ~rolling =
   check_invariants chain_store
-  >>= fun () ->
+  >>=? fun () ->
   let snapshot_name = store_dir // "snapshot.full" in
   (* No lockfile on the same process, we must enforce waiting the
      merging thread to finish *)
@@ -214,7 +214,7 @@ let check_baking_continuity ~test_descr ~exported_chain_store
         Alpha_utils.bake imported_chain_store head
         >>=? fun new_head ->
         check_invariants imported_chain_store
-        >>= fun () -> loop new_head (n - 1)
+        >>=? fun () -> loop new_head (n - 1)
   in
   let nb_blocks_to_bake_in_import =
     Int32.(to_int (sub level_to_reach (Store.Block.level imported_head)))

@@ -62,14 +62,14 @@ let get_checkpoint store (chain : Chain_services.chain) =
 
 let predecessors chain_store ignored length head =
   let rec loop acc length block =
-    if length <= 0 then Lwt.return (List.rev acc)
+    if length <= 0 then return (List.rev acc)
     else
       Store.Block.read_ancestor_hash chain_store ~distance:1 block
-      >>= function
+      >>=? function
       | None ->
-          Lwt.return (List.rev acc)
+          return (List.rev acc)
       | Some pred ->
-          if Block_hash.Set.mem block ignored then Lwt.return (List.rev acc)
+          if Block_hash.Set.mem block ignored then return (List.rev acc)
           else loop (pred :: acc) (length - 1) pred
   in
   let head_hash = Store.Block.hash head in
@@ -110,24 +110,24 @@ let list_blocks chain_store ?(length = 1) ?min_date heads =
   | _ :: _ as heads ->
       Lwt_list.map_p (Store.Block.read_block_opt chain_store) heads )
   >>= fun requested_heads ->
-  Lwt_list.fold_left_s
+  fold_left_s
     (fun (ignored, acc) head ->
       match head with
       | None ->
-          Lwt.return (ignored, [])
+          return (ignored, [])
       | Some block ->
           predecessors chain_store ignored length block
-          >>= fun predecessors ->
+          >>=? fun predecessors ->
           let ignored =
             List.fold_left
               (fun acc v -> Block_hash.Set.add v acc)
               ignored
               predecessors
           in
-          Lwt.return (ignored, predecessors :: acc))
+          return (ignored, predecessors :: acc))
     (Block_hash.Set.empty, [])
     requested_heads
-  >>= fun (_, blocks) -> return (List.rev blocks)
+  >>=? fun (_, blocks) -> return (List.rev blocks)
 
 let sync_state cv =
   match Chain_validator.sync_state cv with

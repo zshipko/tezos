@@ -90,6 +90,8 @@ and chain_state = {
     Protocol_levels.activation_block Protocol_levels.t Stored_data.t;
   invalid_blocks : invalid_block Block_hash.Map.t Stored_data.t;
   forked_chains : Block_hash.t Chain_id.Map.t Stored_data.t;
+  (* In memory *)
+  current_head_metadata : Block_repr.metadata;
   active_testchain : testchain option;
   live_blocks : Block_hash.Set.t;
   live_operations : Operation_hash.Set.t;
@@ -123,41 +125,29 @@ let history_mode chain_store = chain_store.chain_config.history_mode
 
 let read_ancestor_hash {block_store; _} ~distance hash =
   Block_store.get_hash block_store (Block (hash, distance))
-  (* FIXME: Propagate?*)
-  >>= function Ok h -> Lwt.return h | Error _ -> Lwt.return_none
 
 let get_highest_cemented_level chain_store =
   Cemented_block_store.get_highest_cemented_level
     (Block_store.cemented_block_store chain_store.block_store)
 
 (* Will that block be compatible with the current state of the store? *)
-let locked_is_acceptable_block chain_store chain_state (hash, level) =
-  Stored_data.read chain_state.current_head
-  >>= fun current_head ->
-  Block_store.read_block_metadata
-    chain_store.block_store
-    (Block (Block_repr.hash current_head, 0))
-  (* FIXME: Propagate?*)
-  >>= (function Ok b -> Lwt.return b | Error _ -> Lwt.return_none)
-  >>= function
-  | None ->
-      (* FIXME proper broken invariant error *)
-      assert false
-  | Some metadata ->
-      let level_limit = Block_repr.last_allowed_fork_level metadata in
-      (* The block must at least be above the highest cemented block
+let locked_is_acceptable_block chain_state (hash, level) =
+  let level_limit =
+    Block_repr.last_allowed_fork_level chain_state.current_head_metadata
+  in
+  (* The block must at least be above the highest cemented block
          (or savepoint when no blocks are cemented) *)
-      if Compare.Int32.(level_limit >= level) then Lwt.return_false
-      else
-        let (checkpoint_hash, checkpoint_level) = chain_state.checkpoint in
-        if Compare.Int32.(checkpoint_level < level) then
-          (* the predecessor is assumed compatible. *)
-          Lwt.return_true
-        else if Compare.Int32.(checkpoint_level = level) then
-          Lwt.return (Block_hash.equal hash checkpoint_hash)
-        else
-          Stored_data.read chain_state.current_head
-          >>= fun head -> Lwt.return (Block_repr.level head < checkpoint_level)
+  if Compare.Int32.(level_limit >= level) then Lwt.return_false
+  else
+    let (checkpoint_hash, checkpoint_level) = chain_state.checkpoint in
+    if Compare.Int32.(checkpoint_level < level) then
+      (* the predecessor is assumed compatible. *)
+      Lwt.return_true
+    else if Compare.Int32.(checkpoint_level = level) then
+      Lwt.return (Block_hash.equal hash checkpoint_hash)
+    else
+      Stored_data.read chain_state.current_head
+      >>= fun head -> Lwt.return (Block_repr.level head < checkpoint_level)
 
 let create_lockfile ~chain_dir =
   Lwt_unix.openfile
@@ -195,8 +185,12 @@ module Block = struct
 
   let is_known_valid {block_store; _} hash =
     Block_store.(mem block_store (Block (hash, 0)))
-    (* FIXME: Propagate?*)
-    >>= function Ok k -> Lwt.return k | Error _ -> Lwt.return_false
+    >>= function
+    | Ok k ->
+        Lwt.return k
+    | Error _ ->
+        (* should never happen : (0 \in N) *)
+        Lwt.return_false
 
   let locked_is_known_invalid chain_state hash =
     let {invalid_blocks; _} = chain_state in
@@ -235,9 +229,7 @@ module Block = struct
       ~read_metadata:false
       block_store
       (Block (hash, distance))
-    (* FIXME: Propagate?*)
-    >>= (function Ok b -> Lwt.return b | Error _ -> Lwt.return_none)
-    >>= function
+    >>=? function
     | None ->
         (* TODO lift the error to block_store *)
         fail (Block_not_found hash)
@@ -248,19 +240,17 @@ module Block = struct
     Block_store.read_block_metadata
       chain_store.block_store
       (Block (hash, distance))
-    (* FIXME: Propagate?*)
-    >>= function Ok m -> Lwt.return m | Error _ -> Lwt.return_none
+
+  let read_block_metadata_opt ?distance chain_store hash =
+    read_block_metadata ?distance chain_store hash
+    >>= function Ok v -> Lwt.return v | Error _ -> Lwt.return_none
 
   let get_block_metadata_opt chain_store block =
     match Block_repr.metadata block with
     | Some metadata ->
         Lwt.return_some metadata
     | None -> (
-        Block_store.read_block_metadata
-          chain_store.block_store
-          (Block (block.hash, 0))
-        (* FIXME: Propagate?*)
-        >>= (function Ok b -> Lwt.return b | Error _ -> Lwt.return_none)
+        read_block_metadata_opt chain_store block.hash
         >>= function
         | Some metadata ->
             (* Put the metadata in cache *)
@@ -282,7 +272,6 @@ module Block = struct
     >>= function
     | Ok block -> Lwt.return_some block | Error _ -> Lwt.return_none
 
-  (* Predecessor = itself for genesis *)
   let read_predecessor chain_store block =
     read_block chain_store (Block_repr.predecessor block)
 
@@ -294,8 +283,12 @@ module Block = struct
   let read_ancestor_hash chain_store ~distance hash =
     read_ancestor_hash chain_store ~distance hash
 
+  let read_ancestor_hash_opt chain_store ~distance hash =
+    read_ancestor_hash chain_store ~distance hash
+    >>= function Ok v -> Lwt.return v | Error _ -> Lwt.return_none
+
   let read_predecessor_of_hash_opt chain_store hash =
-    read_ancestor_hash chain_store ~distance:1 hash
+    read_ancestor_hash_opt chain_store ~distance:1 hash
     >>= function
     | Some hash -> read_block_opt chain_store hash | None -> Lwt.return_none
 
@@ -387,7 +380,6 @@ module Block = struct
          compatible with the current checkpoint. *)
       Shared.use chain_store.chain_state (fun chain_state ->
           locked_is_acceptable_block
-            chain_store
             chain_state
             (hash, block_header.shell.level))
       >>= fun acceptable_block ->
@@ -480,7 +472,7 @@ module Block = struct
     >>= fun (caboose, _caboose_level) ->
     Block_locator.compute
       ~get_predecessor:(fun h n ->
-        read_ancestor_hash chain_store h ~distance:n)
+        read_ancestor_hash_opt chain_store h ~distance:n)
       ~caboose
       ~size
       head.Block_repr.hash
@@ -688,6 +680,10 @@ module Chain = struct
 
   let current_head chain_store = current_head chain_store
 
+  let current_head_metadata chain_store =
+    Shared.use chain_store.chain_state (fun {current_head_metadata; _} ->
+        Lwt.return current_head_metadata)
+
   let mempool chain_store =
     Shared.use chain_store.chain_state (fun {mempool; _} -> Lwt.return mempool)
 
@@ -727,7 +723,7 @@ module Chain = struct
     else if Compare.Int32.(lvl = lvl') then
       Lwt.return (Block_hash.equal hash hash')
     else
-      Block.read_ancestor_hash
+      Block.read_ancestor_hash_opt
         chain_store
         hash
         ~distance:Int32.(to_int (sub lvl lvl'))
@@ -892,7 +888,7 @@ module Chain = struct
        locked_chain_store
        ~distance
        (Block.hash new_head)
-     >>= function
+     >>=? function
      | None ->
          fail Missing_last_allowed_fork_level_block
      | Some hash ->
@@ -987,7 +983,7 @@ module Chain = struct
       else chain_state.checkpoint
     in
     (* FIXME: add a test to ensure that the new checkpoint is related
-       to the lafl? *)
+       to the lafl ? *)
     compute_new_savepoint
       chain_store
       chain_state
@@ -1037,13 +1033,18 @@ module Chain = struct
 
   let set_head chain_store new_head =
     Shared.update_with chain_store.chain_state (fun chain_state ->
-        let {current_head; savepoint; checkpoint; caboose; _} = chain_state in
+        let { current_head;
+              savepoint;
+              checkpoint;
+              caboose;
+              current_head_metadata;
+              _ } =
+          chain_state
+        in
         Stored_data.read current_head
         >>= fun prev_head ->
         Block.get_block_metadata chain_store new_head
         >>=? fun new_head_metadata ->
-        Block.get_block_metadata chain_store prev_head
-        >>=? fun prev_head_metadata ->
         if Block.equal prev_head new_head then
           (* Nothing to do *)
           return (None, prev_head)
@@ -1053,12 +1054,12 @@ module Chain = struct
           fail_unless
             Compare.Int32.(
               Block.level new_head
-              > Block.last_allowed_fork_level prev_head_metadata)
+              > Block.last_allowed_fork_level current_head_metadata)
             (Invalid_head_switch
                {
                  minimum_allowed_level =
                    Int32.succ
-                     (Block.last_allowed_fork_level prev_head_metadata);
+                     (Block.last_allowed_fork_level current_head_metadata);
                  given_head = Block.descriptor new_head;
                })
           >>=? fun () ->
@@ -1067,7 +1068,7 @@ module Chain = struct
             Block.last_allowed_fork_level new_head_metadata
           in
           let prev_head_lafl =
-            Block.last_allowed_fork_level prev_head_metadata
+            Block.last_allowed_fork_level current_head_metadata
           in
           (* Should we trigger a merge? i.e. has the last allowed fork
              level changed and do we have enough blocks? *)
@@ -1099,7 +1100,7 @@ module Chain = struct
               trigger_merge
                 chain_store
                 chain_state
-                ~prev_head_metadata
+                ~prev_head_metadata:current_head_metadata
                 ~new_head
                 ~new_head_metadata
               >>=? fun (checkpoint, savepoint, caboose, to_block) ->
@@ -1128,6 +1129,7 @@ module Chain = struct
           let new_chain_state =
             {
               chain_state with
+              current_head_metadata = new_head_metadata;
               live_blocks;
               live_operations;
               checkpoint;
@@ -1173,7 +1175,7 @@ module Chain = struct
             chain_store
             ~distance:Int32.(to_int (sub given_checkpoint_level head_lafl))
             given_checkpoint_hash
-          >>= function
+          >>=? function
           | None ->
               (* The last allowed fork level is unknown, thus different from current head's lafl *)
               return_false
@@ -1183,7 +1185,7 @@ module Chain = struct
                 ~distance:
                   Int32.(to_int (sub (Block.level current_head) head_lafl))
                 (Block.hash current_head)
-              >>= function
+              >>=? function
               | None ->
                   fail Missing_last_allowed_fork_level_block
               | Some lafl_hash ->
@@ -1223,7 +1225,7 @@ module Chain = struct
 
   let is_acceptable_block chain_store block_descr =
     Shared.use chain_store.chain_state (fun chain_state ->
-        locked_is_acceptable_block chain_store chain_state block_descr)
+        locked_is_acceptable_block chain_state block_descr)
 
   let best_known_head_for_checkpoint chain_store ~checkpoint =
     let (_, checkpoint_level) = checkpoint in
@@ -1376,6 +1378,9 @@ module Chain = struct
     >>= fun savepoint ->
     Stored_data.read caboose_data
     >>= fun caboose ->
+    let current_head_metadata =
+      Option.unopt_assert ~loc:__POS__ (Block_repr.metadata genesis_block)
+    in
     let active_testchain = None in
     let mempool = Mempool.empty in
     let live_blocks = Block_hash.Set.empty in
@@ -1394,6 +1399,7 @@ module Chain = struct
         protocol_levels;
         invalid_blocks;
         forked_chains;
+        current_head_metadata;
         active_testchain;
         mempool;
         live_blocks;
@@ -1445,6 +1451,11 @@ module Chain = struct
     >>= fun savepoint ->
     Stored_data.read caboose_data
     >>= fun caboose ->
+    Stored_data.read current_head
+    >>= fun current_head_block ->
+    let current_head_metadata =
+      Option.unopt_assert ~loc:__POS__ (Block_repr.metadata current_head_block)
+    in
     let active_testchain = None in
     let mempool = Mempool.empty in
     let live_blocks = Block_hash.Set.empty in
@@ -1463,6 +1474,7 @@ module Chain = struct
         protocol_levels;
         invalid_blocks;
         forked_chains;
+        current_head_metadata;
         active_testchain;
         mempool;
         live_blocks;
@@ -2195,9 +2207,7 @@ module Unsafe = struct
     iter_s
       (fun (_, {block = (bh, _); protocol; commit_info = commit_info_opt}) ->
         Block_store.read_block block_store ~read_metadata:false (Block (bh, 0))
-        (* FIXME: Propagate?*)
-        >>= (function Ok b -> Lwt.return b | Error _ -> Lwt.return_none)
-        >>= fun block_opt ->
+        >>=? fun block_opt ->
         match (block_opt, commit_info_opt) with
         | (None, _) -> (
           match history_mode with
@@ -2356,9 +2366,7 @@ module Unsafe = struct
           block_store
           ~read_metadata:false
           (Block (Block_repr.hash new_head_with_metadata, distance))
-        (* FIXME: Propagate?*)
-        >>= (function Ok b -> Lwt.return b | Error _ -> Lwt.return_none)
-        >>= fun block_opt ->
+        >>=? fun block_opt ->
         match (block_opt, commit_info_opt) with
         | (None, _) -> (
           match history_mode with
