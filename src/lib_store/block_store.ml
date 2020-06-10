@@ -473,6 +473,9 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
   (* Do not allow multiple merges *)
   Lwt_mutex.lock block_store.merge_mutex
   >>= fun () ->
+  Store_events.Event.(emit start_merging_stores) (snd from_block, snd to_block)
+  >>= fun () ->
+  let merge_start = Systime_os.now () in
   (* Force waiting for a potential previous merging operation *)
   let chain_dir = block_store.chain_dir in
   (* TODO improvement for non-blocking cases: replace force_idle by
@@ -565,7 +568,11 @@ let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
           merging_thread
           >>= function
           | Ok () ->
-              Lwt.return_unit
+              let merge_end = Systime_os.now () in
+              let merging_time = Ptime.diff merge_end merge_start in
+              Store_events.Event.(emit end_merging_stores)
+                (Format.asprintf "%a" Ptime.Span.pp merging_time)
+              >>= fun () -> Lwt.return_unit
           | Error ([Merge_error _; _] as merge_error) ->
               Format.printf "%a" pp_print_error merge_error ;
               Lwt.return_unit

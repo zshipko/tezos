@@ -25,6 +25,7 @@
 
 open Store_types
 open Store_errors
+open Store_events
 
 module Shared = struct
   type 'a t = {mutable data : 'a; lock : Lwt_idle_waiter.t}
@@ -413,7 +414,8 @@ module Block = struct
         chain_store.global_store.global_block_watcher
         (chain_store, block) ;
       (* TODO? Should we specifically store the forking block ? *)
-      return_some block
+      Event.(emit store_block) (hash, block_header.shell.level)
+      >>= fun () -> return_some block
 
   let context_exn chain_store block =
     let context_index = chain_store.global_store.context_index in
@@ -668,6 +670,8 @@ module Chain = struct
         (* FIXME: potential data-race if called during a merge *)
         Stored_data.write chain_state.savepoint_data new_savepoint
         >>= fun () ->
+        Event.(emit set_savepoint) new_savepoint
+        >>= fun () ->
         return (Some {chain_state with savepoint = new_savepoint}, ()))
 
   let caboose chain_store = caboose chain_store
@@ -676,6 +680,8 @@ module Chain = struct
     Shared.update_with chain_store.chain_state (fun chain_state ->
         (* FIXME: potential data-race if called during a merge *)
         Stored_data.write chain_state.caboose_data new_caboose
+        >>= fun () ->
+        Event.(emit set_caboose) new_caboose
         >>= fun () -> return (Some {chain_state with caboose = new_caboose}, ()))
 
   let current_head chain_store = current_head chain_store
@@ -1137,7 +1143,8 @@ module Chain = struct
               caboose;
             }
           in
-          return (Some new_chain_state, prev_head))
+          Event.(emit set_head) (Block.hash new_head, Block.level new_head)
+          >>= fun () -> return (Some new_chain_state, prev_head))
 
   let known_heads chain_store =
     Shared.use
@@ -1219,6 +1226,8 @@ module Chain = struct
                 fail (Cannot_set_checkpoint given_checkpoint)
             | true ->
                 Stored_data.write chain_state.checkpoint_data given_checkpoint
+                >>= fun () ->
+                Event.(emit set_checkpoint) given_checkpoint
                 >>= fun () ->
                 return
                   (Some {chain_state with checkpoint = given_checkpoint}, ()) ))
@@ -1727,6 +1736,13 @@ module Chain = struct
               >>= fun () ->
               Lwt.return {forked_block = forked_block_hash; testchain_store}
               >>= fun testchain ->
+              Event.(emit fork_testchain)
+                ( testchain_id,
+                  test_protocol,
+                  genesis_hash,
+                  forked_block_hash,
+                  Block.level forked_block )
+              >>= fun () ->
               return
                 ( Some {chain_state with active_testchain = Some testchain},
                   testchain ))
