@@ -142,3 +142,22 @@ let pp_short ppf = function
       Format.fprintf ppf "rolling"
 
 let tag = Tag.def "history_mode" pp
+
+let of_string s =
+  let delim = ':' in
+  let args = String.split_on_char delim s in
+  match args with
+  | ["archive"] | ["Archive"] ->
+      Some Archive
+  | ["full"] | ["Full"] ->
+      Some default_full
+  | ["full"; n] | ["Full"; n] ->
+      let offset = int_of_string n in
+      Some (Full {offset})
+  | ["rolling"] | ["Rolling"] ->
+      Some default_rolling
+  | ["rolling"; n] | ["Rolling"; n] ->
+      let offset = int_of_string n in
+      Some (Rolling {offset})
+  | _ ->
+      None

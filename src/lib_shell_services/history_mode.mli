@@ -54,3 +54,9 @@ val pp : Format.formatter -> t -> unit
 val pp_short : Format.formatter -> t -> unit
 
 val tag : t Tag.def
+
+(** [of_string s] parses the history mode given as a string through
+    [arg] from the command line and returns the corresponding well
+    formed history mode. The colon punctuation mark (:) is used to
+    delimit offsets such as: "full:5" -> Full { offset = 5}. *)
+val of_string : string -> t option
