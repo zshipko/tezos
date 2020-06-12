@@ -162,15 +162,8 @@ module Term = struct
 
   let history_mode_converter =
     let open History_mode in
-    ( (function
-      | "archive" ->
-          `Ok Archive
-      | "full" ->
-          `Ok (Full {offset = default_offset})
-      | "rolling" ->
-          `Ok (Rolling {offset = default_offset})
-      | s ->
-          `Error s),
+    ( (fun arg ->
+        match of_string arg with Some hm -> `Ok hm | None -> `Error arg),
       pp )
 
   let network_name_converter =
@@ -207,12 +200,17 @@ module Term = struct
 
   let history_mode =
     let doc =
-      "Set the mode for the chain's data history storage. Possible values are \
-       $(i,archive), $(i,full) (default), $(i,rolling). Archive mode retains \
-       all data since the genesis block. Full mode only maintains block \
-       headers and operations allowing replaying the chain since the genesis \
-       if wanted. Rolling mode retains only the most recent data (i.e. from \
-       the 5 last cycles) and deletes the rest."
+      Format.sprintf
+        "Set the mode for the chain's data history storage. Possible values \
+         are $(i,archive), $(i,full) $(b,(default)), $(i,full:N), \
+         $(i,rolling), $(i,rolling:N). Archive mode retains all data since \
+         the genesis block. Full mode only maintains block headers and \
+         operations allowing replaying the chain since the genesis if wanted. \
+         Rolling mode retains only the most recent data and deletes the rest. \
+         For both Full and Rolling modes, it is possible to adjust the number \
+         of cycles to preserve by using the $(i,:N) annotation. The default \
+         number of preserved cycles is %d."
+        History_mode.default_offset
     in
     Arg.(
       value
