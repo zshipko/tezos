@@ -532,6 +532,67 @@ let cement_blocks ?(check_consistency = true) (cemented_store : t)
   if write_metadata then cement_blocks_metadata cemented_store blocks
   else return_unit
 
+let comply_to_history_mode cemented_store = function
+  | History_mode.Archive ->
+      assert false
+  | Full {offset} ->
+      let nb_files = Array.length cemented_store.cemented_blocks_files in
+      if nb_files <= offset then Lwt.return_unit
+      else
+        let cemented_files =
+          Array.to_list cemented_store.cemented_blocks_files
+        in
+        let (files_to_remove, _files_to_keep) =
+          List.split_n (nb_files - offset) cemented_files
+        in
+        Lwt_list.iter_s
+          (fun cemented_block_file ->
+            let metadata_file =
+              Naming.(
+                cemented_store.cemented_blocks_metadata_dir
+                // cemented_metadata_file
+                     ~cemented_filename:cemented_block_file.filename)
+            in
+            Lwt.catch
+              (fun () -> Lwt_unix.unlink metadata_file)
+              (fun _exn -> Lwt.return_unit))
+          files_to_remove
+        >>= fun () -> Lwt.return_unit
+  | Rolling {offset} ->
+      let nb_files = Array.length cemented_store.cemented_blocks_files in
+      if nb_files <= offset then Lwt.return_unit
+      else
+        let cemented_files =
+          Array.to_list cemented_store.cemented_blocks_files
+        in
+        let (files_to_remove, files_to_keep) =
+          List.split_n (nb_files - offset) cemented_files
+        in
+        (* FIXME clean indexes ? Or it will be automatically done at next merge *)
+        Lwt_list.iter_s
+          (fun cemented_block_file ->
+            let cemented_file =
+              Naming.(
+                cemented_store.cemented_blocks_dir
+                // cemented_block_file.filename)
+            in
+            let metadata_file =
+              Naming.(
+                cemented_store.cemented_blocks_metadata_dir
+                // cemented_metadata_file
+                     ~cemented_filename:cemented_block_file.filename)
+            in
+            Lwt.catch
+              (fun () ->
+                Lwt_unix.unlink cemented_file
+                >>= fun () -> Lwt_unix.unlink metadata_file)
+              (fun _exn -> Lwt.return_unit))
+          files_to_remove
+        >>= fun () ->
+        (* Update the cemented blocks files with the ones to keep *)
+        cemented_store.cemented_blocks_files <- Array.of_list files_to_keep ;
+        Lwt.return_unit
+
 let trigger_gc cemented_store = function
   | History_mode.Archive ->
       Lwt.return_unit

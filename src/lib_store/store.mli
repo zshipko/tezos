@@ -200,6 +200,7 @@ val init :
   ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->
   ?commit_genesis:(chain_id:Chain_id.t -> Context_hash.t tzresult Lwt.t) ->
   ?history_mode:History_mode.t ->
+  ?force_history_mode_switch:bool ->
   ?readonly:bool ->
   store_dir:string ->
   context_dir:string ->
@@ -244,6 +245,12 @@ val get_chain_store : store -> Chain_id.t -> chain_store tzresult Lwt.t
 (** [get_chain_store_opt global_store chain_id] optional version of
     [get_chain_store]. *)
 val get_chain_store_opt : store -> Chain_id.t -> chain_store option Lwt.t
+
+(** [switch_history_mode chain_store from to] switches the history
+    mode [from] to [to]. If needed, it removes all the unecessary data
+    an update both the savepoint and caboose.*)
+val switch_history_mode :
+  chain_store -> History_mode.t -> History_mode.t -> unit tzresult Lwt.t
 
 (** The module for handling block-related operations such as storing
     and reading data associated to a single block. *)

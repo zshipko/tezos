@@ -109,4 +109,15 @@ module Event = struct
       ~name:"end_merging_stores"
       ~msg:"the store was successfully merged in {time}"
       ("time", Data_encoding.string)
+
+  let switch_history_mode =
+    declare_2
+      ~section
+      ~level:Notice
+      ~name:"switch_history_mode"
+      ~msg:"the history mode was successfully switched from {old} to {new}"
+      ~pp1:History_mode.pp
+      ("old", History_mode.encoding)
+      ~pp2:History_mode.pp
+      ("new", History_mode.encoding)
 end

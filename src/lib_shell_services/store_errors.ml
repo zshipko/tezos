@@ -31,6 +31,10 @@ type error +=
       previous_mode : History_mode.t;
       next_mode : History_mode.t;
     }
+  | Cannot_switch_history_mode of {
+      previous_mode : History_mode.t;
+      next_mode : History_mode.t;
+    }
   | Invalid_head_switch of {
       minimum_allowed_level : int32;
       given_head : Block_hash.t * int32;
@@ -96,7 +100,8 @@ let () =
     ~pp:(fun ppf (prev, next) ->
       Format.fprintf
         ppf
-        "Cannot switch from history mode %a mode to %a mode."
+        "Incorrect history mode switch: cannot switch from history mode %a to \
+         %a."
         History_mode.pp
         prev
         History_mode.pp
@@ -111,6 +116,32 @@ let () =
           None)
     (fun (previous_mode, next_mode) ->
       Incorrect_history_mode_switch {previous_mode; next_mode}) ;
+  register_error_kind
+    `Permanent
+    ~id:"node_config_file.cannot_switch_history_mode"
+    ~title:"Cannot switch history mode"
+    ~description:"Cannot switch history mode."
+    ~pp:(fun ppf (prev, next) ->
+      Format.fprintf
+        ppf
+        "Cannot switch from history mode %a to %a. In order to change your \
+         history mode please refer to the Tezos node documentation. If you \
+         really want to change your history mode, run this command again with \
+         the `--force-history-mode-switch` option."
+        History_mode.pp
+        prev
+        History_mode.pp
+        next)
+    (Data_encoding.obj2
+       (Data_encoding.req "previous_mode" History_mode.encoding)
+       (Data_encoding.req "next_mode" History_mode.encoding))
+    (function
+      | Cannot_switch_history_mode x ->
+          Some (x.previous_mode, x.next_mode)
+      | _ ->
+          None)
+    (fun (previous_mode, next_mode) ->
+      Cannot_switch_history_mode {previous_mode; next_mode}) ;
   register_error_kind
     `Permanent
     ~id:"store.invalid_head_switch"

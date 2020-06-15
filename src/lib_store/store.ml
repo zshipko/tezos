@@ -1934,8 +1934,205 @@ let create_store ~store_dir ~context_index ~chain_id ~genesis ~genesis_context
   global_store.main_chain_store <- Some main_chain_store ;
   return global_store
 
-let load_store ?history_mode ~store_dir ~context_index ~chain_id
-    ~allow_testchains ~readonly () =
+(* Computes the savepoint which is expected given a cemented store and
+   an history mode's offset. None is returned it the cemented_store is
+   not accorded to the given offset. *)
+let expected_savepoint main_chain_store offset =
+  let cemented_store =
+    Block_store.cemented_block_store main_chain_store.block_store
+  in
+  let cemented_block_files =
+    Cemented_block_store.cemented_blocks_files cemented_store
+  in
+  let nb_files = Array.length cemented_block_files in
+  let index = nb_files - offset in
+  if index < 0 then
+    (* When the expected offset is below the last known block*)
+    None
+  else if index >= nb_files then
+    (* When the offset = 0, we take the checkpoint *)
+    let cycle = cemented_block_files.(nb_files - 1) in
+    Some (Int32.succ cycle.end_level)
+  else
+    (* We take the expected level *)
+    let cycle = cemented_block_files.(index) in
+    Some cycle.start_level
+
+(* Returns the savepoint which is actually reacheable given an
+   expected savepoint level.*)
+let available_savepoint main_chain_store expected_level =
+  Chain.savepoint main_chain_store
+  >>= fun current_savepoint ->
+  if expected_level < snd current_savepoint then
+    Lwt.return (snd current_savepoint)
+  else Lwt.return expected_level
+
+(* Returns the preserved level is the given level is higher that the
+   current preserved block. The preserved block aims to be the one needed
+   and maintained available to export snasphot. That is to say:
+   lafl(head) - max_op_ttl(lafl).*)
+let preserved_block main_chain_store expected_level =
+  Chain.current_head main_chain_store
+  >>= fun current_head ->
+  Block.get_block_metadata main_chain_store current_head
+  >>=? fun current_head_metadata ->
+  let head_lafl = Block_repr.last_allowed_fork_level current_head_metadata in
+  let head_max_op_ttl =
+    Int32.of_int (Block_repr.max_operations_ttl current_head_metadata)
+  in
+  let block_to_preserve = Int32.(max 0l (sub head_lafl head_max_op_ttl)) in
+  let new_block_level = min block_to_preserve expected_level in
+  Block.read_block_by_level main_chain_store new_block_level
+  >>=? fun block -> return (Block.descriptor block)
+
+let infer_savepoint main_chain_store ~previous_offset ~target_offset =
+  ( match previous_offset with
+  | Some previous_offset -> (
+    (*Full or rolling offset*)
+    match expected_savepoint main_chain_store target_offset with
+    | Some expected_savepoint_level ->
+        (* Fit the right cycle *)
+        if previous_offset <= target_offset then
+          Lwt.return (Int32.succ expected_savepoint_level)
+        else Lwt.return expected_savepoint_level
+    | None ->
+        (* The expected savepoint cannot be satisfied. Instead, we
+          return the current savepoint (best effort). *)
+        Chain.savepoint main_chain_store
+        >>= fun current_savepoint -> Lwt.return (snd current_savepoint) )
+  | None -> (
+    (*Archive offset*)
+    match expected_savepoint main_chain_store target_offset with
+    | Some expected_savepoint_level ->
+        Lwt.return expected_savepoint_level
+    | None ->
+        Chain.caboose main_chain_store
+        >>= fun current_caboose -> Lwt.return (snd current_caboose) ) )
+  >>= fun expected_savepoint_level ->
+  available_savepoint main_chain_store expected_savepoint_level
+  >>= fun available_savepoint ->
+  preserved_block main_chain_store available_savepoint
+
+(* Computes the caboose which is expected given a cemented store and
+   an history mode's offset. None is returned it the cemented_store is
+   not accorded to the given offset. *)
+let expected_caboose main_chain_store offset =
+  let cemented_store =
+    Block_store.cemented_block_store main_chain_store.block_store
+  in
+  let cemented_block_files =
+    Cemented_block_store.cemented_blocks_files cemented_store
+  in
+  let nb_files = Array.length cemented_block_files in
+  let index = nb_files - offset in
+  if offset <> 0 && index >= 0 then
+    let cycle = cemented_block_files.(nb_files - offset) in
+    Some cycle.start_level
+  else (* The expected caboose cannot be satisfied *)
+    None
+
+let infer_caboose main_chain_store savepoint offset ~new_history_mode =
+  function
+  | History_mode.Archive -> (
+    match new_history_mode with
+    | History_mode.Archive ->
+        assert false
+    | Full _ ->
+        Chain.caboose main_chain_store >>= return
+    | Rolling _ ->
+        return savepoint )
+  | Full _ -> (
+    match expected_caboose main_chain_store offset with
+    | Some expected_caboose ->
+        preserved_block main_chain_store expected_caboose
+    | None ->
+        return savepoint )
+  | Rolling r ->
+      if r.offset < offset then Chain.caboose main_chain_store >>= return
+      else return savepoint
+
+let switch_history_mode main_chain_store previous_history_mode new_history_mode
+    =
+  let open History_mode in
+  let is_valid_switch =
+    match (previous_history_mode, new_history_mode) with
+    | (p, n) when History_mode.equal p n ->
+        false
+    | (Archive, Full _)
+    | (Archive, Rolling _)
+    | (Full _, Full _)
+    | (Full _, Rolling _)
+    | (Rolling _, Rolling _) ->
+        true
+    | _ ->
+        (* The remaining combinations are inavlid. *)
+        false
+  in
+  fail_unless
+    is_valid_switch
+    (Incorrect_history_mode_switch
+       {previous_mode = previous_history_mode; next_mode = new_history_mode})
+  >>=? fun () ->
+  Chain.set_history_mode main_chain_store new_history_mode
+  >>=? fun () ->
+  ( match (previous_history_mode, new_history_mode) with
+  | (Full n, Rolling m) | (Rolling n, Rolling m) ->
+      infer_savepoint
+        main_chain_store
+        ~previous_offset:(Some n.offset)
+        ~target_offset:m.offset
+      >>=? fun new_savepoint ->
+      infer_caboose
+        main_chain_store
+        new_savepoint
+        m.offset
+        ~new_history_mode
+        previous_history_mode
+      >>=? fun new_caboose ->
+      Cemented_block_store.comply_to_history_mode
+        (Block_store.cemented_block_store main_chain_store.block_store)
+        new_history_mode
+      >>= fun () ->
+      Chain.set_savepoint main_chain_store new_savepoint
+      >>=? fun () -> Chain.set_caboose main_chain_store new_caboose
+  | (Full n, Full m) ->
+      infer_savepoint
+        main_chain_store
+        ~previous_offset:(Some n.offset)
+        ~target_offset:m.offset
+      >>=? fun new_savepoint ->
+      Cemented_block_store.comply_to_history_mode
+        (Block_store.cemented_block_store main_chain_store.block_store)
+        new_history_mode
+      >>= fun () -> Chain.set_savepoint main_chain_store new_savepoint
+  | (Archive, Full m) | (Archive, Rolling m) ->
+      infer_savepoint
+        main_chain_store
+        ~previous_offset:None
+        ~target_offset:m.offset
+      >>=? fun new_savepoint ->
+      infer_caboose
+        main_chain_store
+        new_savepoint
+        m.offset
+        ~new_history_mode
+        previous_history_mode
+      >>=? fun new_caboose ->
+      Cemented_block_store.comply_to_history_mode
+        (Block_store.cemented_block_store main_chain_store.block_store)
+        new_history_mode
+      >>= fun () ->
+      Chain.set_savepoint main_chain_store new_savepoint
+      >>=? fun () -> Chain.set_caboose main_chain_store new_caboose
+  | _ ->
+      (* Should not happen *)
+      assert false )
+  >>=? fun () ->
+  Event.(emit switch_history_mode (previous_history_mode, new_history_mode))
+  >>= fun () -> return_unit
+
+let load_store ?history_mode ~force_history_mode_switch ~store_dir
+    ~context_index ~chain_id ~allow_testchains ~readonly () =
   (* TODO: check genesis coherence and fail if mismatch *)
   let chain_dir = Naming.(store_dir // chain_store chain_id) in
   Protocol_store.init ~store_dir
@@ -1957,23 +2154,31 @@ let load_store ?history_mode ~store_dir ~context_index ~chain_id
   >>=? fun main_chain_store ->
   ( match history_mode with
   | None ->
-      return_unit
+      return main_chain_store
   | Some history_mode ->
       let previous_history_mode = Chain.history_mode main_chain_store in
       fail_when
-        (history_mode <> previous_history_mode)
-        (Incorrect_history_mode_switch
+        (history_mode <> previous_history_mode && not force_history_mode_switch)
+        (Cannot_switch_history_mode
            {previous_mode = previous_history_mode; next_mode = history_mode})
-  )
-  >>=? fun () ->
+      >>=? fun () ->
+      if force_history_mode_switch then
+        switch_history_mode main_chain_store previous_history_mode history_mode
+        >>=? fun () ->
+        (* update history mode in pre-loaded chain config *)
+        let chain_config = {main_chain_store.chain_config with history_mode} in
+        return {main_chain_store with chain_config}
+      else return main_chain_store )
+  >>=? fun main_chain_store ->
   global_store.main_chain_store <- Some main_chain_store ;
   return global_store
 
 let main_chain_store store =
   Option.unopt_assert ~loc:__POS__ store.main_chain_store
 
-let init ?patch_context ?commit_genesis ?history_mode ?(readonly = false)
-    ~store_dir ~context_dir ~allow_testchains genesis =
+let init ?patch_context ?commit_genesis ?history_mode
+    ?(force_history_mode_switch = false) ?(readonly = false) ~store_dir
+    ~context_dir ~allow_testchains genesis =
   let chain_id = Chain_id.of_block_hash genesis.Genesis.block in
   ( match commit_genesis with
   | Some commit_genesis ->
@@ -1998,6 +2203,7 @@ let init ?patch_context ?commit_genesis ?history_mode ?(readonly = false)
   if Sys.file_exists chain_dir && Sys.is_directory chain_dir then
     load_store
       ?history_mode
+      ~force_history_mode_switch
       ~store_dir
       ~context_index
       ~chain_id
@@ -2109,6 +2315,7 @@ module Unsafe = struct
       ~chain_id
       ~allow_testchains:false
       ~readonly:true
+      ~force_history_mode_switch:false
       ()
     >>=? fun store ->
     let chain_store = main_chain_store store in

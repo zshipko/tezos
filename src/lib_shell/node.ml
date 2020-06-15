@@ -332,6 +332,7 @@ let check_and_fix_storage_consistency store vp =
     chains
 
 let create ?(sandboxed = false) ?sandbox_parameters ~singleprocess
+    ~force_history_mode_switch
     { genesis;
       chain_name;
       sandboxed_chain_name;
@@ -342,9 +343,9 @@ let create ?(sandboxed = false) ?sandbox_parameters ~singleprocess
       protocol_root;
       patch_context;
       p2p = p2p_params;
+      checkpoint;
       disable_mempool;
-      enable_testchain;
-      checkpoint } peer_validator_limits block_validator_limits
+      enable_testchain } peer_validator_limits block_validator_limits
     prevalidator_limits chain_validator_limits history_mode =
   let (start_prevalidator, start_testchain) =
     match p2p_params with
@@ -363,6 +364,7 @@ let create ?(sandboxed = false) ?sandbox_parameters ~singleprocess
     Store.init
       ?patch_context
       ?history_mode
+      ~force_history_mode_switch
       ~store_dir:store_root
       ~context_dir:context_root
       ~allow_testchains:start_testchain
@@ -393,6 +395,7 @@ let create ?(sandboxed = false) ?sandbox_parameters ~singleprocess
     Store.init
       ?patch_context
       ?history_mode
+      ~force_history_mode_switch
       ~commit_genesis
       ~store_dir:store_root
       ~context_dir:context_root

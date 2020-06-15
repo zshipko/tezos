@@ -229,6 +229,11 @@ val cement_blocks :
       the higher the offset is, the longest the GC phase will last. *)
 val trigger_gc : t -> History_mode.t -> unit Lwt.t
 
+(** [comply_to_history_mode cemented_store history_mode] aims to
+    update the [cemented_store] in accordance to the given
+    [history_mode]. To do so, it will clean the unecessary files.*)
+val comply_to_history_mode : t -> History_mode.t -> unit Lwt.t
+
 (** [iter_cemented_file ~cemented_block_dir f block_file] reads from
     the cemented [block_file] located in [cemented_block_dir] and
     applies [f] on every block. *)

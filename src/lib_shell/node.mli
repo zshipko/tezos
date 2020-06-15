@@ -55,6 +55,7 @@ val create :
   ?sandboxed:bool ->
   ?sandbox_parameters:Data_encoding.json ->
   singleprocess:bool ->
+  force_history_mode_switch:bool ->
   config ->
   Peer_validator.limits ->
   Block_validator.limits ->
