@@ -9,13 +9,14 @@ import os
 import re
 import subprocess
 import time
+import pytest
 
 import base58check
 import ed25519
 import pyblake2
 import requests
 from client.client import Client
-from client.client_output import BakeForResult, RunScriptResult
+from client import client_output
 
 from . import constants
 
@@ -364,7 +365,7 @@ def contract_name_of_file(contract_path: str) -> str:
     return os.path.splitext(os.path.basename(contract_path))[0]
 
 
-def bake(client: Client) -> BakeForResult:
+def bake(client: Client) -> client_output.BakeForResult:
     return client.bake('bootstrap1',
                        ['--max-priority', '512',
                         '--minimal-timestamp',
@@ -394,7 +395,7 @@ def assert_balance(client: Client,
 def assert_run_script_success(client: Client,
                               contract: str,
                               param: str,
-                              storage: str) -> RunScriptResult:
+                              storage: str) -> client_output.RunScriptResult:
     return client.run_script(contract, param, storage, None, True)
 
 
@@ -479,3 +480,67 @@ def assert_transfer_failwith(client: Client,
     pattern = re.compile(r'script reached FAILWITH instruction')
     with assert_run_failure(pattern):
         client.transfer(amount, sender, receiver, args)
+
+
+def node_consistency_after_import(node_id,
+                                  sandbox,
+                                  expected_level,
+                                  expected_checkpoint,
+                                  expected_savepoint,
+                                  expected_caboose):
+    level = sandbox.client(node_id).get_head()['header']['level']
+    checkpoint = sandbox.client(node_id).get_checkpoint()['block']['level']
+    savepoint = sandbox.client(node_id).get_savepoint()
+    caboose = sandbox.client(node_id).get_caboose()
+
+    assert level == expected_level
+    assert checkpoint == expected_checkpoint
+    assert savepoint == expected_savepoint
+    assert caboose == expected_caboose
+
+    # the metadata of genesis are available
+    assert get_block_at_level(sandbox.client(node_id), 0)
+
+
+# We should take the Full mode offset into account.
+# Currently, it is assumed to be 5
+def full_node_blocks_availability(node_id,
+                                  sandbox,
+                                  savepoint,
+                                  head):
+    # Error that must be raised when a block is not available
+    expected_command_error = 'Command failed : Unable to find block'
+    # Genesis is available with metadata
+    assert get_block_at_level(sandbox.client(node_id), 0)
+    # [1;…;savepoint[ metadata are not available
+    for i in range(1, savepoint):
+        with pytest.raises(client_output.InvalidClientOutput) as exc:
+            get_block_metadata_at_level(sandbox.client(node_id), i)
+        assert exc.value.client_output.startswith(expected_command_error)
+    # [savepoint;…;head] are available with metadata
+    for i in range(savepoint + 1, head):
+        get_block_header_at_level(sandbox.client(node_id), i)
+
+
+# We should take the Rolling mode offset into account.
+# Currently, it is assumed to be 5
+def rolling_node_blocks_availability(node_id,
+                                     sandbox,
+                                     savepoint,
+                                     caboose,
+                                     head):
+    # Error that must be raised when a block is unknown
+    expected_service_error = 'Did not find service'
+    # Genesis is available with metadata
+    assert get_block_at_level(sandbox.client(node_id), 0)
+    if caboose == 0:
+        pass
+    else:
+        # [1;…;caboose[ blocks are unknown
+        for i in range(1, caboose):
+            with assert_run_failure(expected_service_error):
+                get_block_at_level(sandbox.client(node_id), i)
+
+    # [savepoint;…;head] are available with metadata
+    for i in range(savepoint + 1, head):
+        get_block_header_at_level(sandbox.client(node_id), i)
