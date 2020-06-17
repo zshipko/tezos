@@ -124,4 +124,7 @@ module Snapshot : sig
 
   (** Snapshot metadata filename. *)
   val metadata : string
+
+  (** Snapshot temporary export directory *)
+  val temp_export_dir : string
 end

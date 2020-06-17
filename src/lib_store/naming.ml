@@ -105,4 +105,6 @@ module Snapshot = struct
   let protocols_table = "protocols_index"
 
   let metadata = "metadata.json"
+
+  let temp_export_dir = "tmp_snapshot_dir"
 end

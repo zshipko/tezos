@@ -44,6 +44,7 @@ type error +=
         | `Genesis
         | `Not_enough_pred ];
     }
+  | Invalid_export_path of string
   | Snapshot_file_not_found of string
   | Inconsistent_protocol_hash of {
       expected : Protocol_hash.t;
@@ -140,6 +141,19 @@ let () =
       | _ ->
           None)
     (fun (block, reason) -> Invalid_export_block {block; reason}) ;
+  register_error_kind
+    `Permanent
+    ~id:"snapshots.invalid_export_path"
+    ~title:"Invalid export path"
+    ~description:"Invalid path to export snapshot"
+    ~pp:(fun ppf path ->
+      Format.fprintf
+        ppf
+        "Failed to export snapshot: the file or directory %s already exists."
+        path)
+    (obj1 (req "path" string))
+    (function Invalid_export_path path -> Some path | _ -> None)
+    (fun path -> Invalid_export_path path) ;
   register_error_kind
     `Permanent
     ~id:"snapshots.snapshot_file_not_found"
@@ -985,14 +999,42 @@ let export_floating_block_stream ~snapshot_dir floating_block_stream =
           floating_block_stream
         >>= fun () -> Lwt_utils_unix.safe_close fd >>= fun () -> return_unit)
 
-let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
-    genesis =
+let format_snapshot_export_path chain_name export_block export_mode = function
+  | Some snapshot_file ->
+      snapshot_file
+  | None ->
+      (* The generated filename follows this pattern:
+         <NETWORK>-<BLOCK_HASH>-<BLOCK_LEVEL>.<SNAPSHOT_KIND> *)
+      Format.asprintf
+        "%a-%a-%ld.%a"
+        Distributed_db_version.Name.pp
+        chain_name
+        Block_hash.pp
+        (Store.Block.hash export_block)
+        (Store.Block.level export_block)
+        History_mode.pp_short
+        export_mode
+
+let ensure_valid_export_path snapshot_export_path =
+  Lwt_unix.file_exists snapshot_export_path
+  >>= fun snapshot_path_exists ->
+  fail_when snapshot_path_exists (Invalid_export_path snapshot_export_path)
+
+let export_rolling ?snapshot_file ~store_dir ~context_dir ~snapshot_dir ~block
+    ~rolling ~chain_name genesis =
   let export_rolling_f (chain_store, _context_index) =
     check_history_mode chain_store ~rolling
     >>=? fun () ->
     retrieve_export_block chain_store block
     >>=? fun (export_block, pred_block, lowest_block_level_needed) ->
     let export_mode = History_mode.Rolling {offset = 0} in
+    let snapshot_export_path =
+      format_snapshot_export_path
+        chain_name
+        export_block
+        export_mode
+        snapshot_file
+    in
     lwt_emit (Export_info (export_mode, Store.Block.descriptor export_block))
     >>= fun () ->
     (* Blocks *)
@@ -1038,7 +1080,8 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
         export_block,
         pred_block,
         protocol_levels,
-        (return_unit, floating_block_stream) )
+        (return_unit, floating_block_stream),
+        snapshot_export_path )
   in
   Store.Unsafe.open_for_snapshot_export
     ~store_dir
@@ -1049,7 +1092,10 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
              export_block,
              pred_block,
              protocol_levels,
-             (return_unit, floating_block_stream) ) ->
+             (return_unit, floating_block_stream),
+             snapshot_export_path ) ->
+  ensure_valid_export_path snapshot_export_path
+  >>=? fun () ->
   (* TODO: when the context's GC is implemented, make sure a context
      pruning cannot occur while the dump context is being run. For
      now, it is performed outside the lock to allow the node from
@@ -1063,7 +1109,8 @@ let export_rolling ~store_dir ~context_dir ~snapshot_dir ~block ~rolling
       export_block,
       protocol_levels,
       written_context_elements,
-      (return_unit, floating_block_stream) )
+      (return_unit, floating_block_stream),
+      snapshot_export_path )
 
 let filter_indexes ~dst_cemented_dir limit =
   let open Cemented_block_store in
@@ -1088,14 +1135,21 @@ let filter_indexes ~dst_cemented_dir limit =
   Cemented_block_level_index.close fresh_level_index ;
   Cemented_block_hash_index.close fresh_hash_index
 
-let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
-    ~rolling genesis =
+let export_full ?snapshot_file ~store_dir ~context_dir ~snapshot_dir
+    ~dst_cemented_dir ~block ~rolling ~chain_name genesis =
   let export_full_f (chain_store, _context_index) =
     check_history_mode chain_store ~rolling
     >>=? fun () ->
     retrieve_export_block chain_store block
     >>=? fun (export_block, pred_block, _lowest_block_level_needed) ->
     let export_mode = History_mode.Full {offset = 0} in
+    let snapshot_export_path =
+      format_snapshot_export_path
+        chain_name
+        export_block
+        export_mode
+        snapshot_file
+    in
     lwt_emit (Export_info (export_mode, Store.Block.descriptor export_block))
     >>= fun () ->
     let chain_id = Store.Chain.chain_id chain_store in
@@ -1140,7 +1194,8 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
             (src_cemented_dir, cemented_table),
             (ro_fd, rw_fd),
             extra_floating_blocks,
-            should_filter_indexes ))
+            should_filter_indexes,
+            snapshot_export_path ))
       (fun exn ->
         Lwt_utils_unix.safe_close ro_fd
         >>= fun () ->
@@ -1159,7 +1214,10 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
              (src_cemented_dir, cemented_table),
              (floating_ro_fd, floating_rw_fd),
              extra_floating_blocks,
-             should_filter_indexes ) ->
+             should_filter_indexes,
+             snapshot_export_path ) ->
+  ensure_valid_export_path snapshot_export_path
+  >>=? fun () ->
   (* TODO: when the context's GC is implemented, make sure a context
      pruning cannot occur while the dump context is being run. For
      now, it is performed outside the lock to allow the node from
@@ -1197,7 +1255,8 @@ let export_full ~store_dir ~context_dir ~snapshot_dir ~dst_cemented_dir ~block
       export_block,
       protocol_levels,
       written_context_elements,
-      (reading_thread, floating_block_stream) )
+      (reading_thread, floating_block_stream),
+      snapshot_export_path )
 
 let zip_snapshot dir out =
   Lwt_utils_unix.display_progress
@@ -1276,63 +1335,92 @@ let unzip_snapshot zipfile path =
             >>= return)
         (fun () -> Zip.close_in ic ; Lwt.return_unit))
 
-let export ?(rolling = false) ?(compress = true) ~block ~store_dir ~context_dir
-    ~chain_name ~snapshot_file genesis =
-  let snapshot_dir = Filename.temp_file (Filename.basename snapshot_file) "" in
+let export ?snapshot_file ?(rolling = false) ?(compress = true) ~block
+    ~store_dir ~context_dir ~chain_name genesis =
+  let snapshot_dir = Filename.temp_file Naming.Snapshot.temp_export_dir "" in
   Lwt_unix.unlink snapshot_dir
   >>= fun () ->
   create_snapshot_dir ~snapshot_dir
   >>=? fun (dst_cemented_dir, dst_protocol_dir) ->
-  ( if rolling then
-    export_rolling
-      ~store_dir
-      ~context_dir
-      ~snapshot_dir
-      ~block
-      ~rolling
-      genesis
-  else
-    export_full
-      ~store_dir
-      ~context_dir
-      ~snapshot_dir
-      ~dst_cemented_dir
-      ~block
-      ~rolling
-      genesis )
-  >>=? fun ( export_mode,
-             export_block,
-             protocol_levels,
-             written_context_elements,
-             (reading_thread, floating_block_stream) ) ->
-  export_floating_block_stream ~snapshot_dir floating_block_stream
-  >>=? fun () ->
-  reading_thread
-  >>=? fun () ->
-  export_protocols
-    protocol_levels
-    ~src_dir:Naming.(store_dir // protocol_store_directory)
-    ~dst_dir:dst_protocol_dir
-  >>=? fun () ->
-  let metadata =
-    {
-      version = current_version;
-      chain_name;
-      history_mode = export_mode;
-      block_hash = Store.Block.hash export_block;
-      level = Store.Block.level export_block;
-      timestamp = Store.Block.timestamp export_block;
-      context_elements = written_context_elements;
-    }
+  let dir_cleaner path =
+    lwt_emit Cleaning_after_failure
+    >>= fun () ->
+    Lwt_list.iter_s
+      (fun path ->
+        Lwt.catch
+          (fun () ->
+            if Sys.is_directory path then Lwt_utils_unix.remove_dir path
+            else Lwt_unix.unlink path)
+          (fun _ -> Lwt.return_unit))
+      path
   in
-  write_snapshot_metadata metadata Naming.(snapshot_dir // Snapshot.metadata)
-  >>=? fun () ->
-  ( if compress then
-    zip_snapshot snapshot_dir snapshot_file
-    >>=? fun () -> Lwt_utils_unix.remove_dir snapshot_dir >>= return
-  else Lwt_unix.rename snapshot_dir snapshot_file >>= return )
-  >>=? fun () ->
-  lwt_emit (Export_success snapshot_file) >>= fun () -> return_unit
+  protect
+    ~on_error:(fun errors ->
+      dir_cleaner [snapshot_dir] >>= fun () -> Lwt.return (Error errors))
+    (fun () ->
+      ( if rolling then
+        export_rolling
+          ?snapshot_file
+          ~store_dir
+          ~context_dir
+          ~snapshot_dir
+          ~block
+          ~rolling
+          ~chain_name
+          genesis
+      else
+        export_full
+          ?snapshot_file
+          ~store_dir
+          ~context_dir
+          ~snapshot_dir
+          ~dst_cemented_dir
+          ~block
+          ~rolling
+          ~chain_name
+          genesis )
+      >>=? fun ( export_mode,
+                 export_block,
+                 protocol_levels,
+                 written_context_elements,
+                 (reading_thread, floating_block_stream),
+                 snapshot_export_path ) ->
+      export_floating_block_stream ~snapshot_dir floating_block_stream
+      >>=? fun () ->
+      reading_thread
+      >>=? fun () ->
+      export_protocols
+        protocol_levels
+        ~src_dir:Naming.(store_dir // protocol_store_directory)
+        ~dst_dir:dst_protocol_dir
+      >>=? fun () ->
+      let metadata =
+        {
+          version = current_version;
+          chain_name;
+          history_mode = export_mode;
+          block_hash = Store.Block.hash export_block;
+          level = Store.Block.level export_block;
+          timestamp = Store.Block.timestamp export_block;
+          context_elements = written_context_elements;
+        }
+      in
+      write_snapshot_metadata
+        metadata
+        Naming.(snapshot_dir // Snapshot.metadata)
+      >>=? fun () -> return snapshot_export_path)
+  >>=? fun snapshot_export_path ->
+  protect
+    ~on_error:(fun errors ->
+      dir_cleaner [snapshot_dir; snapshot_export_path]
+      >>= fun () -> Lwt.return (Error errors))
+    (fun () ->
+      ( if compress then
+        zip_snapshot snapshot_dir snapshot_export_path
+        >>=? fun () -> Lwt_utils_unix.remove_dir snapshot_dir >>= return
+      else Lwt_unix.rename snapshot_dir snapshot_export_path >>= return )
+      >>=? fun () ->
+      lwt_emit (Export_success snapshot_export_path) >>= fun () -> return_unit)
 
 let restore_cemented_blocks ?(check_consistency = true) ~should_rename
     ~snapshot_cemented_dir ~dst_cemented_dir ~genesis_hash =

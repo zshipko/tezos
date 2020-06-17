@@ -24,7 +24,7 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-type error += Invalid_sandbox_file of string
+type error += Invalid_sandbox_file of string | Missing_file_to_import
 
 let () =
   register_error_kind
@@ -36,7 +36,17 @@ let () =
       Format.fprintf ppf "The file '%s' is not a valid JSON sandbox file" s)
     Data_encoding.(obj1 (req "sandbox_file" string))
     (function Invalid_sandbox_file s -> Some s | _ -> None)
-    (fun s -> Invalid_sandbox_file s)
+    (fun s -> Invalid_sandbox_file s) ;
+  register_error_kind
+    `Permanent
+    ~id:"main.snapshots.missing_file_to_import"
+    ~title:"Missing file to import"
+    ~description:"The snapshot file to import is missing"
+    ~pp:(fun ppf () ->
+      Format.fprintf ppf "Failed to import snapshot: missing file to import.")
+    Data_encoding.(empty)
+    (function Missing_file_to_import -> Some () | _ -> None)
+    (fun () -> Missing_file_to_import)
 
 (** Main *)
 
@@ -70,20 +80,6 @@ module Term = struct
       in
       match subcommand with
       | Export ->
-          Lwt_unix.file_exists snapshot_path
-          >>= fun snapshot_dir_exists ->
-          (* TODO: clean error *)
-          ( if snapshot_dir_exists then
-            failwith
-              "The file %s already exists. Please provide a valid path for \
-               the snapshot."
-              snapshot_path
-          else return_unit )
-          >>=? fun () ->
-          let dir_cleaner () =
-            Event.(emit cleaning_up_after_failure) snapshot_path
-            >>= fun () -> Lwt_utils_unix.remove_dir snapshot_path
-          in
           Node_data_version.ensure_data_dir data_dir
           >>=? fun () ->
           let context_dir = Node_data_version.context_dir data_dir in
@@ -98,21 +94,22 @@ module Term = struct
                   return block)
             block
           >>=? fun block ->
-          protect
-            ~on_error:(fun err ->
-              dir_cleaner () >>= fun () -> Lwt.return (Error err))
-            (fun () ->
-              let compress = not disable_compress in
-              Snapshots.export
-                ~rolling
-                ~compress
-                ~store_dir
-                ~context_dir
-                ~chain_name
-                ~block
-                ~snapshot_file:snapshot_path
-                genesis)
+          let compress = not disable_compress in
+          Snapshots.export
+            ?snapshot_file:snapshot_path
+            ~rolling
+            ~compress
+            ~store_dir
+            ~context_dir
+            ~chain_name
+            ~block
+            genesis
       | Import ->
+          Option.unopt_map
+            ~f:return
+            ~default:(fail Missing_file_to_import)
+            snapshot_path
+          >>=? fun snapshot_path ->
           let dir_cleaner () =
             Event.(emit cleaning_up_after_failure) data_dir
             >>= fun () ->
@@ -205,6 +202,11 @@ module Term = struct
                   .user_activated_protocol_overrides
           else return_unit
       | Info ->
+          Option.unopt_map
+            ~f:return
+            ~default:(fail Missing_file_to_import)
+            snapshot_path
+          >>=? fun snapshot_path ->
           Snapshots.read_snapshot_metadata ~snapshot_file:snapshot_path
           >>=? fun metadata ->
           Format.printf
@@ -246,7 +248,15 @@ module Term = struct
     & pos 0 (some (parser, printer)) None
     & info [] ~docv:"OPERATION" ~doc
 
-  let file_arg = required & pos 1 (some string) None & info [] ~docv:"FILE"
+  let file_arg =
+    let doc =
+      "The name of the snapshot file to export. If no provided, it will be \
+       automatically generated using the target block and following patern: \
+       $(i,./<NETWORK>-<BLOCK_HASH>-<BLOCK_LEVEL>.<SNAPSHOT_KIND>). \
+       Otherwise, it must be given as a positionnal argument, just after the \
+       $(b,export) hint."
+    in
+    value & pos 1 (some string) None & info [] ~doc ~docv:"FILE"
 
   let block =
     let open Cmdliner.Arg in

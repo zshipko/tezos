@@ -38,6 +38,7 @@ type status =
   | Set_head of Block_hash.t
   | Import_success of string
   | Validate_protocol_sources of Protocol_hash.t
+  | Cleaning_after_failure
 
 let status_pp ppf = function
   | Export_unspecified_hash block_descr ->
@@ -89,6 +90,8 @@ let status_pp ppf = function
         "Validating protocol %a against sources."
         Protocol_hash.pp
         protocol_hash
+  | Cleaning_after_failure ->
+      Format.fprintf ppf "Cleaning up artifacts after failure."
 
 module Definition = struct
   let name = "snapshot"
@@ -167,7 +170,13 @@ module Definition = struct
              ~title:"Validate_protocol_sources"
              Protocol_hash.encoding
              (function Validate_protocol_sources h -> Some h | _ -> None)
-             (fun h -> Validate_protocol_sources h) ]
+             (fun h -> Validate_protocol_sources h);
+           case
+             (Tag 10)
+             ~title:"Cleaning_after_failure"
+             empty
+             (function Cleaning_after_failure -> Some () | _ -> None)
+             (fun () -> Cleaning_after_failure) ]
 
   let pp ~short:_ ppf (status : t) =
     Format.fprintf ppf "%a" status_pp status.data
@@ -184,7 +193,8 @@ module Definition = struct
     | Import_unspecified_hash
     | Import_loading
     | Set_head _
-    | Import_success _ ->
+    | Import_success _
+    | Cleaning_after_failure ->
         Internal_event.Notice
     | Validate_protocol_sources _ ->
         Internal_event.Info

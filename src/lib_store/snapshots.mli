@@ -141,18 +141,19 @@ val read_snapshot_metadata : snapshot_file:string -> metadata tzresult Lwt.t
 (** [export ?rolling ?compress ~block ~store_dir ~context_dir
     ~chain_name ~snapshot_file genesis] reads from the [store_dir] and
     [context_dir] the current state of the node and produces a
-    snapshot in [snapshot_file]. If [compress] is set, the snapshot is
-    compressed using zip format, otherwise, it is output as a
-    directory. If [rolling] is set, only the necessary blocks will be
-    exported. *)
+    snapshot in [snapshot_file] if it is porvided. Otherwise, a
+    snapshot file name is automatically generated using the target
+    block as hint. If [compress] is set, the snapshot is compressed
+    using zip format, otherwise, it is output as a directory. If
+    [rolling] is set, only the necessary blocks will be exported. *)
 val export :
+  ?snapshot_file:string ->
   ?rolling:bool ->
   ?compress:bool ->
   block:Block_services.block ->
   store_dir:string ->
   context_dir:string ->
   chain_name:Distributed_db_version.Name.t ->
-  snapshot_file:string ->
   Genesis.t ->
   unit tzresult Lwt.t
 
