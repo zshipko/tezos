@@ -53,13 +53,25 @@ let () =
 module Event = struct
   include Internal_event.Simple
 
+  let section = ["node"; "main"]
+
   let cleaning_up_after_failure =
     Internal_event.Simple.declare_1
-      ~section:["node"; "main"]
+      ~section
       ~name:"cleaning_up_after_failure"
       ~msg:"cleaning up directory \"{directory}\" after failure."
       ~level:Internal_event.Notice
       ("directory", Data_encoding.string)
+
+  let export_unspecified_hash =
+    Internal_event.Simple.declare_0
+      ~section
+      ~name:"export_unspecified_hash"
+      ~msg:
+        "There is no block hash specified with the `--block` option. Using \
+         the last checkpoint as the default value"
+      ~level:Internal_event.Notice
+      ()
 end
 
 module Term = struct
@@ -84,15 +96,16 @@ module Term = struct
           >>=? fun () ->
           let context_dir = Node_data_version.context_dir data_dir in
           let store_dir = Node_data_version.store_dir data_dir in
-          Option.unopt_map
-            ~default:(return (`Alias (`Checkpoint, 0)))
-            ~f:(fun block ->
-              match Block_services.parse_block block with
-              | Error err ->
-                  failwith "%s: %s" block err
-              | Ok block ->
-                  return block)
-            block
+          ( match block with
+          | None ->
+              Event.(emit export_unspecified_hash) ()
+              >>= fun () -> return (`Alias (`Checkpoint, 0))
+          | Some block -> (
+            match Block_services.parse_block block with
+            | Error err ->
+                failwith "%s: %s" block err
+            | Ok block ->
+                return block ) )
           >>=? fun block ->
           let compress = not disable_compress in
           Snapshots.export
