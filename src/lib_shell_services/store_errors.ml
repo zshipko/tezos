@@ -405,7 +405,7 @@ let () =
     ~pp:(fun ppf () ->
       Format.fprintf
         ppf
-        "Failed to swap floating stores: tryed to swap floating store of the \
+        "Failed to swap floating stores: tried to swap floating store of the \
          same kind.")
     Data_encoding.empty
     (function Wrong_floating_kind_swap -> Some () | _ -> None)
