@@ -322,7 +322,7 @@ module Make (I : Dump_interface) = struct
   (* TODO add more info (e.g. nb context item, nb blocks, etc.) *)
   type snapshot_metadata = {
     version : string;
-    mode : Tezos_shell_services.History_mode.t;
+    mode : Tezos_shell_services.History_mode.Legacy.t;
   }
 
   let snapshot_metadata_encoding =
@@ -332,7 +332,7 @@ module Make (I : Dump_interface) = struct
       (fun (version, mode) -> {version; mode})
       (obj2
          (req "version" string)
-         (req "mode" Tezos_shell_services.History_mode.encoding))
+         (req "mode" Tezos_shell_services.History_mode.Legacy.encoding))
 
   let write_snapshot_metadata ~mode buf =
     let version = {version = current_version; mode} in

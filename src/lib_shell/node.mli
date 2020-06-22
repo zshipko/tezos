@@ -63,7 +63,7 @@ val create :
   Block_validator.limits ->
   Prevalidator.limits ->
   Chain_validator.limits ->
-  History_mode.t option ->
+  History_mode.Legacy.t option ->
   t tzresult Lwt.t
 
 val shutdown : t -> unit Lwt.t

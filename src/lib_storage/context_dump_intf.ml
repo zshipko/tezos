@@ -160,7 +160,7 @@ module type S = sig
     index ->
     block_header
     * block_data
-    * History_mode.t
+    * History_mode.Legacy.t
     * (block_header ->
       (pruned_block option * protocol_data option) tzresult Lwt.t) ->
     fd:Lwt_unix.file_descr ->
@@ -176,7 +176,7 @@ module type S = sig
     unit tzresult Lwt.t) ->
     ( block_header
     * block_data
-    * History_mode.t
+    * History_mode.Legacy.t
     * Block_header.t option
     * Block_hash.t list
     * protocol_data list )

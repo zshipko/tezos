@@ -26,9 +26,9 @@
 
 type status =
   | Export_unspecified_hash of Block_hash.t
-  | Export_info of History_mode.t * Block_hash.t * Int32.t
+  | Export_info of History_mode.Legacy.t * Block_hash.t * Int32.t
   | Export_success of string
-  | Set_history_mode of History_mode.t
+  | Set_history_mode of History_mode.Legacy.t
   | Import_info of string
   | Import_unspecified_hash
   | Import_loading
@@ -51,7 +51,7 @@ let status_pp ppf = function
       Format.fprintf
         ppf
         "Exporting a snapshot in %a mode, targeting block hash %a at level %a"
-        History_mode.pp
+        History_mode.Legacy.pp
         hm
         Block_hash.pp
         h
@@ -60,7 +60,7 @@ let status_pp ppf = function
   | Export_success filename ->
       Format.fprintf ppf "@[Successful export: %s@]" filename
   | Set_history_mode hm ->
-      Format.fprintf ppf "Setting history-mode to %a" History_mode.pp hm
+      Format.fprintf ppf "Setting history-mode to %a" History_mode.Legacy.pp hm
   | Import_info filename ->
       Format.fprintf ppf "Importing data from snapshot file %s" filename
   | Import_unspecified_hash ->
@@ -109,7 +109,7 @@ module Definition = struct
              (Tag 1)
              ~title:"Export_info"
              (obj3
-                (req "history_mode" History_mode.encoding)
+                (req "history_mode" History_mode.Legacy.encoding)
                 (req "block_hash" Block_hash.encoding)
                 (req "level" int32))
              (function Export_info (hm, h, l) -> Some (hm, h, l) | _ -> None)
@@ -123,7 +123,7 @@ module Definition = struct
            case
              (Tag 3)
              ~title:"Set_history_mode"
-             History_mode.encoding
+             History_mode.Legacy.encoding
              (function Set_history_mode hm -> Some hm | _ -> None)
              (fun hm -> Set_history_mode hm);
            case
@@ -221,7 +221,8 @@ let lwt_emit (status : status) =
         pp_print_error
         el
 
-type error += Wrong_snapshot_export of History_mode.t * History_mode.t
+type error +=
+  | Wrong_snapshot_export of History_mode.Legacy.t * History_mode.Legacy.t
 
 type wrong_block_export_kind =
   | Pruned of Block_hash.t
@@ -274,7 +275,7 @@ type error +=
   | Inconsistent_operation_hashes of
       (Operation_list_list_hash.t * Operation_list_list_hash.t)
 
-type error += Cannot_reconstruct of History_mode.t
+type error += Cannot_reconstruct of History_mode.Legacy.t
 
 type error += Invalid_block_specification of string
 
@@ -290,11 +291,13 @@ let () =
       Format.fprintf
         ppf
         "Cannot export a %a snapshot from a %a node."
-        History_mode.pp
+        History_mode.Legacy.pp
         dst
-        History_mode.pp
+        History_mode.Legacy.pp
         src)
-    (obj2 (req "src" History_mode.encoding) (req "dst" History_mode.encoding))
+    (obj2
+       (req "src" History_mode.Legacy.encoding)
+       (req "dst" History_mode.Legacy.encoding))
     (function
       | Wrong_snapshot_export (src, dst) -> Some (src, dst) | _ -> None)
     (fun (src, dst) -> Wrong_snapshot_export (src, dst)) ;
@@ -390,9 +393,9 @@ let () =
       Format.fprintf
         ppf
         "Cannot reconstruct storage from %a mode."
-        History_mode.pp
+        History_mode.Legacy.pp
         hm)
-    (obj1 (req "history_mode " History_mode.encoding))
+    (obj1 (req "history_mode " History_mode.Legacy.encoding))
     (function Cannot_reconstruct hm -> Some hm | _ -> None)
     (fun hm -> Cannot_reconstruct hm) ;
   register_error_kind
@@ -495,7 +498,9 @@ let export ?(export_rolling = false) ~context_root ~store_root ~genesis
       return_unit
   | Rolling as history_mode ->
       if export_rolling then return_unit
-      else fail (Wrong_snapshot_export (history_mode, History_mode.Full)) )
+      else
+        fail (Wrong_snapshot_export (history_mode, History_mode.Legacy.Full))
+  )
   >>=? fun () ->
   parse_block_arg block
   >>=? (function
@@ -527,7 +532,7 @@ let export ?(export_rolling = false) ~context_root ~store_root ~genesis
                  (Unknown_block (Block_hash.to_b58check block_hash)))
         | Some block_header ->
             let export_mode =
-              if export_rolling then History_mode.Rolling else Full
+              if export_rolling then History_mode.Legacy.Rolling else Full
             in
             lwt_emit
               (Export_info (export_mode, block_hash, block_header.shell.level))
@@ -856,7 +861,7 @@ let reconstruct_storage store context_index chain_id ~user_activated_upgrades
     >>=? fun level ->
     if level = limit then return_unit else reconstruct_chunks limit
   in
-  set_history_mode store History_mode.Archive
+  set_history_mode store History_mode.Legacy.Archive
   >>=? fun () ->
   reconstruct_chunks 0
   >>=? fun _cpt ->
@@ -878,7 +883,7 @@ let reconstruct chain_id ~user_activated_upgrades
   Store.Configuration.History_mode.read store
   >>=? fun history_mode ->
   fail_unless
-    (history_mode = History_mode.Full)
+    (history_mode = History_mode.Legacy.Full)
     (Cannot_reconstruct history_mode)
   >>=? fun () ->
   let low_limit = 1l in
@@ -1118,7 +1123,7 @@ let import ?(reconstruct = false) ?patch_context ~data_dir
       >>=? fun () ->
       ( match reconstruct with
       | true ->
-          if history_mode = History_mode.Full then
+          if history_mode = History_mode.Legacy.Full then
             reconstruct_storage
               store
               context_index

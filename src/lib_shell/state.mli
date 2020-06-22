@@ -106,11 +106,11 @@ module Chain : sig
       invalid (when `level > checkpoint`). *)
   val set_checkpoint : chain_state -> Block_header.t -> unit Lwt.t
 
-  (** Apply [set_checkpoint] then [purge_full] (see {!History_mode.t}). *)
+  (** Apply [set_checkpoint] then [purge_full] (see {!History_mode.Legacy.t}). *)
   val set_checkpoint_then_purge_full :
     chain_state -> Block_header.t -> unit tzresult Lwt.t
 
-  (** Apply [set_checkpoint] then [purge_rolling] (see {!History_mode.t}). *)
+  (** Apply [set_checkpoint] then [purge_rolling] (see {!History_mode.Legacy.t}). *)
   val set_checkpoint_then_purge_rolling :
     chain_state -> Block_header.t -> unit tzresult Lwt.t
 
@@ -388,11 +388,11 @@ end
 
 type error +=
   | Incorrect_history_mode_switch of {
-      previous_mode : History_mode.t;
-      next_mode : History_mode.t;
+      previous_mode : History_mode.Legacy.t;
+      next_mode : History_mode.Legacy.t;
     }
 
-val history_mode : global_state -> History_mode.t Lwt.t
+val history_mode : global_state -> History_mode.Legacy.t Lwt.t
 
 (** Read the internal state of the node and initialize
     the databases. *)
@@ -403,9 +403,10 @@ val init :
   ?context_mapsize:int64 ->
   store_root:string ->
   context_root:string ->
-  ?history_mode:History_mode.t ->
+  ?history_mode:History_mode.Legacy.t ->
   ?readonly:bool ->
   Genesis.t ->
-  (global_state * Chain.t * Context.index * History_mode.t) tzresult Lwt.t
+  (global_state * Chain.t * Context.index * History_mode.Legacy.t) tzresult
+  Lwt.t
 
 val close : global_state -> unit Lwt.t
