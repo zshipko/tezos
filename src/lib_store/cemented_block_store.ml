@@ -603,16 +603,21 @@ let trigger_gc cemented_store = function
         let cemented_files =
           Array.to_list cemented_store.cemented_blocks_files
         in
-        let file_to_prune = List.nth cemented_files (nb_files - 1 - offset) in
-        (* Remove the corresponding metadata files *)
-        let metadata_file =
-          Naming.(
-            cemented_store.cemented_blocks_metadata_dir
-            // cemented_metadata_file ~cemented_filename:file_to_prune.filename)
+        let (files_to_remove, _files_to_keep) =
+          List.split_n (nb_files - offset) cemented_files
         in
-        Lwt.catch
-          (fun () -> Lwt_unix.unlink metadata_file)
-          (fun _exn -> Lwt.return_unit)
+        (* Remove the rest of the files to prune *)
+        Lwt_list.iter_s
+          (fun {filename; _} ->
+            let metadata_file =
+              Naming.(
+                cemented_store.cemented_blocks_metadata_dir
+                // cemented_metadata_file ~cemented_filename:filename)
+            in
+            Lwt.catch
+              (fun () -> Lwt_unix.unlink metadata_file)
+              (fun _exn -> Lwt.return_unit))
+          files_to_remove
   | Rolling {offset} ->
       let nb_files = Array.length cemented_store.cemented_blocks_files in
       if nb_files <= offset then Lwt.return_unit
