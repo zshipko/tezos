@@ -23,31 +23,6 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-open Tezos_protocol_environment
-open Context
-
-let ( >>= ) = Lwt.( >>= )
-
-type _ Context.kind += Shell : Tezos_context.Context.t Context.kind
-
-let ops = (module Tezos_context.Context : CONTEXT with type t = 'ctxt)
-
-let checkout index context_hash =
-  Tezos_context.Context.checkout index context_hash
-  >>= function
-  | Some ctxt ->
-      Lwt.return_some (Context.Context {ops; ctxt; kind = Shell})
-  | None ->
-      Lwt.return_none
-
-let checkout_exn index context_hash =
-  Tezos_context.Context.checkout_exn index context_hash
-  >>= fun ctxt -> Lwt.return (Context.Context {ops; ctxt; kind = Shell})
-
-let wrap_disk_context ctxt = Context.Context {ops; ctxt; kind = Shell}
-
-let unwrap_disk_context : t -> Tezos_context.Context.t = function
-  | Context.Context {ctxt; kind = Shell; _} ->
-      ctxt
-  | _ ->
-      assert false
+let () =
+  Lwt_main.run
+    (Alcotest_lwt.run "tezos-storage" [("context", Test_context.tests)])

@@ -21,7 +21,7 @@
  (public_name tezos-shell-context)
  (libraries tezos-base
             tezos-protocol-environment
-            tezos-storage)
+            tezos-context)
  (modules Shell_context))
 
 (alias

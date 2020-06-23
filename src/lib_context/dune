@@ -1,9 +1,8 @@
 (library
- (name tezos_storage)
- (public_name tezos-storage)
+ (name tezos_context)
+ (public_name tezos-context)
  (libraries tezos-base
             tezos-shell-services
-            tezos-lmdb
             logs.fmt
             digestif.c
             irmin

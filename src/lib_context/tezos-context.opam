@@ -9,13 +9,15 @@ depends: [
   "tezos-tooling" { with-test }
   "dune" { >= "1.11" }
   "tezos-base"
-  "tezos-context"
-  "tezos-shell-context"
+  "irmin" { >= "2.2.0" }
+  "irmin-pack"
+  "digestif" {>= "0.7.3"}
   "tezos-shell-services"
-  "tezos-protocol-updater"
+  "tezos-stdlib-unix"
+  "alcotest-lwt" { with-test & >= "1.1.0" }
 ]
 build: [
   ["dune" "build" "-p" name "-j" jobs]
   ["dune" "runtest" "-p" name "-j" jobs] {with-test}
 ]
-synopsis: "Tezos: library for blocks validation"
+synopsis: "Tezos: on-disk context abstraction for `tezos-node`"
