@@ -287,7 +287,7 @@ let run input output =
                        pred_context_hash))
           >>=? (fun predecessor_context ->
                  Context.get_protocol predecessor_context
-                 >>= fun protocol_hash ->
+                 >>=? fun protocol_hash ->
                  load_protocol protocol_hash protocol_root
                  >>=? fun () ->
                  let env =

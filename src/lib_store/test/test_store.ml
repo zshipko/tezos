@@ -62,7 +62,7 @@ let rec compare_path is_eq p1 p2 =
   | _ ->
       false
 
-let vblock tbl k = Hashtbl.find tbl k
+let vblock tbl k = Option.get @@ Nametbl.find tbl k
 
 let pp_print_list fmt l =
   Format.fprintf

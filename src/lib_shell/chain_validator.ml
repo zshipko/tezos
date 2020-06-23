@@ -41,9 +41,9 @@ end
 module Request = struct
   include Request
 
-  type _ t = Validated : State.Block.t -> Event.update t
+  type _ t = Validated : Store.Block.t -> Event.update t
 
-  let view (type a) (Validated block : a t) : view = State.Block.hash block
+  let view (type a) (Validated block : a t) : view = Store.Block.hash block
 end
 
 type synchronisation_limits = {latency : int; threshold : int}
@@ -60,11 +60,11 @@ module Types = struct
     parent : Name.t option;
     (* inherit bootstrap status from parent chain validator *)
     db : Distributed_db.t;
-    chain_state : State.Chain.t;
+    chain_store : Store.chain_store;
     chain_db : Distributed_db.chain_db;
     block_validator : Block_validator.t;
     block_validator_process : Block_validator_process.t;
-    global_valid_block_input : State.Block.t Lwt_watcher.input;
+    global_valid_block_input : Store.Block.t Lwt_watcher.input;
     global_chains_input : (Chain_id.t * bool) Lwt_watcher.input;
     prevalidator_limits : Prevalidator.limits;
     peer_validator_limits : Peer_validator.limits;
@@ -84,8 +84,8 @@ module Types = struct
     mutable bootstrapped : bool;
     bootstrapped_waiter : unit Lwt.t;
     bootstrapped_wakener : unit Lwt.u;
-    valid_block_input : State.Block.t Lwt_watcher.input;
-    new_head_input : State.Block.t Lwt_watcher.input;
+    valid_block_input : Store.Block.t Lwt_watcher.input;
+    new_head_input : Store.Block.t Lwt_watcher.input;
     mutable child : (state * (unit -> unit Lwt.t (* shutdown *))) option;
     mutable prevalidator : Prevalidator.t option;
     active_peers :
@@ -119,16 +119,20 @@ let shutdown w = Worker.shutdown w
 let shutdown_child nv active_chains =
   Lwt_utils.may
     ~f:
-      (fun ({parameters = {chain_state; global_chains_input; _}; _}, shutdown) ->
-      Lwt_watcher.notify global_chains_input (State.Chain.id chain_state, false) ;
-      Chain_id.Table.remove active_chains (State.Chain.id chain_state) ;
-      State.update_chain_data nv.parameters.chain_state (fun _ chain_data ->
-          Lwt.return (Some {chain_data with test_chain = None}, ()))
-      >>= fun () ->
-      shutdown ()
-      >>= fun () ->
-      nv.child <- None ;
-      Lwt.return_unit)
+      (fun ({parameters = {chain_store; global_chains_input; _}; _}, shutdown) ->
+      let test_chain_id = Store.Chain.chain_id chain_store in
+      Lwt_watcher.notify global_chains_input (test_chain_id, false) ;
+      Chain_id.Table.remove active_chains test_chain_id ;
+      Store.Chain.shutdown_testchain nv.parameters.chain_store
+      >>= function
+      | Error _err ->
+          (* FIXME *)
+          Lwt.return_unit
+      | Ok () ->
+          shutdown ()
+          >>= fun () ->
+          nv.child <- None ;
+          Lwt.return_unit)
     nv.child
 
 (* Update the synchronisation state and if it is relevant, set the
@@ -166,7 +170,7 @@ let update_synchronisation_state =
 let check_and_update_synchronisation_state w (block, peer_id) : unit Lwt.t =
   let nv = Worker.state w in
   let hash = Block_header.hash block in
-  State.Block.known_valid nv.parameters.chain_state hash
+  Store.Block.is_known_valid nv.parameters.chain_store hash
   >>= fun known_valid ->
   if known_valid then (
     update_synchronisation_state w (block, peer_id) ;
@@ -192,7 +196,7 @@ let notify_new_block w block =
 let notify_new_foreign_block w peer_id block =
   notify_new_block w block
   >>=? fun () ->
-  update_synchronisation_state w (State.Block.header block, peer_id) ;
+  update_synchronisation_state w (Store.Block.header block, peer_id) ;
   return_unit
 
 let with_activated_peer_validator w peer_id f =
@@ -215,143 +219,116 @@ let with_activated_peer_validator w peer_id f =
   | Worker_types.Launching _ ->
       return_unit
 
-let may_update_checkpoint chain_state new_head =
-  State.Chain.checkpoint chain_state
-  >>= fun checkpoint ->
-  State.Block.last_allowed_fork_level new_head
-  >>=? fun new_level ->
-  if new_level <= checkpoint.shell.level then return_unit
-  else
-    let state = State.Chain.global_state chain_state in
-    State.history_mode state
-    >>= fun history_mode ->
-    let head_level = State.Block.level new_head in
-    State.Block.predecessor_n
-      new_head
-      (Int32.to_int (Int32.sub head_level new_level))
-    >>= function
-    | None ->
-        assert false (* should not happen *)
-    | Some new_checkpoint -> (
-        State.Block.read_opt chain_state new_checkpoint
-        >>= function
-        | None ->
-            assert false (* should not happen *)
-        | Some new_checkpoint -> (
-            Chain_validator_event.(emit updated_to_checkpoint)
-              (State.Block.hash new_checkpoint, history_mode)
-            >>= fun () ->
-            let new_checkpoint = State.Block.header new_checkpoint in
-            match history_mode with
-            | History_mode.Legacy.Archive ->
-                State.Chain.set_checkpoint chain_state new_checkpoint
-                >>= fun () -> return_unit
-            | Full ->
-                State.Chain.set_checkpoint_then_purge_full
-                  chain_state
-                  new_checkpoint
-            | Rolling ->
-                State.Chain.set_checkpoint_then_purge_rolling
-                  chain_state
-                  new_checkpoint ) )
-
 let may_switch_test_chain w active_chains spawn_child block =
   let nv = Worker.state w in
-  let create_child block protocol expiration forking_block =
-    let block_header = State.Block.header block in
-    let genesis =
-      Context.compute_testchain_genesis (State.Block.hash forking_block)
-    in
-    let chain_id = Context.compute_testchain_chain_id genesis in
-    let activated =
-      match nv.child with
-      | None ->
-          false
-      | Some (child, _) ->
-          Block_hash.equal
-            (State.Chain.genesis child.parameters.chain_state).block
-            genesis
-    in
+  let may_create_child block test_protocol expiration forking_block_hash =
+    let block_header = Store.Block.header block in
+    let genesis_hash = Context.compute_testchain_genesis forking_block_hash in
+    let testchain_id = Context.compute_testchain_chain_id genesis_hash in
+    ( match nv.child with
+    | None ->
+        Lwt.return_false
+    | Some (child, _) ->
+        let child_chain_store = child.parameters.chain_store in
+        let child_genesis = Store.Chain.genesis child_chain_store in
+        Lwt.return (Block_hash.equal child_genesis.block forking_block_hash) )
+    >>= fun activated ->
     let expired = expiration < block_header.shell.timestamp in
     if expired && activated then
       shutdown_child nv active_chains >>= fun () -> return_unit
-    else if
-      activated || expired
-      || not (State.Chain.allow_forked_chain nv.parameters.chain_state)
-    then return_unit
     else
-      State.Chain.get_opt
-        (State.Chain.global_state nv.parameters.chain_state)
-        chain_id
-      >>= (function
-            | Some chain_state ->
-                State.update_testchain block ~testchain_state:chain_state
-                >>= fun () -> return chain_state
-            | None ->
-                let try_init_test_chain cont =
-                  let bvp = nv.parameters.block_validator_process in
-                  Block_validator_process.init_test_chain bvp forking_block
-                  >>= function
-                  | Ok genesis_header ->
-                      State.fork_testchain
-                        block
-                        chain_id
-                        genesis
-                        genesis_header
-                        protocol
-                        expiration
-                      >>=? fun chain_state ->
-                      Chain.head chain_state
-                      >>= fun new_genesis_block ->
-                      Lwt_watcher.notify
-                        nv.parameters.global_valid_block_input
-                        new_genesis_block ;
-                      Lwt_watcher.notify nv.valid_block_input new_genesis_block ;
-                      return chain_state
-                  | Error
-                      (Block_validator_errors.Missing_test_protocol
-                         missing_protocol
-                      :: _) ->
-                      Block_validator.fetch_and_compile_protocol
-                        nv.parameters.block_validator
-                        missing_protocol
-                      >>=? fun _ -> cont ()
-                  | Error _ as error ->
-                      Lwt.return error
-                in
-                try_init_test_chain
-                @@ fun () ->
-                try_init_test_chain
-                @@ fun () -> failwith "Could not retrieve test protocol")
-      >>=? fun chain_state ->
-      (* [spawn_child] is a callback to [create_node]. Thus, it takes care of
-         global initialization boilerplate (e.g. notifying [global_chains_input],
-         adding the chain to the correct tables, ...) *)
-      spawn_child
-        ~parent:(State.Chain.id chain_state)
-        nv.parameters.peer_validator_limits
-        nv.parameters.prevalidator_limits
-        nv.parameters.block_validator
-        nv.parameters.global_valid_block_input
-        nv.parameters.global_chains_input
-        nv.parameters.db
-        chain_state
-        nv.parameters.limits
-      (* TODO: different limits main/test ? *)
-      >>=? fun child ->
-      nv.child <- Some child ;
-      return_unit
+      let chain_store = nv.parameters.chain_store in
+      let allow_forked_chains =
+        Store.allow_testchains (Store.Chain.global_store chain_store)
+      in
+      if (not allow_forked_chains) || activated || expired then return_unit
+      else
+        let chain_store = nv.parameters.chain_store in
+        Store.Block.read_block_opt chain_store forking_block_hash
+        >>= function
+        | None ->
+            (* Forking block is not found => cannot start the testchain *)
+            return_unit
+        | Some forking_block ->
+            Store.get_chain_store_opt
+              (Store.Chain.global_store nv.parameters.chain_store)
+              testchain_id
+            >>= (function
+                  | Some test_chain_store ->
+                      return test_chain_store
+                  | None ->
+                      let try_init_test_chain cont =
+                        let bvp = nv.parameters.block_validator_process in
+                        Block_validator_process.init_test_chain
+                          bvp
+                          forking_block
+                        >>= function
+                        | Ok genesis_header ->
+                            Store.Chain.fork_testchain
+                              chain_store
+                              ~testchain_id
+                              ~forked_block:block
+                              ~genesis_hash
+                              ~genesis_header
+                              ~expiration
+                              ~test_protocol
+                            >>=? fun testchain ->
+                            let testchain_store =
+                              Store.Chain.testchain_store testchain
+                            in
+                            Store.Chain.current_head testchain_store
+                            >>= fun new_genesis_block ->
+                            Lwt_watcher.notify
+                              nv.parameters.global_valid_block_input
+                              new_genesis_block ;
+                            Lwt_watcher.notify
+                              nv.valid_block_input
+                              new_genesis_block ;
+                            return testchain_store
+                        | Error
+                            (Block_validator_errors.Missing_test_protocol
+                               missing_protocol
+                            :: _) ->
+                            Block_validator.fetch_and_compile_protocol
+                              nv.parameters.block_validator
+                              missing_protocol
+                            >>=? fun _ -> cont ()
+                        | Error _ as error ->
+                            Lwt.return error
+                      in
+                      try_init_test_chain
+                      @@ fun () ->
+                      try_init_test_chain
+                      @@ fun () -> failwith "Could not retrieve test protocol")
+            >>=? fun chain_store ->
+            (* [spawn_child] is a callback to [create_node]. Thus, it takes care of
+               global initialization boilerplate (e.g. notifying [global_chains_input],
+               adding the chain to the correct tables, ...) *)
+            spawn_child
+              ~parent:(Store.Chain.chain_id chain_store)
+              nv.parameters.peer_validator_limits
+              nv.parameters.prevalidator_limits
+              nv.parameters.block_validator
+              nv.parameters.global_valid_block_input
+              nv.parameters.global_chains_input
+              nv.parameters.db
+              chain_store
+              nv.parameters.limits
+            (* TODO: different limits main/test ? *)
+            >>=? fun child ->
+            nv.child <- Some child ;
+            return_unit
   in
-  State.Block.test_chain block
-  >>= (function
-        | (Not_running, _) ->
-            shutdown_child nv active_chains >>= fun () -> return_unit
-        | ((Forking _ | Running _), None) ->
-            return_unit (* only for snapshots *)
-        | ( ( Forking {protocol; expiration; _}
-            | Running {protocol; expiration; _} ),
-            Some forking_block ) ->
-            create_child block protocol expiration forking_block)
+  Store.Block.testchain_status nv.parameters.chain_store block
+  >>=? (function
+         | (Not_running, _) ->
+             shutdown_child nv active_chains >>= fun () -> return_unit
+         | ((Forking _ | Running _), None) ->
+             return_unit (* only for snapshots *)
+         | ( ( Forking {protocol; expiration; _}
+             | Running {protocol; expiration; _} ),
+             Some forking_block_hash ) ->
+             may_create_child block protocol expiration forking_block_hash)
   >>= function
   | Ok () ->
       Lwt.return_unit
@@ -363,12 +340,12 @@ let broadcast_head w ~previous block =
   let nv = Worker.state w in
   if not nv.bootstrapped then Lwt.return_unit
   else
-    State.Block.predecessor block
+    Store.Block.read_predecessor_opt nv.parameters.chain_store block
     >>= (function
           | None ->
               Lwt.return_true
           | Some predecessor ->
-              Lwt.return (State.Block.equal predecessor previous))
+              Lwt.return (Store.Block.equal predecessor previous))
     >>= fun successor ->
     if successor then (
       Distributed_db.Advertise.current_head nv.parameters.chain_db block ;
@@ -399,12 +376,13 @@ let on_request (type a) w start_testchain active_chains spawn_child
     (req : a Request.t) : a tzresult Lwt.t =
   let (Request.Validated block) = req in
   let nv = Worker.state w in
-  Chain.head nv.parameters.chain_state
+  let chain_store = nv.parameters.chain_store in
+  Store.Chain.current_head chain_store
   >>= fun head ->
-  let head_header = State.Block.header head
-  and head_hash = State.Block.hash head
-  and block_header = State.Block.header block
-  and block_hash = State.Block.hash block in
+  let head_header = Store.Block.header head
+  and head_hash = Store.Block.hash head
+  and block_header = Store.Block.header block
+  and block_hash = Store.Block.hash block in
   ( match nv.prevalidator with
   | None ->
       Lwt.return head_header.shell.fitness
@@ -420,15 +398,13 @@ let on_request (type a) w start_testchain active_chains spawn_child
   in
   if not accepted_head then return Event.Ignored_head
   else
-    Chain.set_head nv.parameters.chain_state block
+    Store.Chain.set_head chain_store block
     >>=? fun previous ->
-    may_update_checkpoint nv.parameters.chain_state block
-    >>=? fun () ->
     broadcast_head w ~previous block
     >>= fun () ->
     ( match nv.prevalidator with
     | Some old_prevalidator ->
-        State.Block.protocol_hash block
+        Store.Block.protocol_hash nv.parameters.chain_store block
         >>=? fun new_protocol ->
         let old_protocol = Prevalidator.protocol_hash old_prevalidator in
         if not (Protocol_hash.equal old_protocol new_protocol) then (
@@ -464,10 +440,10 @@ let on_request (type a) w start_testchain active_chains spawn_child
 
 let on_completion (type a) w (req : a Request.t) (update : a) request_status =
   let (Request.Validated block) = req in
-  let fitness = State.Block.fitness block in
-  let request = State.Block.hash block in
-  let level = State.Block.level block in
-  let timestamp = State.Block.timestamp block in
+  let fitness = Store.Block.fitness block in
+  let request = Store.Block.hash block in
+  let level = Store.Block.level block in
+  let timestamp = Store.Block.timestamp block in
   Worker.record_event
     w
     (Processed_block
@@ -495,11 +471,9 @@ let on_close w =
 
 let on_launch start_prevalidator w _ parameters =
   ( if start_prevalidator then
-    State.read_chain_data
-      parameters.chain_state
-      (fun _ {State.current_head; _} -> Lwt.return current_head)
-    >>= fun head ->
-    State.Block.protocol_hash head
+    Store.Chain.current_head parameters.chain_store
+    >>= fun current_head ->
+    Store.Block.protocol_hash parameters.chain_store current_head
     >>=? fun head_hash ->
     safe_get_prevalidator_filter head_hash
     >>= function
@@ -624,7 +598,7 @@ let on_launch start_prevalidator w _ parameters =
 
 let rec create ~start_prevalidator ~start_testchain ~active_chains ?parent
     ~block_validator_process peer_validator_limits prevalidator_limits
-    block_validator global_valid_block_input global_chains_input db chain_state
+    block_validator global_valid_block_input global_chains_input db chain_store
     limits =
   let spawn_child ~parent pvl pl bl gvbi gci db n l =
     create
@@ -668,22 +642,22 @@ let rec create ~start_prevalidator ~start_testchain ~active_chains ?parent
       global_valid_block_input;
       global_chains_input;
       db;
-      chain_db = Distributed_db.activate db chain_state;
-      chain_state;
+      chain_db = Distributed_db.activate db chain_store;
+      chain_store;
       limits;
     }
   in
-  Chain.init_head chain_state
-  >>=? fun () ->
   Worker.launch
     table
     prevalidator_limits.worker_limits
-    (State.Chain.id chain_state)
+    (Store.Chain.chain_id chain_store)
     parameters
     (module Handlers)
   >>=? fun w ->
-  Chain_id.Table.add active_chains (State.Chain.id chain_state) w ;
-  Lwt_watcher.notify global_chains_input (State.Chain.id chain_state, true) ;
+  Chain_id.Table.add active_chains (Store.Chain.chain_id chain_store) w ;
+  Lwt_watcher.notify
+    global_chains_input
+    (Store.Chain.chain_id chain_store, true) ;
   return w
 
 (** Current block computation *)
@@ -708,12 +682,12 @@ let create ~start_prevalidator ~start_testchain ~active_chains
     limits
 
 let chain_id w =
-  let {parameters = {chain_state; _}; _} = Worker.state w in
-  State.Chain.id chain_state
+  let {parameters = {chain_store; _}; _} = Worker.state w in
+  Store.Chain.chain_id chain_store
 
-let chain_state w =
-  let {parameters = {chain_state; _}; _} = Worker.state w in
-  chain_state
+let chain_store w =
+  let {parameters = {chain_store; _}; _} = Worker.state w in
+  chain_store
 
 let prevalidator w =
   let {prevalidator; _} = Worker.state w in
@@ -726,37 +700,36 @@ let chain_db w =
 let child w =
   Option.bind
     (Worker.state w).child
-    (fun ({parameters = {chain_state; _}; _}, _) ->
-      List.assoc_opt (State.Chain.id chain_state) (Worker.list table))
+    (fun ({parameters = {chain_store; _}; _}, _) ->
+      List.assoc_opt (Store.Chain.chain_id chain_store) (Worker.list table))
 
 let assert_fitness_increases ?(force = false) w distant_header =
   let pv = Worker.state w in
-  let chain_state = Distributed_db.chain_state pv.parameters.chain_db in
-  Chain.head chain_state
-  >>= fun local_header ->
+  let chain_store = Distributed_db.chain_store pv.parameters.chain_db in
+  Store.Chain.current_head chain_store
+  >>= fun current_head ->
   fail_when
     ( (not force)
     && Fitness.compare
          distant_header.Block_header.shell.fitness
-         (State.Block.fitness local_header)
+         (Store.Block.fitness current_head)
        <= 0 )
     (failure "Fitness too low")
 
-let assert_checkpoint w (header : Block_header.t) =
+let assert_checkpoint w ((hash, _) as block_descr) =
   let pv = Worker.state w in
-  let chain_state = Distributed_db.chain_state pv.parameters.chain_db in
-  State.Chain.acceptable_block chain_state header
+  let chain_store = Distributed_db.chain_store pv.parameters.chain_db in
+  Store.Chain.is_acceptable_block chain_store block_descr
   >>= fun acceptable ->
-  fail_unless
-    acceptable
-    (Validation_errors.Checkpoint_error (Block_header.hash header, None))
+  fail_unless acceptable (Validation_errors.Checkpoint_error (hash, None))
 
 let validate_block w ?force hash block operations =
   let nv = Worker.state w in
-  assert (Block_hash.equal hash (Block_header.hash block)) ;
+  let hash' = Block_header.hash block in
+  assert (Block_hash.equal hash hash') ;
   assert_fitness_increases ?force w block
   >>=? fun () ->
-  assert_checkpoint w block
+  assert_checkpoint w (hash, block.Block_header.shell.level)
   >>=? fun () ->
   Block_validator.validate
     ~canceler:(Worker.canceler w)

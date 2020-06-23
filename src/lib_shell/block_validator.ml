@@ -66,18 +66,19 @@ module Request = struct
   type 'a t =
     | Request_validation : {
         chain_db : Distributed_db.chain_db;
-        notify_new_block : State.Block.t -> unit tzresult;
+        notify_new_block : Store.Block.t -> unit tzresult Lwt.t;
         canceler : Lwt_canceler.t option;
         peer : P2p_peer.Id.t option;
         hash : Block_hash.t;
         header : Block_header.t;
         operations : Operation.t list list;
       }
-        -> State.Block.t option tzresult t
+        -> Store.Block.t option tzresult t
 
   let view : type a. a t -> view =
    fun (Request_validation {chain_db; peer; hash; _}) ->
-    let chain_id = chain_db |> Distributed_db.chain_state |> State.Chain.id in
+    let chain_store = Distributed_db.chain_store chain_db in
+    let chain_id = Store.Chain.chain_id chain_store in
     {chain_id; block = hash; peer}
 end
 
@@ -94,26 +95,26 @@ type t = Worker.infinite Worker.queue Worker.t
 let debug w = Format.kasprintf (fun msg -> Worker.record_event w (Debug msg))
 
 let check_chain_liveness chain_db hash (header : Block_header.t) =
-  let chain_state = Distributed_db.chain_state chain_db in
-  match State.Chain.expiration chain_state with
+  let chain_store = Distributed_db.chain_store chain_db in
+  match Store.Chain.expiration chain_store with
   | Some eol when Time.Protocol.(eol <= header.shell.timestamp) ->
       fail @@ invalid_block hash
       @@ Expired_chain
            {
-             chain_id = State.Chain.id chain_state;
+             chain_id = Store.Chain.chain_id chain_store;
              expiration = eol;
              timestamp = header.shell.timestamp;
            }
   | None | Some _ ->
       return_unit
 
-let should_validate_block w chain_state hash =
-  State.Block.read_opt chain_state hash
+let should_validate_block w chain_store hash =
+  Store.Block.read_block_opt chain_store hash
   >>= function
   | None ->
       Lwt.return_none
   | Some block ->
-      State.Block.context_exists block
+      Store.Block.context_exists chain_store block
       >>= fun context_exists ->
       if not context_exists then
         debug w "could not find context for block %a" Block_hash.pp_short hash ;
@@ -125,8 +126,8 @@ let on_request : type r. t -> r Request.t -> r tzresult Lwt.t =
      (Request.Request_validation
        {chain_db; notify_new_block; canceler; peer; hash; header; operations}) ->
   let bv = Worker.state w in
-  let chain_state = Distributed_db.chain_state chain_db in
-  should_validate_block w chain_state hash
+  let chain_store = Distributed_db.chain_store chain_db in
+  should_validate_block w chain_store hash
   >>= function
   | Some (block, false) ->
       debug
@@ -141,24 +142,25 @@ let on_request : type r. t -> r Request.t -> r tzresult Lwt.t =
         block ;
       return (Ok None)
   | Some (_, true) | None -> (
-      State.Block.read_invalid chain_state hash
+      Store.Block.read_invalid_block_opt chain_store hash
       >>= function
       | Some {errors; _} ->
           return (Error errors)
       | None -> (
-          State.Chain.save_point chain_state
-          >>= fun (save_point_lvl, _) ->
+          Store.Chain.savepoint chain_store
+          >>= fun (_, save_point_lvl) ->
           (* Safety and late workers in partial mode. *)
           if Compare.Int32.(header.shell.level < save_point_lvl) then
             return (Ok None)
           else
             ( debug w "validating block %a" Block_hash.pp_short hash ;
-              State.Block.read chain_state header.shell.predecessor
+              Store.Block.read_block chain_store header.shell.predecessor
               >>=? fun pred ->
               Worker.protect w (fun () ->
                   protect ?canceler (fun () ->
                       Block_validator_process.apply_block
                         bv.validation_process
+                        chain_store
                         ~predecessor:pred
                         header
                         operations
@@ -174,35 +176,19 @@ let on_request : type r. t -> r Request.t -> r tzresult Lwt.t =
                           >>=? fun _ ->
                           Block_validator_process.apply_block
                             bv.validation_process
+                            chain_store
                             ~predecessor:pred
                             header
                             operations
                       | Error _ as x ->
                           Lwt.return x)
-                  >>=? fun { validation_store;
-                             block_metadata;
-                             ops_metadata;
-                             forking_testchain } ->
-                  let validation_store =
-                    ( {
-                        context_hash = validation_store.context_hash;
-                        message = validation_store.message;
-                        max_operations_ttl =
-                          validation_store.max_operations_ttl;
-                        last_allowed_fork_level =
-                          validation_store.last_allowed_fork_level;
-                      }
-                      : Block_validation.validation_store )
-                  in
+                  >>=? fun result ->
                   Distributed_db.commit_block
                     chain_db
                     hash
                     header
-                    block_metadata
                     operations
-                    ops_metadata
-                    validation_store
-                    ~forking_testchain
+                    result
                   >>=? function
                   | None ->
                       (* This case can be reached if the block was
@@ -210,7 +196,7 @@ let on_request : type r. t -> r Request.t -> r tzresult Lwt.t =
                          context has not been written on disk and
                          therefore it means that it already exists in
                          the store. *)
-                      State.Block.read chain_state hash
+                      Store.Block.read_block chain_store hash
                   | Some block ->
                       return block) )
             >>= function
@@ -226,16 +212,14 @@ let on_request : type r. t -> r Request.t -> r tzresult Lwt.t =
                   List.exists
                     (function Invalid_block _ -> true | _ -> false)
                     err
-                then (
+                then
                   Worker.protect w (fun () ->
                       Distributed_db.commit_invalid_block
                         chain_db
                         hash
                         header
                         err)
-                  >>=? fun committed ->
-                  assert committed ;
-                  return error )
+                  >>=? fun () -> return error
                 else (
                   debug
                     w
@@ -305,8 +289,8 @@ let shutdown = Worker.shutdown
 let validate w ?canceler ?peer ?(notify_new_block = fun _ -> return_unit)
     chain_db hash (header : Block_header.t) operations =
   let bv = Worker.state w in
-  let chain_state = Distributed_db.chain_state chain_db in
-  should_validate_block w chain_state hash
+  let chain_store = Distributed_db.chain_store chain_db in
+  should_validate_block w chain_store hash
   >>= function
   | Some (block, false) ->
       debug

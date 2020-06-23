@@ -9,9 +9,12 @@ depends: [
   "tezos-tooling" { with-test }
   "dune" { >= "1.11" }
   "tezos-base"
+  "tezos-context"
   "tezos-lmdb"
+  "tezos-validation"
   "tezos-shell-services"
   "tezos-stdlib-unix"
+  "lwt-watcher"
   "alcotest-lwt" { with-test & >= "1.1.0" }
 ]
 build: [

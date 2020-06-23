@@ -883,7 +883,7 @@ let forge_block cctxt ?force ?operations ?(best_effort = operations = None)
         Shell_context.unwrap_disk_context validation_result.context
       in
       Context.get_protocol context
-      >>= fun next_protocol ->
+      >>=? fun next_protocol ->
       if Protocol_hash.equal current_protocol next_protocol then
         finalize_block_header
           final_context.header
@@ -1250,7 +1250,7 @@ let build_block cctxt ~user_activated_upgrades state seed_nonce_hash
               Shell_context.unwrap_disk_context validation_result.context
             in
             Context.get_protocol context
-            >>= fun next_protocol ->
+            >>=? fun next_protocol ->
             if Protocol_hash.equal current_protocol next_protocol then
               finalize_block_header
                 final_context.header

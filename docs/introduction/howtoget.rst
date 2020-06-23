@@ -197,7 +197,7 @@ Set up the development environment
 
 ::
 
-   sudo apt install -y rsync git m4 build-essential patch unzip wget pkg-config libgmp-dev libev-dev libhidapi-dev libffi-dev opam jq
+   sudo apt install -y rsync git m4 build-essential patch unzip wget pkg-config libgmp-dev libev-dev libhidapi-dev libffi-dev zlib1g-dev opam jq
    git clone https://gitlab.com/tezos/tezos.git
    cd tezos
    git checkout latest-release

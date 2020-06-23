@@ -23,8 +23,6 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-[@@@ocaml.warning "-30"]
-
 type t
 
 type config = {
@@ -63,7 +61,7 @@ val create :
   Block_validator.limits ->
   Prevalidator.limits ->
   Chain_validator.limits ->
-  History_mode.Legacy.t option ->
+  History_mode.t option ->
   t tzresult Lwt.t
 
 val shutdown : t -> unit Lwt.t

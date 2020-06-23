@@ -44,8 +44,9 @@ module type T = sig
       predecessor block . When ?protocol_data is passed to this function, it will
       be used to create the new block *)
   val create :
+    Store.chain_store ->
     ?protocol_data:Bytes.t ->
-    predecessor:State.Block.t ->
+    predecessor:Store.Block.t ->
     timestamp:Time.Protocol.t ->
     unit ->
     t tzresult Lwt.t
@@ -119,7 +120,7 @@ struct
       {shell = op1.raw.shell; protocol_data = op1.protocol_data}
       {shell = op2.raw.shell; protocol_data = op2.protocol_data}
 
-  let create ?protocol_data ~predecessor ~timestamp () =
+  let create chain_store ?protocol_data ~predecessor ~timestamp () =
     (* The prevalidation module receives input from the system byt handles
        protocol values. It translates timestamps here. *)
     let { Block_header.shell =
@@ -128,15 +129,13 @@ struct
               level = predecessor_level;
               _ };
           _ } =
-      State.Block.header predecessor
+      Store.Block.header predecessor
     in
-    State.Block.context predecessor
+    Store.Block.context chain_store predecessor
     >>=? fun predecessor_context ->
-    let predecessor_header = State.Block.header predecessor in
-    let predecessor_hash = State.Block.hash predecessor in
-    State.Block.max_operations_ttl predecessor
-    >>=? fun max_op_ttl ->
-    Chain_traversal.live_blocks predecessor max_op_ttl
+    let predecessor_header = Store.Block.header predecessor in
+    let predecessor_hash = Store.Block.hash predecessor in
+    Store.Chain.compute_live_blocks chain_store ~block:predecessor
     >>=? fun (live_blocks, live_operations) ->
     Block_validation.update_testchain_status
       predecessor_context
@@ -161,7 +160,7 @@ struct
       Shell_context.wrap_disk_context predecessor_context
     in
     Proto.begin_construction
-      ~chain_id:(State.Block.chain_id predecessor)
+      ~chain_id:(Store.Chain.chain_id chain_store)
       ~predecessor_context
       ~predecessor_timestamp
       ~predecessor_fitness
@@ -244,12 +243,13 @@ struct
         pp_print_string ppf "outdated"
 end
 
-let preapply ~user_activated_upgrades ~user_activated_protocol_overrides
-    ~predecessor ~timestamp ~protocol_data operations =
-  State.Block.context predecessor
+let preapply chain_store ~user_activated_upgrades
+    ~user_activated_protocol_overrides ~predecessor ~timestamp ~protocol_data
+    operations =
+  Store.Block.context chain_store predecessor
   >>=? fun predecessor_context ->
   Context.get_protocol predecessor_context
-  >>= fun protocol ->
+  >>=? fun protocol ->
   ( match Registered_protocol.get protocol with
   | None ->
       (* FIXME. *)
@@ -287,7 +287,7 @@ let preapply ~user_activated_upgrades ~user_activated_protocol_overrides
     | Duplicate | Outdated ->
         Lwt.return (preapp, t)
   in
-  Prevalidation.create ~protocol_data ~predecessor ~timestamp ()
+  Prevalidation.create chain_store ~protocol_data ~predecessor ~timestamp ()
   >>=? fun validation_state ->
   Lwt_list.fold_left_s
     (fun ( acc_validation_passes,
@@ -333,7 +333,7 @@ let preapply ~user_activated_upgrades ~user_activated_protocol_overrides
   in
   Prevalidation.status validation_state
   >>=? fun {block_result; _} ->
-  let pred_shell_header = State.Block.shell_header predecessor in
+  let pred_shell_header = Store.Block.shell_header predecessor in
   let level = Int32.succ pred_shell_header.level in
   Block_validation.may_patch_protocol
     ~user_activated_upgrades
@@ -341,10 +341,10 @@ let preapply ~user_activated_upgrades ~user_activated_protocol_overrides
     ~level
     block_result
   >>= fun {fitness; context; message; _} ->
-  State.Block.protocol_hash predecessor
+  Store.Block.protocol_hash chain_store predecessor
   >>=? fun pred_protocol ->
   let context = Shell_context.unwrap_disk_context context in
-  Context.get_protocol context
+  Context.get_protocol_exn context
   >>= fun protocol ->
   let proto_level =
     if Protocol_hash.equal protocol pred_protocol then
@@ -355,7 +355,7 @@ let preapply ~user_activated_upgrades ~user_activated_protocol_overrides
     {
       level;
       proto_level;
-      predecessor = State.Block.hash predecessor;
+      predecessor = Store.Block.hash predecessor;
       timestamp;
       validation_passes;
       operations_hash;
@@ -369,7 +369,7 @@ let preapply ~user_activated_upgrades ~user_activated_protocol_overrides
     | None ->
         fail
           (Block_validator_errors.Unavailable_protocol
-             {block = State.Block.hash predecessor; protocol})
+             {block = Store.Block.hash predecessor; protocol})
     | Some (module NewProto) ->
         let context = Shell_context.wrap_disk_context context in
         NewProto.init context shell_header

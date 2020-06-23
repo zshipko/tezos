@@ -530,6 +530,14 @@ module Example_tree = struct
 
    **********************************************************)
 
+  module Nametbl = Hashtbl.MakeSeeded (struct
+    type t = string
+
+    let hash = Hashtbl.seeded_hash
+
+    let equal = String.equal
+  end)
+
   let build_example_tree store =
     let chain_store = Store.main_chain_store store in
     let main_chain = List.map (fun i -> Format.sprintf "A%d" i) (1 -- 8) in
@@ -553,16 +561,16 @@ module Example_tree = struct
       branch
     >>= fun branch_blocks ->
     let branch_blocks = List.combine branch_chain branch_blocks in
-    let vtbl = Hashtbl.create 17 in
+    let vtbl = Nametbl.create 17 in
     Store.Chain.genesis_block chain_store
     >>= fun genesis ->
-    Hashtbl.add vtbl "Genesis" genesis ;
-    List.iter (fun (k, b) -> Hashtbl.add vtbl k b) (main_blocks @ branch_blocks) ;
+    Nametbl.add vtbl "Genesis" genesis ;
+    List.iter (fun (k, b) -> Nametbl.add vtbl k b) (main_blocks @ branch_blocks) ;
     assert_presence_in_store chain_store (blocks @ branch)
     >>=? fun () -> return vtbl
 
   let rev_lookup block_hash tbl =
-    Hashtbl.fold
+    Nametbl.fold
       (fun k b -> function None ->
             if Block_hash.equal block_hash (Store.Block.hash b) then Some k
             else None | x -> x)
@@ -570,7 +578,7 @@ module Example_tree = struct
       None
     |> Option.unopt_exn Not_found
 
-  let vblock tbl k = Hashtbl.find tbl k
+  let vblock tbl k = Nametbl.find tbl k
 
   let wrap_test ?keep_dir (name, g) =
     let f _ store =

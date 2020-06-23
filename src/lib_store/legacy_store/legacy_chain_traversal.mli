@@ -25,7 +25,7 @@
 
 (** Tezos Shell Module - Chain Traversal API *)
 
-open State
+open Legacy_state
 
 (** If [h1] is an ancestor of [h2] in the current [state],
     then [path state h1 h2] returns the chain of block from

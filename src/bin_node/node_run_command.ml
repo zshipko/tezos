@@ -169,6 +169,20 @@ module Event = struct
       ~msg:"bye"
       ~level:Notice
       ("exit_code", Data_encoding.int31)
+
+  let incorrect_history_mode =
+    declare_2
+      ~section
+      ~name:"incorrect_history_mode"
+      ~msg:
+        "The given history mode {given_history_mode} does not correspond to \
+         the stored history mode {stored_history_mode}. If you wish to force \
+         the switch, use the flag '--force_history_mode_switch'."
+      ~level:Error
+      ~pp1:History_mode.pp
+      ("given_history_mode", History_mode.encoding)
+      ~pp2:History_mode.pp
+      ("stored_history_mode", History_mode.encoding)
 end
 
 open Filename.Infix
@@ -190,7 +204,7 @@ let init_identity_file (config : Node_config_file.t) =
     >>= fun () -> return identity
 
 let init_node ?sandbox ?checkpoint ~identity ~singleprocess
-    (config : Node_config_file.t) =
+    ~force_history_mode_switch (config : Node_config_file.t) =
   (* TODO "WARN" when pow is below our expectation. *)
   ( match config.p2p.discovery_addr with
   | None ->
@@ -280,6 +294,16 @@ let init_node ?sandbox ?checkpoint ~identity ~singleprocess
       disable_mempool = config.p2p.disable_mempool;
     }
   in
+  ( match config.shell.history_mode with
+  | Some history_mode when force_history_mode_switch ->
+      Store.may_switch_history_mode
+        ~store_dir:node_config.store_root
+        ~context_dir:node_config.context_root
+        genesis
+        ~new_history_mode:history_mode
+  | _ ->
+      return_unit )
+  >>=? fun () ->
   Node.create
     ~sandboxed:(sandbox <> None)
     ?sandbox_parameters:(Option.map snd sandbox_param)
@@ -349,7 +373,7 @@ let init_rpc (rpc_config : Node_config_file.rpc) node =
     []
 
 let run ?verbosity ?sandbox ?checkpoint ~singleprocess
-    (config : Node_config_file.t) =
+    ~force_history_mode_switch (config : Node_config_file.t) =
   Node_data_version.ensure_data_dir config.data_dir
   >>=? fun () ->
   Lwt_lock_file.create
@@ -374,21 +398,22 @@ let run ?verbosity ?sandbox ?checkpoint ~singleprocess
   Updater.init (Node_data_version.protocol_dir config.data_dir) ;
   Event.(emit starting_node) config.blockchain_network.chain_name
   >>= fun () ->
-  init_node ?sandbox ?checkpoint ~identity ~singleprocess config
+  init_node
+    ?sandbox
+    ?checkpoint
+    ~identity
+    ~singleprocess
+    ~force_history_mode_switch
+    config
   >>= (function
         | Ok node ->
             return node
         | Error
-            (State.Incorrect_history_mode_switch {previous_mode; next_mode}
-            :: _) ->
-            failwith
-              "@[Cannot switch from history mode '%a' to '%a'. In order to \
-               change your history mode please refer to the Tezos node \
-               documentation. @]"
-              History_mode.Legacy.pp
-              previous_mode
-              History_mode.Legacy.pp
-              next_mode
+            (Store_errors.Incorrect_history_mode_switch
+               {previous_mode; next_mode}
+            :: _) as err ->
+            Event.(emit incorrect_history_mode) (previous_mode, next_mode)
+            >>= fun () -> Lwt.return err
         | Error _ as err ->
             Lwt.return err)
   >>=? fun node ->
@@ -417,7 +442,8 @@ let run ?verbosity ?sandbox ?checkpoint ~singleprocess
   in
   Lwt_utils.never_ending ()
 
-let process sandbox verbosity checkpoint singleprocess args =
+let process sandbox verbosity checkpoint singleprocess
+    force_history_mode_switch args =
   let verbosity =
     let open Internal_event in
     match verbosity with [] -> None | [_] -> Some Info | _ -> Some Debug
@@ -452,7 +478,14 @@ let process sandbox verbosity checkpoint singleprocess args =
     >>=? function
     | false ->
         Lwt.catch
-          (fun () -> run ?sandbox ?verbosity ?checkpoint ~singleprocess config)
+          (fun () ->
+            run
+              ?sandbox
+              ?verbosity
+              ?checkpoint
+              ~singleprocess
+              ~force_history_mode_switch
+              config)
           (function
             | Unix.Unix_error (Unix.EADDRINUSE, "bind", "") ->
                 Lwt_list.fold_right_s
@@ -538,11 +571,27 @@ module Term = struct
       value & flag
       & info ~docs:Node_shared_arg.Manpage.misc_section ~doc ["singleprocess"])
 
+  let force_history_mode_switch =
+    let open Cmdliner in
+    let doc =
+      Format.sprintf
+        "Forces the switch of history modes when a different history mode is \
+         found between the written configuration and the given history mode.  \
+         Warning: this option will modify the storage irremediably. Please \
+         refer to the Tezos node documentation for more details."
+    in
+    Arg.(
+      value & flag
+      & info
+          ~docs:Node_shared_arg.Manpage.misc_section
+          ~doc
+          ["force-history-mode-switch"])
+
   let term =
     Cmdliner.Term.(
       ret
         ( const process $ sandbox $ verbosity $ checkpoint $ singleprocess
-        $ Node_shared_arg.Term.args ))
+        $ force_history_mode_switch $ Node_shared_arg.Term.args ))
 end
 
 module Manpage = struct

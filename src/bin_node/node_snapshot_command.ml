@@ -24,7 +24,7 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-type error += Invalid_sandbox_file of string
+type error += Invalid_sandbox_file of string | Missing_file_to_import
 
 let () =
   register_error_kind
@@ -36,54 +36,103 @@ let () =
       Format.fprintf ppf "The file '%s' is not a valid JSON sandbox file" s)
     Data_encoding.(obj1 (req "sandbox_file" string))
     (function Invalid_sandbox_file s -> Some s | _ -> None)
-    (fun s -> Invalid_sandbox_file s)
+    (fun s -> Invalid_sandbox_file s) ;
+  register_error_kind
+    `Permanent
+    ~id:"main.snapshots.missing_file_to_import"
+    ~title:"Missing file to import"
+    ~description:"The snapshot file to import is missing"
+    ~pp:(fun ppf () ->
+      Format.fprintf ppf "Failed to import snapshot: missing file to import.")
+    Data_encoding.(empty)
+    (function Missing_file_to_import -> Some () | _ -> None)
+    (fun () -> Missing_file_to_import)
 
 (** Main *)
 
 module Event = struct
   include Internal_event.Simple
 
+  let section = ["node"; "main"]
+
   let cleaning_up_after_failure =
     Internal_event.Simple.declare_1
-      ~section:["node"; "main"]
+      ~section
       ~name:"cleaning_up_after_failure"
-      ~msg:"cleaning up after failure"
+      ~msg:"cleaning up directory \"{directory}\" after failure."
+      ~level:Internal_event.Notice
       ("directory", Data_encoding.string)
+
+  let export_unspecified_hash =
+    Internal_event.Simple.declare_0
+      ~section
+      ~name:"export_unspecified_hash"
+      ~msg:
+        "There is no block hash specified with the `--block` option. Using \
+         the last checkpoint as the default value"
+      ~level:Internal_event.Notice
+      ()
 end
 
 module Term = struct
-  type subcommand = Export | Import
+  type subcommand = Export | Import | Info
 
-  let dir_cleaner data_dir =
-    Event.(emit cleaning_up_after_failure) data_dir
-    >>= fun () ->
-    Lwt_utils_unix.remove_dir @@ Node_data_version.store_dir data_dir
-    >>= fun () ->
-    Lwt_utils_unix.remove_dir @@ Node_data_version.context_dir data_dir
-
-  let process subcommand args snapshot_file block export_rolling reconstruct
-      sandbox_file =
+  let process subcommand args snapshot_path block disable_check
+      disable_compress rolling reconstruct sandbox_file =
+    (* FIXME check snapshot format *)
     let run =
       Internal_event_unix.init ()
       >>= fun () ->
+      (* TODO FIXME *)
       Node_shared_arg.read_and_patch_config_file args
       >>=? fun node_config ->
       let data_dir = node_config.data_dir in
-      let genesis = node_config.blockchain_network.genesis in
+      let ({genesis; chain_name; _} : Node_config_file.blockchain_network) =
+        node_config.blockchain_network
+      in
       match subcommand with
       | Export ->
           Node_data_version.ensure_data_dir data_dir
           >>=? fun () ->
-          let context_root = Node_data_version.context_dir data_dir in
-          let store_root = Node_data_version.store_dir data_dir in
+          let context_dir = Node_data_version.context_dir data_dir in
+          let store_dir = Node_data_version.store_dir data_dir in
+          ( match block with
+          | None ->
+              Event.(emit export_unspecified_hash) ()
+              >>= fun () -> return (`Alias (`Checkpoint, 0))
+          | Some block -> (
+            match Block_services.parse_block block with
+            | Error err ->
+                failwith "%s: %s" block err
+            | Ok block ->
+                return block ) )
+          >>=? fun block ->
+          let compress = not disable_compress in
           Snapshots.export
-            ~export_rolling
-            ~context_root
-            ~store_root
-            ~genesis
-            snapshot_file
+            ?snapshot_file:snapshot_path
+            ~rolling
+            ~compress
+            ~store_dir
+            ~context_dir
+            ~chain_name
             ~block
+            genesis
       | Import ->
+          ( match snapshot_path with
+          | None ->
+              fail Missing_file_to_import
+          | Some x ->
+              return x )
+          >>=? fun snapshot_path ->
+          let dir_cleaner () =
+            Event.(emit cleaning_up_after_failure) data_dir
+            >>= fun () ->
+            Lwt_utils_unix.remove_dir (Node_data_version.store_dir data_dir)
+            >>= fun () ->
+            Lwt_utils_unix.remove_dir (Node_data_version.context_dir data_dir)
+          in
+          Node_config_file.write args.config_file node_config
+          >>=? fun () ->
           Node_data_version.ensure_data_dir ~bare:true data_dir
           >>=? fun () ->
           Lwt_lock_file.create
@@ -105,21 +154,66 @@ module Term = struct
               | Ok json ->
                   return_some ("sandbox_parameter", json) ) )
           >>=? fun sandbox_parameters ->
+          let context_root = Node_data_version.context_dir data_dir in
+          let store_root = Node_data_version.store_dir data_dir in
           let patch_context =
             Patch_context.patch_context genesis sandbox_parameters
           in
-          Snapshots.import
-            ~reconstruct
-            ~patch_context
-            ~data_dir
-            ~dir_cleaner
-            ~genesis
-            ~user_activated_upgrades:
-              node_config.blockchain_network.user_activated_upgrades
-            ~user_activated_protocol_overrides:
-              node_config.blockchain_network.user_activated_protocol_overrides
-            snapshot_file
-            ~block
+          protect
+            ~on_error:(fun err ->
+              dir_cleaner () >>= fun () -> Lwt.return (Error err))
+            (fun () ->
+              ( match block with
+              | Some s -> (
+                match Block_hash.of_b58check_opt s with
+                | Some bh ->
+                    return_some bh
+                | None ->
+                    failwith "%s is not a valid block identifier." s )
+              | None ->
+                  return_none )
+              >>=? fun block ->
+              let check_consistency = not disable_check in
+              Snapshots.import
+                ~patch_context
+                ?block
+                ~check_consistency
+                ~snapshot_file:snapshot_path
+                ~dst_store_dir:store_root
+                ~dst_context_dir:context_root
+                ~user_activated_upgrades:
+                  node_config.blockchain_network.user_activated_upgrades
+                ~user_activated_protocol_overrides:
+                  node_config.blockchain_network
+                    .user_activated_protocol_overrides
+                genesis)
+          >>=? fun () ->
+          if reconstruct then
+            Reconstruction.reconstruct
+              ~patch_context
+              ~store_dir:store_root
+              ~context_dir:context_root
+              genesis
+              ~user_activated_upgrades:
+                node_config.blockchain_network.user_activated_upgrades
+              ~user_activated_protocol_overrides:
+                node_config.blockchain_network
+                  .user_activated_protocol_overrides
+          else return_unit
+      | Info ->
+          ( match snapshot_path with
+          | None ->
+              fail Missing_file_to_import
+          | Some x ->
+              return x )
+          >>=? fun snapshot_path ->
+          Snapshots.read_snapshot_metadata ~snapshot_file:snapshot_path
+          >>=? fun metadata ->
+          Format.printf
+            "@[<v 2>Snapshot information:@ %a@]@."
+            Snapshots.pp_metadata
+            metadata ;
+          return_unit
     in
     match Lwt_main.run @@ Lwt_exit.wrap_and_exit run with
     | Ok () ->
@@ -127,12 +221,16 @@ module Term = struct
     | Error err ->
         `Error (false, Format.asprintf "%a" pp_print_error err)
 
+  open Cmdliner.Arg
+
   let subcommand_arg =
     let parser = function
       | "export" ->
           `Ok Export
       | "import" ->
           `Ok Import
+      | "info" ->
+          `Ok Info
       | s ->
           `Error ("invalid argument: " ^ s)
     and printer ppf = function
@@ -140,8 +238,9 @@ module Term = struct
           Format.fprintf ppf "export"
       | Import ->
           Format.fprintf ppf "import"
+      | Info ->
+          Format.fprintf ppf "info"
     in
-    let open Cmdliner.Arg in
     let doc =
       "Operation to perform. Possible values: $(b,export), $(b,import)."
     in
@@ -150,21 +249,45 @@ module Term = struct
     & info [] ~docv:"OPERATION" ~doc
 
   let file_arg =
-    let open Cmdliner.Arg in
-    required & pos 1 (some string) None & info [] ~docv:"FILE"
+    let doc =
+      "The name of the snapshot file to export. If no provided, it will be \
+       automatically generated using the target block and following patern: \
+       $(i,./<NETWORK>-<BLOCK_HASH>-<BLOCK_LEVEL>.<SNAPSHOT_KIND>). \
+       Otherwise, it must be given as a positionnal argument, just after the \
+       $(b,export) hint."
+    in
+    value & pos 1 (some string) None & info [] ~doc ~docv:"FILE"
 
   let block =
     let open Cmdliner.Arg in
     let doc =
       "The block to export/import. When exporting, either the block_hash, the \
        level or an alias (such as $(i,caboose), $(i,checkpoint), \
-       $(i,save_point) or $(i,head) in combination with ~ and + operators) \
-       can be used. When importing, only the block hash you are expected to \
+       $(i,savepoint) or $(i,head) in combination with ~ and + operators) can \
+       be used. When importing, only the block hash you are expected to \
        restore is allowed."
     in
     value
     & opt (some string) None
     & info ~docv:"<block_hash, level, alias>" ~doc ["block"]
+
+  let disable_check =
+    let open Cmdliner.Arg in
+    let doc =
+      "Setting this flag disable the consistency check after importing a \
+       full-mode snapshot. This improves performances but is strongly \
+       unrecommended as the snapshot could contain a corrupted chain."
+    in
+    value & flag & info ~doc ["no-check"]
+
+  let disable_compress =
+    let open Cmdliner.Arg in
+    let doc =
+      "Setting this flag disable the snapshot compression. This slightly \
+       speeds up of the export process but the snapshot will occupy more \
+       on-disk space."
+    in
+    value & flag & info ~doc ["no-compress"]
 
   let export_rolling =
     let open Cmdliner in
@@ -209,7 +332,8 @@ module Term = struct
     let open Cmdliner.Term in
     ret
       ( const process $ subcommand_arg $ Node_shared_arg.Term.args $ file_arg
-      $ block $ export_rolling $ reconstruct $ sandbox )
+      $ block $ disable_check $ disable_compress $ export_rolling $ reconstruct
+      $ sandbox )
 end
 
 module Manpage = struct
@@ -222,7 +346,8 @@ module Manpage = struct
       `P
         "$(b,export) allows to export a snapshot of the current node state \
          into a file.";
-      `P "$(b,import) allows to import a snapshot from a given file." ]
+      `P "$(b,import) allows to import a snapshot from a given file.";
+      `P "$(b,info) displays information about the snapshot file." ]
 
   let options = [`S "OPTIONS"]
 

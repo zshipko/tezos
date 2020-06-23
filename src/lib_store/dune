@@ -10,6 +10,7 @@
             tezos-legacy-store
             tezos-validation
             lwt-watcher
+            ringo-lwt
             camlzip)
  (flags (:standard -open Tezos_shell_services
                    -open Tezos_base

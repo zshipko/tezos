@@ -2,6 +2,7 @@
 (*                                                                           *)
 (* Open Source License                                                       *)
 (* Copyright (c) 2018 Dynamic Ledger Solutions, Inc. <contact@tezos.com>     *)
+(* Copyright (c) 2020 Nomadic Labs, <contact@nomadic-labs.com>               *)
 (*                                                                           *)
 (* Permission is hereby granted, free of charge, to any person obtaining a   *)
 (* copy of this software and associated documentation files (the "Software"),*)
@@ -22,6 +23,8 @@
 (* DEALINGS IN THE SOFTWARE.                                                 *)
 (*                                                                           *)
 (*****************************************************************************)
+
+(** Copy of legacy src/lib_shell/store.mli *)
 
 open Store_sigs
 
@@ -124,7 +127,7 @@ end
 (** {2 Block header store} *)
 
 module Block : sig
-  type store
+  type store = Chain.store
 
   val get : Chain.store -> store
 
@@ -141,11 +144,11 @@ module Block : sig
     SINGLE_STORE with type t = store * Block_hash.t and type value := contents
 
   (** Block header storage used for pruned blocks.
-      Blocks that are not pruned have their header
-      stored in their contents (see {!Store.Block.Contents}).
-      For an abstraction over a block header, please see
-      the {!State.Block.Header} module.
-  *)
+        Blocks that are not pruned have their header
+        stored in their contents (see {!Store.Block.Contents}).
+        For an abstraction over a block header, please see
+        the {!State.Block.Header} module.
+    *)
 
   type pruned_contents = {header : Block_header.t}
 
@@ -195,7 +198,7 @@ end
 (** {2 Protocol store} *)
 
 module Protocol : sig
-  type store
+  type store = global_store
 
   val get : global_store -> store
 

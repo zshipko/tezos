@@ -462,7 +462,7 @@ module Block = struct
         >>= fun protocol_levels ->
         let open Protocol_levels in
         let proto_level = Block_repr.proto_level block in
-        match find_opt proto_level protocol_levels with
+        match find proto_level protocol_levels with
         | Some {protocol; _} ->
             return protocol
         | None ->
@@ -490,7 +490,7 @@ module Block = struct
     Shared.use chain_state (fun {invalid_blocks; _} ->
         Stored_data.read invalid_blocks
         >>= fun invalid_blocks ->
-        Lwt.return (Block_hash.Map.find_opt hash invalid_blocks))
+        Lwt.return (Block_hash.Map.find hash invalid_blocks))
 
   let read_invalid_blocks {chain_state; _} =
     Shared.use chain_state (fun {invalid_blocks; _} ->
@@ -778,7 +778,7 @@ module Chain = struct
           let alternate_heads =
             Block_hash.Map.add prev_head_hash prev_head_level alternate_heads
           in
-          match Block_hash.Map.find_opt new_head_pred alternate_heads with
+          match Block_hash.Map.find new_head_pred alternate_heads with
           | None ->
               (* It's an orphan new head: mark the previous head as
                  alternate head *)
@@ -1654,7 +1654,7 @@ module Chain = struct
         Shared.use chain_store.chain_state (fun {forked_chains; _} ->
             Stored_data.read forked_chains
             >>= fun forked_chains ->
-            match Chain_id.Map.find_opt chain_id forked_chains with
+            match Chain_id.Map.find chain_id forked_chains with
             | None ->
                 return_none
             | Some forked_block ->
@@ -1796,7 +1796,7 @@ module Chain = struct
     Shared.use chain_store.chain_state (fun {protocol_levels; _} ->
         Stored_data.read protocol_levels
         >>= fun protocol_levels ->
-        Lwt.return (Protocol_levels.find_opt protocol_level protocol_levels))
+        Lwt.return (Protocol_levels.find protocol_level protocol_levels))
 
   let find_protocol chain_store ~protocol_level =
     find_activation_block chain_store ~protocol_level
@@ -1843,22 +1843,20 @@ module Chain = struct
         else Block.protocol_hash_exn chain_store pred )
         >>= fun protocol ->
         match
-          Protocol_hash.Table.find_opt
-            chain_store.block_rpc_directories
-            protocol
+          Protocol_hash.Table.find chain_store.block_rpc_directories protocol
         with
         | None ->
             Lwt.return_none
         | Some map ->
             Block.protocol_hash_exn chain_store block
             >>= fun next_protocol ->
-            Lwt.return (Protocol_hash.Map.find_opt next_protocol map) )
+            Lwt.return (Protocol_hash.Map.find next_protocol map) )
 
   let set_rpc_directory chain_store protocol_hash dir =
     let map =
       Option.value
         ~default:Protocol_hash.Map.empty
-        (Protocol_hash.Table.find_opt
+        (Protocol_hash.Table.find
            chain_store.block_rpc_directories
            protocol_hash)
     in
@@ -2470,9 +2468,11 @@ module Unsafe = struct
     Block_store.store_block block_store new_head_with_metadata
     >>= fun () ->
     (* Check correctness of protocol transition blocks *)
-    let open Protocol_levels in
     iter_s
-      (fun (_, {block = (bh, _); protocol; commit_info = commit_info_opt}) ->
+      (fun ( _,
+             { Protocol_levels.block = (bh, _);
+               protocol;
+               commit_info = commit_info_opt } ) ->
         Block_store.read_block block_store ~read_metadata:false (Block (bh, 0))
         >>=? fun block_opt ->
         match (block_opt, commit_info_opt) with
