@@ -38,7 +38,6 @@ type context = t
 (** Open or initialize a versioned store at a given path. *)
 val init :
   ?patch_context:(context -> context tzresult Lwt.t) ->
-  ?mapsize:int64 ->
   ?readonly:bool ->
   string ->
   index Lwt.t
@@ -115,7 +114,9 @@ val set_master : index -> Context_hash.t -> unit Lwt.t
 
 (** {2 Predefined Fields} *)
 
-val get_protocol : context -> Protocol_hash.t Lwt.t
+val get_protocol : context -> Protocol_hash.t tzresult Lwt.t
+
+val get_protocol_exn : context -> Protocol_hash.t Lwt.t
 
 val set_protocol : context -> Protocol_hash.t -> context Lwt.t
 
@@ -150,7 +151,11 @@ module Pruned_block : sig
 end
 
 module Block_data : sig
-  type t = {block_header : Block_header.t; operations : Operation.t list list}
+  type t = {
+    block_header : Block_header.t;
+    operations : Operation.t list list;
+    predecessor_header : Block_header.t;
+  }
 
   val to_bytes : t -> Bytes.t
 
@@ -170,6 +175,7 @@ module Protocol_data : sig
     test_chain_status : Test_chain_status.t;
     data_key : Context_hash.t;
     parents : Context_hash.t list;
+    protocol : Protocol.t;
   }
 
   val to_bytes : t -> Bytes.t
@@ -179,20 +185,67 @@ module Protocol_data : sig
   val encoding : t Data_encoding.t
 end
 
-val get_protocol_data_from_header :
-  index -> Block_header.t -> Protocol_data.t Lwt.t
+module Protocol_data_legacy : sig
+  type t = Int32.t * data
 
-val dump_contexts :
+  and info = {author : string; message : string; timestamp : Time.Protocol.t}
+
+  and data = {
+    info : info;
+    protocol_hash : Protocol_hash.t;
+    test_chain_status : Test_chain_status.t;
+    data_key : Context_hash.t;
+    parents : Context_hash.t list;
+  }
+
+  val to_bytes : t -> Bytes.t
+
+  val of_bytes : Bytes.t -> t option
+
+  val encoding : t Data_encoding.t
+end
+
+module Block_data_legacy : sig
+  type t = {block_header : Block_header.t; operations : Operation.t list list}
+
+  val to_bytes : t -> Bytes.t
+
+  val of_bytes : Bytes.t -> t option
+
+  val encoding : t Data_encoding.t
+end
+
+val dump_context :
+  index -> Block_data.t -> context_file_path:string -> int tzresult Lwt.t
+
+val restore_context :
+  ?expected_block:Block_hash.t ->
   index ->
-  Block_header.t
-  * Block_data.t
-  * History_mode.Legacy.t
-  * (Block_header.t ->
-    (Pruned_block.t option * Protocol_data.t option) tzresult Lwt.t) ->
-  filename:string ->
-  unit tzresult Lwt.t
+  context_file_path:string ->
+  target_block:Block_hash.t ->
+  nb_context_elements:int ->
+  Block_data.t tzresult Lwt.t
 
-val restore_contexts :
+val restore_context_legacy :
+  ?expected_block:string ->
+  index ->
+  snapshot_file:string ->
+  handle_block:(History_mode.Legacy.t ->
+               Block_hash.t * Pruned_block.t ->
+               unit tzresult Lwt.t) ->
+  handle_protocol_data:(Protocol_data_legacy.t -> unit tzresult Lwt.t) ->
+  block_validation:(Block_header.t option ->
+                   Block_hash.t ->
+                   Pruned_block.t ->
+                   unit tzresult Lwt.t) ->
+  ( Block_header.t
+  * Block_data_legacy.t
+  * Block_header.t option
+  * History_mode.Legacy.t )
+  tzresult
+  Lwt.t
+
+val legacy_restore_contexts :
   index ->
   filename:string ->
   ((Block_hash.t * Pruned_block.t) list -> unit tzresult Lwt.t) ->
@@ -201,13 +254,51 @@ val restore_contexts :
   Pruned_block.t ->
   unit tzresult Lwt.t) ->
   ( Block_header.t
-  * Block_data.t
+  * Block_data_legacy.t
   * History_mode.Legacy.t
   * Block_header.t option
   * Block_hash.t list
-  * Protocol_data.t list )
+  * Protocol_data_legacy.t list )
   tzresult
   Lwt.t
+
+val retrieve_commit_info :
+  index ->
+  Block_header.t ->
+  ( Protocol_hash.t
+  * string
+  * string
+  * Time.Protocol.t
+  * Test_chain_status.t
+  * Context_hash.t
+  * Context_hash.t list )
+  tzresult
+  Lwt.t
+
+val check_protocol_commit_consistency :
+  index ->
+  expected_context_hash:Context_hash.t ->
+  given_protocol_hash:Protocol_hash.t ->
+  author:string ->
+  message:string ->
+  timestamp:Time.Protocol.t ->
+  test_chain_status:Test_chain_status.t ->
+  data_merkle_root:Context_hash.t ->
+  parents_contexts:Context_hash.t list ->
+  bool Lwt.t
+
+(**/**)
+
+(** {b Warning} For testing purposes only *)
+val dump_legacy_snapshot :
+  index ->
+  Block_header.t
+  * Block_data_legacy.t
+  * History_mode.Legacy.t
+  * (Block_header.t ->
+    (Pruned_block.t option * Protocol_data_legacy.t option) tzresult Lwt.t) ->
+  filename:string ->
+  unit tzresult Lwt.t
 
 val validate_context_hash_consistency_and_commit :
   data_hash:Context_hash.t ->
@@ -220,5 +311,3 @@ val validate_context_hash_consistency_and_commit :
   parents:Context_hash.t list ->
   index:index ->
   bool Lwt.t
-
-val upgrade_0_0_3 : context_dir:string -> unit tzresult Lwt.t

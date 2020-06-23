@@ -27,14 +27,11 @@
 
 include Context_dump_intf
 
-let current_version = "tezos-snapshot-1.0.0"
-
-(*****************************************************************************)
 let () =
   let open Data_encoding in
   register_error_kind
     `Permanent
-    ~id:"Writing_error"
+    ~id:"context_dump.writing_error"
     ~title:"Writing error"
     ~description:"Cannot write in file for context dump"
     ~pp:(fun ppf s ->
@@ -44,7 +41,7 @@ let () =
     (fun s -> System_write_error s) ;
   register_error_kind
     `Permanent
-    ~id:"Bad_hash"
+    ~id:"context_dump.bad_hash"
     ~title:"Bad hash"
     ~description:"Wrong hash given"
     ~pp:(fun ppf (ty, his, hshould) ->
@@ -63,7 +60,7 @@ let () =
     (fun (ty, his, hshould) -> Bad_hash (ty, his, hshould)) ;
   register_error_kind
     `Permanent
-    ~id:"Context_not_found"
+    ~id:"context_dump.context_not_found"
     ~title:"Context not found"
     ~description:"Cannot find context corresponding to hash"
     ~pp:(fun ppf mb ->
@@ -73,7 +70,7 @@ let () =
     (fun mb -> Context_not_found mb) ;
   register_error_kind
     `Permanent
-    ~id:"System_read_error"
+    ~id:"context_dump.system_read_error"
     ~title:"System read error"
     ~description:"Failed to read file"
     ~pp:(fun ppf uerr ->
@@ -86,7 +83,7 @@ let () =
     (fun e -> System_read_error e) ;
   register_error_kind
     `Permanent
-    ~id:"Inconsistent_snapshot_file"
+    ~id:"context_dump.inconsistent_snapshot_file"
     ~title:"Inconsistent snapshot file"
     ~description:"Error while opening snapshot file"
     ~pp:(fun ppf () ->
@@ -98,7 +95,7 @@ let () =
     (fun () -> Inconsistent_snapshot_file) ;
   register_error_kind
     `Permanent
-    ~id:"Inconsistent_snapshot_data"
+    ~id:"context_dump.inconsistent_snapshot_data"
     ~title:"Inconsistent snapshot data"
     ~description:"The data provided by the snapshot is inconsistent"
     ~pp:(fun ppf () ->
@@ -111,7 +108,7 @@ let () =
     (fun () -> Inconsistent_snapshot_data) ;
   register_error_kind
     `Permanent
-    ~id:"Missing_snapshot_data"
+    ~id:"context_dump.missing_snapshot_data"
     ~title:"Missing data in imported snapshot"
     ~description:"Mandatory data missing while reaching end of snapshot file."
     ~pp:(fun ppf () ->
@@ -123,7 +120,7 @@ let () =
     (fun () -> Missing_snapshot_data) ;
   register_error_kind
     `Permanent
-    ~id:"Invalid_snapshot_version"
+    ~id:"context_dump.invalid_snapshot_version"
     ~title:"Invalid snapshot version"
     ~description:"The version of the snapshot to import is not valid"
     ~pp:(fun ppf (found, expected) ->
@@ -141,16 +138,318 @@ let () =
     (fun (found, expected) -> Invalid_snapshot_version (found, expected)) ;
   register_error_kind
     `Permanent
-    ~id:"Restore_context_failure"
+    ~id:"context_dump.restore_context_failure"
     ~title:"Failed to restore context"
     ~description:"Internal error while restoring the context"
     ~pp:(fun ppf () ->
       Format.fprintf ppf "Internal error while restoring the context.")
     empty
     (function Restore_context_failure -> Some () | _ -> None)
-    (fun () -> Restore_context_failure)
+    (fun () -> Restore_context_failure) ;
+  register_error_kind
+    `Permanent
+    ~id:"context_dump.inconsistent_imported_block"
+    ~title:"Inconsistent imported block"
+    ~description:"The imported block is not the expected one."
+    ~pp:(fun ppf (got, exp) ->
+      Format.fprintf
+        ppf
+        "The block contained in the file is %a instead of %a."
+        Block_hash.pp
+        got
+        Block_hash.pp
+        exp)
+    (obj2
+       (req "block_hash" Block_hash.encoding)
+       (req "block_hash_expected" Block_hash.encoding))
+    (function
+      | Inconsistent_imported_block (got, exp) -> Some (got, exp) | _ -> None)
+    (fun (got, exp) -> Inconsistent_imported_block (got, exp))
 
 module Make (I : Dump_interface) = struct
+  type command =
+    | Root of {block_data : I.Block_data.t}
+    | Node of (string * I.hash) list
+    | Blob of string
+    | Eoc of {info : I.commit_info; parents : I.Commit_hash.t list}
+    | Eof
+
+  (* Command encoding. *)
+
+  let blob_encoding =
+    let open Data_encoding in
+    case
+      ~title:"blob"
+      (Tag (Char.code 'b'))
+      string
+      (function Blob string -> Some string | _ -> None)
+      (function string -> Blob string)
+
+  let node_encoding =
+    let open Data_encoding in
+    case
+      ~title:"node"
+      (Tag (Char.code 'n'))
+      (list (obj2 (req "name" string) (req "hash" I.hash_encoding)))
+      (function Node x -> Some x | _ -> None)
+      (function x -> Node x)
+
+  let eof_encoding =
+    let open Data_encoding in
+    case
+      ~title:"eof"
+      (Tag (Char.code 'e'))
+      empty
+      (function Eof -> Some () | _ -> None)
+      (fun () -> Eof)
+
+  let root_encoding =
+    let open Data_encoding in
+    case
+      ~title:"root"
+      (Tag (Char.code 'r'))
+      (obj1 (req "block_data" I.Block_data.encoding))
+      (function Root {block_data} -> Some block_data | _ -> None)
+      (fun block_data -> Root {block_data})
+
+  let eoc_encoding =
+    let open Data_encoding in
+    case
+      ~title:"eoc"
+      (Tag (Char.code 'c'))
+      (obj2
+         (req "info" I.commit_info_encoding)
+         (req "parents" (list I.Commit_hash.encoding)))
+      (function Eoc {info; parents} -> Some (info, parents) | _ -> None)
+      (fun (info, parents) -> Eoc {info; parents})
+
+  let command_encoding =
+    Data_encoding.union
+      ~tag_size:`Uint8
+      [blob_encoding; node_encoding; eoc_encoding; root_encoding; eof_encoding]
+
+  (* IO toolkit. *)
+
+  let rec read_string rbuf ~len =
+    let (fd, buf, ofs, total) = !rbuf in
+    if Bytes.length buf - ofs < len then (
+      let blen = Bytes.length buf - ofs in
+      let neu = Bytes.create (blen + 1_000_000) in
+      Bytes.blit buf ofs neu 0 blen ;
+      Lwt_unix.read fd neu blen 1_000_000
+      >>= fun bread ->
+      total := !total + bread ;
+      if bread = 0 then fail Inconsistent_snapshot_file
+      else
+        let neu =
+          if bread <> 1_000_000 then Bytes.sub neu 0 (blen + bread) else neu
+        in
+        rbuf := (fd, neu, 0, total) ;
+        read_string rbuf ~len )
+    else
+      let res = Bytes.sub_string buf ofs len in
+      rbuf := (fd, buf, ofs + len, total) ;
+      return res
+
+  let read_mbytes rbuf b =
+    read_string rbuf ~len:(Bytes.length b)
+    >>=? fun string ->
+    Bytes.blit_string string 0 b 0 (Bytes.length b) ;
+    return ()
+
+  let set_int64 buf i =
+    let b = Bytes.create 8 in
+    EndianBytes.BigEndian.set_int64 b 0 i ;
+    Buffer.add_bytes buf b
+
+  let get_int64 rbuf =
+    read_string ~len:8 rbuf
+    >>=? fun s -> return @@ EndianString.BigEndian.get_int64 s 0
+
+  let set_mbytes buf b =
+    set_int64 buf (Int64.of_int (Bytes.length b)) ;
+    Buffer.add_bytes buf b
+
+  let get_mbytes rbuf =
+    get_int64 rbuf >|=? Int64.to_int
+    >>=? fun l ->
+    let b = Bytes.create l in
+    read_mbytes rbuf b >>=? fun () -> return b
+
+  (* Getter and setters *)
+
+  let get_command rbuf =
+    get_mbytes rbuf
+    >|=? fun bytes -> Data_encoding.Binary.of_bytes_exn command_encoding bytes
+
+  let set_root buf block_data =
+    let root = Root {block_data} in
+    let bytes = Data_encoding.Binary.to_bytes_exn command_encoding root in
+    set_mbytes buf bytes
+
+  let set_tree buf tree =
+    (match tree with `Branch node -> Node node | `Leaf blob -> Blob blob)
+    |> Data_encoding.Binary.to_bytes_exn command_encoding
+    |> set_mbytes buf
+
+  let set_eoc buf info parents =
+    let eoc = Eoc {info; parents} in
+    let bytes = Data_encoding.Binary.to_bytes_exn command_encoding eoc in
+    set_mbytes buf bytes
+
+  let set_end buf =
+    let bytes = Data_encoding.Binary.to_bytes_exn command_encoding Eof in
+    set_mbytes buf bytes
+
+  let serialize_tree ~notify ~maybe_flush buf =
+    I.tree_iteri_unique (fun sub_tree ->
+        set_tree buf sub_tree ;
+        maybe_flush () >>= fun () -> notify ())
+
+  let dump_context_fd idx block_data ~context_fd =
+    (* Dumping *)
+    let buf = Buffer.create 1_000_000 in
+    let written = ref 0 in
+    let flush () =
+      let contents = Buffer.contents buf in
+      Buffer.clear buf ;
+      written := !written + String.length contents ;
+      Lwt_utils_unix.write_string context_fd contents
+    in
+    let maybe_flush () =
+      if Buffer.length buf > 500_000 then flush () else Lwt.return_unit
+    in
+    Lwt.catch
+      (fun () ->
+        let pred_block_header = I.Block_data.predecessor_header block_data in
+        I.get_context idx pred_block_header
+        >>= function
+        | None ->
+            fail
+            @@ Context_not_found (I.Block_header.to_bytes pred_block_header)
+        | Some ctxt ->
+            Lwt_utils_unix.display_progress
+              ~every:1000
+              ~pp_print_step:(fun fmt i ->
+                Format.fprintf
+                  fmt
+                  "Copying context: %dK elements, %s written"
+                  (i / 1000)
+                  ( if !written > 1_048_576 then
+                    Format.asprintf "%dMiB" (!written / 1_048_576)
+                  else Format.asprintf "%dKiB" (!written / 1_024) ))
+              (fun notify ->
+                set_root buf block_data ;
+                I.context_tree ctxt
+                |> serialize_tree ~notify ~maybe_flush buf
+                >>= fun elements ->
+                let parents = I.context_parents ctxt in
+                set_eoc buf (I.context_info ctxt) parents ;
+                set_end buf ;
+                return_unit
+                >>=? fun () -> flush () >>= fun () -> return elements))
+      (function
+        | Unix.Unix_error (e, _, _) ->
+            fail @@ System_write_error (Unix.error_message e)
+        | err ->
+            Lwt.fail err)
+
+  (* Restoring *)
+
+  let restore_context_fd index ?expected_block ~fd ~target_block
+      ~nb_context_elements =
+    let read = ref 0 in
+    let rbuf = ref (fd, Bytes.empty, 0, read) in
+    (* Editing the repository *)
+    let add_blob t blob = I.add_string t blob >>= fun tree -> return tree in
+    let add_dir t keys =
+      I.add_dir t keys
+      >>= function
+      | None -> fail Restore_context_failure | Some tree -> return tree
+    in
+    let restore () =
+      let first_pass () =
+        get_command rbuf
+        >>=? function
+        | Root {block_data} ->
+            (* Checks that the block hash imported by the snapshot is the expected one *)
+            let imported_block_header = I.Block_data.header block_data in
+            let imported_block_hash =
+              Block_header.hash imported_block_header
+            in
+            ( match expected_block with
+            | Some bh ->
+                fail_unless
+                  (Block_hash.equal bh imported_block_hash)
+                  (Inconsistent_imported_block (imported_block_hash, bh))
+            | None ->
+                return_unit )
+            >>=? fun () ->
+            (* Checks that the block hash of the metadata is the expected one *)
+            fail_unless
+              (Block_hash.equal target_block imported_block_hash)
+              (Inconsistent_imported_block (imported_block_hash, target_block))
+            >>=? fun () -> return block_data
+        | _ ->
+            fail Inconsistent_snapshot_data
+      in
+      let rec second_pass batch ctxt block_header notify =
+        notify ()
+        >>= fun () ->
+        get_command rbuf
+        >>=? function
+        | Node contents ->
+            add_dir batch contents
+            >>=? fun tree ->
+            second_pass batch (I.update_context ctxt tree) block_header notify
+        | Blob data ->
+            add_blob batch data
+            >>=? fun tree ->
+            second_pass batch (I.update_context ctxt tree) block_header notify
+        | Eoc {info; parents} -> (
+            I.set_context ~info ~parents ctxt block_header
+            >>= function
+            | false -> fail Inconsistent_snapshot_data | true -> return_unit )
+        | _ ->
+            fail Inconsistent_snapshot_data
+      in
+      let check_eof () =
+        get_command rbuf
+        >>=? function
+        | Eof -> return_unit | _ -> fail Inconsistent_snapshot_data
+      in
+      first_pass ()
+      >>=? fun block_data ->
+      let pred_block_header = I.Block_data.predecessor_header block_data in
+      Lwt_utils_unix.display_progress
+        ~every:1000
+        ~pp_print_step:(fun fmt i ->
+          Format.fprintf
+            fmt
+            "Writing context: %dK/%dK (%d%%) elements, %s read"
+            (i / 1_000)
+            (nb_context_elements / 1_000)
+            (100 * i / nb_context_elements)
+            ( if !read > 1_048_576 then
+              Format.asprintf "%dMiB" (!read / 1_048_576)
+            else Format.asprintf "%dKiB" (!read / 1_024) ))
+        (fun notify ->
+          I.batch index (fun batch ->
+              second_pass batch (I.make_context index) pred_block_header notify))
+      >>=? fun () -> check_eof () >>=? fun () -> return block_data
+    in
+    Lwt.catch
+      (fun () -> restore ())
+      (function
+        | Unix.Unix_error (e, _, _) ->
+            fail @@ System_read_error (Unix.error_message e)
+        | err ->
+            Lwt.fail err)
+end
+
+module Make_legacy (I : Dump_interface_legacy) = struct
+  let current_version = "tezos-snapshot-1.0.0"
+
   type command =
     | Root of {
         block_header : I.Block_header.t;
@@ -268,18 +567,9 @@ module Make (I : Dump_interface) = struct
     Bytes.blit_string string 0 b 0 (Bytes.length b) ;
     return ()
 
-  let set_int64 buf i =
-    let b = Bytes.create 8 in
-    EndianBytes.BigEndian.set_int64 b 0 i ;
-    Buffer.add_bytes buf b
-
   let get_int64 rbuf =
     read_string ~len:8 rbuf
     >>=? fun s -> return @@ EndianString.BigEndian.get_int64 s 0
-
-  let set_mbytes buf b =
-    set_int64 buf (Int64.of_int (Bytes.length b)) ;
-    Buffer.add_bytes buf b
 
   let get_mbytes rbuf =
     get_int64 rbuf >|=? Int64.to_int
@@ -292,6 +582,17 @@ module Make (I : Dump_interface) = struct
   let get_command rbuf =
     get_mbytes rbuf
     >|=? fun bytes -> Data_encoding.Binary.of_bytes_exn command_encoding bytes
+
+  let set_int64 buf i =
+    let b = Bytes.create 8 in
+    EndianBytes.BigEndian.set_int64 b 0 i ;
+    Buffer.add_bytes buf b
+
+  let set_mbytes buf b =
+    set_int64 buf (Int64.of_int (Bytes.length b)) ;
+    Buffer.add_bytes buf b
+
+  (* Getter and setters *)
 
   let set_root buf block_header info parents block_data =
     let root = Root {block_header; info; parents; block_data} in
@@ -319,20 +620,14 @@ module Make (I : Dump_interface) = struct
 
   (* Snapshot metadata *)
 
-  (* TODO add more info (e.g. nb context item, nb blocks, etc.) *)
-  type snapshot_metadata = {
-    version : string;
-    mode : Tezos_shell_services.History_mode.Legacy.t;
-  }
+  type snapshot_metadata = {version : string; mode : History_mode.Legacy.t}
 
   let snapshot_metadata_encoding =
     let open Data_encoding in
     conv
       (fun {version; mode} -> (version, mode))
       (fun (version, mode) -> {version; mode})
-      (obj2
-         (req "version" string)
-         (req "mode" Tezos_shell_services.History_mode.Legacy.encoding))
+      (obj2 (req "version" string) (req "mode" History_mode.Legacy.encoding))
 
   let write_snapshot_metadata ~mode buf =
     let version = {version = current_version; mode} in
@@ -442,9 +737,123 @@ module Make (I : Dump_interface) = struct
         | err ->
             Lwt.fail err)
 
-  (* Restoring *)
+  (* Restoring legacy *)
 
-  let restore_contexts_fd index ~fd k_store_pruned_blocks block_validation =
+  let restore_context_fd index ~fd ?expected_block ~handle_block
+      ~handle_protocol_data ~block_validation =
+    let read = ref 0 in
+    let rbuf = ref (fd, Bytes.empty, 0, read) in
+    (* Editing the repository *)
+    let add_blob t blob = I.add_string t blob >>= fun tree -> return tree in
+    let add_dir t keys =
+      I.add_dir t keys
+      >>= function
+      | None -> fail Restore_context_failure | Some tree -> return tree
+    in
+    let restore history_mode =
+      let rec first_pass ctxt batch notify =
+        notify ()
+        >>= fun () ->
+        get_command rbuf
+        >>=? function
+        | Node contents ->
+            add_dir batch contents
+            >>=? fun tree ->
+            first_pass (I.update_context ctxt tree) batch notify
+        | Blob data ->
+            add_blob batch data
+            >>=? fun tree ->
+            first_pass (I.update_context ctxt tree) batch notify
+        | Root {block_header; info; parents; block_data} ->
+            (* Checks that the block hash imported by the snapshot is
+               the expected one *)
+            let imported_block_header = I.Block_data.header block_data in
+            let imported_block_hash =
+              Block_header.hash imported_block_header
+            in
+            ( match expected_block with
+            | Some str ->
+                let bh = Block_hash.of_b58check_exn str in
+                fail_unless
+                  (Block_hash.equal bh imported_block_hash)
+                  (Inconsistent_imported_block (imported_block_hash, bh))
+            | None ->
+                return_unit )
+            >>=? fun () ->
+            I.set_context ~info ~parents ctxt block_header
+            >>= fun is_correct ->
+            fail_unless is_correct Inconsistent_snapshot_data
+            >>=? fun () -> return (block_header, block_data)
+        | _ ->
+            fail Inconsistent_snapshot_data
+      in
+      let second_pass notify =
+        let rec loop pred_header =
+          get_command rbuf
+          >>=? function
+          | Proot pruned_block ->
+              let header = I.Pruned_block.header pruned_block in
+              let hash = Block_header.hash header in
+              block_validation pred_header hash pruned_block
+              >>=? fun () ->
+              handle_block history_mode (hash, pruned_block)
+              >>=? fun () -> notify () >>= fun () -> loop (Some header)
+          | Loot protocol_data ->
+              handle_protocol_data protocol_data
+              >>=? fun () -> loop pred_header
+          | End ->
+              return pred_header
+          | _ ->
+              fail Inconsistent_snapshot_data
+        in
+        loop None
+      in
+      Lwt_utils_unix.display_progress
+        ~every:1000
+        ~pp_print_step:(fun fmt i ->
+          Format.fprintf
+            fmt
+            "Writing context: %dK elements, %s read"
+            (i / 1_000)
+            ( if !read > 1_048_576 then
+              Format.asprintf "%dMiB" (!read / 1_048_576)
+            else Format.asprintf "%dKiB" (!read / 1_024) ))
+        (fun notify ->
+          I.batch index (fun batch ->
+              first_pass (I.make_context index) batch notify))
+      >>=? fun (pred_block_header, export_block_data) ->
+      Lwt_utils_unix.display_progress
+        ~every:1000
+        ~pp_print_step:(fun fmt i ->
+          Format.fprintf fmt "Storing blocks: %d blocks wrote" i)
+        (fun notify -> second_pass notify)
+      >>=? fun oldest_header_opt ->
+      return (pred_block_header, export_block_data, oldest_header_opt)
+    in
+    Lwt.catch
+      (fun () ->
+        (* Check snapshot version *)
+        read_snapshot_metadata rbuf
+        >>=? fun version ->
+        check_version version
+        >>=? fun () ->
+        restore version.mode
+        >>=? fun (pred_block_header, export_block_data, oldest_header_opt) ->
+        return
+          ( pred_block_header,
+            export_block_data,
+            oldest_header_opt,
+            version.mode ))
+      (function
+        | Unix.Unix_error (e, _, _) ->
+            fail (System_read_error (Unix.error_message e))
+        | Invalid_argument _ ->
+            fail Inconsistent_snapshot_file
+        | err ->
+            Lwt.fail err)
+
+  let legacy_restore_contexts_fd index ~fd k_store_pruned_blocks
+      block_validation =
     let read = ref 0 in
     let rbuf = ref (fd, Bytes.empty, 0, read) in
     (* Editing the repository *)
@@ -468,9 +877,9 @@ module Make (I : Dump_interface) = struct
         | Root {block_header; info; parents; block_data} -> (
             I.set_context ~info ~parents ctxt block_header
             >>= function
-            | None ->
+            | false ->
                 fail Inconsistent_snapshot_data
-            | Some block_header ->
+            | true ->
                 return (block_header, block_data) )
         | Node contents ->
             add_dir batch contents
