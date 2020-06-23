@@ -63,7 +63,7 @@
     consistent information to producethe snapshot.
 
     (LEGACY) Snapshots from the previous version (1) of the store are
-    fully retro-compatible and might be used to initializea new store with
+    fully retro-compatible and might be used to initialize a new store with
     the previous snapshot format.
 *)
 
@@ -176,5 +176,26 @@ val import :
   chain_name:Distributed_db_version.Name.t ->
   user_activated_upgrades:User_activated.upgrades ->
   user_activated_protocol_overrides:User_activated.protocol_overrides ->
+  Genesis.t ->
+  unit tzresult Lwt.t
+
+(** [import_legacy ?patch_context ?block ~dst_store_dir
+   ~dst_context_dir ~chain_name ~user_activated_upgrades
+   ~user_activated_protocol_overrides ~snapshot_file genesis]
+
+    same as import but expect [snapshot_file] to be in the format of
+    version 1. The {!Cemented_block_store} will be artificially
+    reconstructed using hard-coded values of most common networks
+    (i.e. mainnet, carthagenet, sandbox). Fails if the [chain_name]
+    cannot be associated to one of the hard-coded supported network. *)
+val import_legacy :
+  ?patch_context:(Context.t -> Context.t tzresult Lwt.t) ->
+  ?block:Block_hash.t ->
+  dst_store_dir:string ->
+  dst_context_dir:string ->
+  chain_name:Distributed_db_version.Name.t ->
+  user_activated_upgrades:User_activated.upgrades ->
+  user_activated_protocol_overrides:User_activated.protocol_overrides ->
+  snapshot_file:string ->
   Genesis.t ->
   unit tzresult Lwt.t

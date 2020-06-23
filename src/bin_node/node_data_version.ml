@@ -49,21 +49,26 @@ let version_file_name = "version.json"
  *  - 0.0.1 : original storage
  *  - 0.0.2 : never released
  *  - 0.0.3 : store upgrade (introducing history mode)
- *  - 0.0.4 : context upgrade (switching from LMDB to IRMIN v2) *)
-let data_version = "0.0.4"
+ *  - 0.0.4 : context upgrade (switching from LMDB to IRMIN v2)
+ *  - 0.0.5 : store upgrade (switching from LMDB) *)
+let data_version = "0.0.5"
 
 (* List of upgrade functions from each still supported previous
    version to the current [data_version] above. If this list grows too
    much, an idea would be to have triples (version, version,
    converter), and to sequence them dynamically instead of
    statically. *)
-let upgradable_data_version = []
+let upgradable_data_version =
+  [ ( "0.0.4",
+      fun ~data_dir genesis ~chain_name ->
+        let patch_context = Patch_context.patch_context genesis None in
+        Legacy.upgrade_0_0_4 ~data_dir ~patch_context ~chain_name genesis ) ]
 
 let version_encoding = Data_encoding.(obj1 (req "version" string))
 
 type error += Invalid_data_dir_version of t * t
 
-type error += Invalid_data_dir of string
+type error += Invalid_data_dir of {data_dir : string; msg : string option}
 
 type error += Could_not_read_data_dir_version of string
 
@@ -77,11 +82,17 @@ let () =
     ~id:"main.data_version.invalid_data_dir"
     ~title:"Invalid data directory"
     ~description:"The data directory cannot be accessed or created"
-    ~pp:(fun ppf path ->
-      Format.fprintf ppf "Invalid data directory '%s'." path)
-    Data_encoding.(obj1 (req "datadir_path" string))
-    (function Invalid_data_dir path -> Some path | _ -> None)
-    (fun path -> Invalid_data_dir path) ;
+    ~pp:(fun ppf (dir, msg_opt) ->
+      Format.fprintf
+        ppf
+        "Invalid data directory '%s'%a"
+        dir
+        (Option.pp ~default:"." (fun fmt msg -> Format.fprintf fmt ": %s." msg))
+        msg_opt)
+    Data_encoding.(obj2 (req "datadir_path" string) (opt "message" string))
+    (function
+      | Invalid_data_dir {data_dir; msg} -> Some (data_dir, msg) | _ -> None)
+    (fun (data_dir, msg) -> Invalid_data_dir {data_dir; msg}) ;
   register_error_kind
     `Permanent
     ~id:"main.data_version.invalid_data_dir_version"
@@ -91,7 +102,8 @@ let () =
       Format.fprintf
         ppf
         "Invalid data directory version '%s' (expected '%s').@,\
-         Your data directory is outdated and cannot be automatically upgraded."
+         Your data directory is incompatible and cannot be automatically \
+         upgraded."
         got
         exp)
     Data_encoding.(
@@ -157,11 +169,15 @@ let version_file data_dir = Filename.concat data_dir version_file_name
 let clean_directory files =
   let to_delete =
     Format.asprintf
-      "@[<v>%a@]"
-      (Format.pp_print_list ~pp_sep:Format.pp_print_cut Format.pp_print_string)
+      "%a"
+      (Format.pp_print_list
+         ~pp_sep:(fun fmt () -> Format.fprintf fmt ", ")
+         Format.pp_print_string)
       files
   in
-  Format.sprintf "Please provide a clean directory by removing:@ %s" to_delete
+  Format.sprintf
+    "Please provide a clean directory by removing the following files: %s"
+    to_delete
 
 let write_version_file data_dir =
   let version_file = version_file data_dir in
@@ -190,7 +206,8 @@ let check_data_dir_version files data_dir =
   Lwt_unix.file_exists version_file
   >>= function
   | false ->
-      fail (Invalid_data_dir (clean_directory files))
+      let msg = Some (clean_directory files) in
+      fail (Invalid_data_dir {data_dir; msg})
   | true -> (
       read_version_file version_file
       >>=? fun version ->
@@ -225,7 +242,8 @@ let ensure_data_dir bare data_dir =
           | [] ->
               write_version ()
           | files when bare ->
-              fail (Invalid_data_dir (clean_directory files))
+              let msg = Some (clean_directory files) in
+              fail (Invalid_data_dir {data_dir; msg})
           | files ->
               check_data_dir_version files data_dir )
       | false ->
@@ -233,11 +251,11 @@ let ensure_data_dir bare data_dir =
           >>= fun () -> write_version ())
     (function
       | Unix.Unix_error _ ->
-          fail (Invalid_data_dir data_dir)
+          fail (Invalid_data_dir {data_dir; msg = None})
       | exc ->
           raise exc)
 
-let upgrade_data_dir data_dir =
+let upgrade_data_dir ~data_dir genesis ~chain_name =
   ensure_data_dir false data_dir
   >>=? function
   | None ->
@@ -245,11 +263,12 @@ let upgrade_data_dir data_dir =
   | Some (version, upgrade) -> (
       lwt_emit (Upgrading_node (version, data_version))
       >>= fun () ->
-      upgrade ~data_dir
+      upgrade ~data_dir genesis ~chain_name
       >>= function
-      | Ok () ->
+      | Ok success_message ->
           write_version_file data_dir
-          >>=? fun () -> lwt_emit Update_success >>= fun () -> return_unit
+          >>=? fun () ->
+          lwt_emit (Upgrade_success success_message) >>= fun () -> return_unit
       | Error e ->
           Format.kasprintf
             (fun errs -> lwt_emit (Aborting_upgrade errs))

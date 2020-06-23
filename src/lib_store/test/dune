@@ -1,5 +1,5 @@
 (executables
- (names test)
+ (names test test_legacy legacy_store_maker)
  (libraries tezos-base
             tezos-store
 	    tezos-legacy-store
@@ -12,6 +12,7 @@
             alcotest-lwt)
  (flags (:standard -open Tezos_base__TzPervasives
                    -open Tezos_store
+		   -open Tezos_legacy_store
                    -open Tezos_shell_services
                    -open Tezos_stdlib_unix
                    -open Tezos_validation
@@ -19,13 +20,21 @@
 
 (alias
  (name buildtest)
- (deps test.exe))
+ (deps
+   ../legacy_store/legacy_store_builder.exe
+   test.exe
+   test_legacy.exe))
 
 (alias
  (name runtest_store)
  (action
   (setenv SLOW_TEST false
    (run %{exe:test.exe}))))
+
+(alias
+ (name runtest_store_legacy)
+ (deps (:legacy_builder ../legacy_store/legacy_store_builder.exe))
+ (action (run %{exe:test_legacy.exe} --builder-path %{legacy_builder})))
 
 (alias
  (name runtest_store_slow)
@@ -37,7 +46,8 @@
  (name runtest)
  (package tezos-store)
  (deps
-  (alias runtest_store)))
+  (alias runtest_store)
+  (alias runtest_store_legacy)))
 
 
 (alias

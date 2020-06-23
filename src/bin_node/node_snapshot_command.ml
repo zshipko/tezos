@@ -78,7 +78,7 @@ module Term = struct
   type subcommand = Export | Import | Info
 
   let process subcommand args snapshot_path block disable_check
-      disable_compress rolling reconstruct sandbox_file =
+      disable_compress rolling reconstruct sandbox_file import_legacy =
     (* FIXME check snapshot format *)
     let run =
       Internal_event_unix.init ()
@@ -174,19 +174,35 @@ module Term = struct
                   return_none )
               >>=? fun block ->
               let check_consistency = not disable_check in
-              Snapshots.import
-                ~patch_context
-                ?block
-                ~check_consistency
-                ~snapshot_file:snapshot_path
-                ~dst_store_dir:store_root
-                ~dst_context_dir:context_root
-                ~user_activated_upgrades:
-                  node_config.blockchain_network.user_activated_upgrades
-                ~user_activated_protocol_overrides:
-                  node_config.blockchain_network
-                    .user_activated_protocol_overrides
-                genesis)
+              if import_legacy then
+                Snapshots.import_legacy
+                  ~patch_context
+                  ?block
+                  ~dst_store_dir:store_root
+                  ~dst_context_dir:context_root
+                  ~chain_name:node_config.blockchain_network.chain_name
+                  ~user_activated_upgrades:
+                    node_config.blockchain_network.user_activated_upgrades
+                  ~user_activated_protocol_overrides:
+                    node_config.blockchain_network
+                      .user_activated_protocol_overrides
+                  ~snapshot_file:snapshot_path
+                  genesis
+              else
+                Snapshots.import
+                  ~patch_context
+                  ?block
+                  ~check_consistency
+                  ~snapshot_file:snapshot_path
+                  ~dst_store_dir:store_root
+                  ~dst_context_dir:context_root
+                  ~chain_name:node_config.blockchain_network.chain_name
+                  ~user_activated_upgrades:
+                    node_config.blockchain_network.user_activated_upgrades
+                  ~user_activated_protocol_overrides:
+                    node_config.blockchain_network
+                      .user_activated_protocol_overrides
+                  genesis)
           >>=? fun () ->
           if reconstruct then
             Reconstruction.reconstruct
@@ -251,9 +267,9 @@ module Term = struct
   let file_arg =
     let doc =
       "The name of the snapshot file to export. If no provided, it will be \
-       automatically generated using the target block and following patern: \
+       automatically generated using the target block and following pattern: \
        $(i,./<NETWORK>-<BLOCK_HASH>-<BLOCK_LEVEL>.<SNAPSHOT_KIND>). \
-       Otherwise, it must be given as a positionnal argument, just after the \
+       Otherwise, it must be given as a positional argument, just after the \
        $(b,export) hint."
     in
     value & pos 1 (some string) None & info [] ~doc ~docv:"FILE"
@@ -274,18 +290,18 @@ module Term = struct
   let disable_check =
     let open Cmdliner.Arg in
     let doc =
-      "Setting this flag disable the consistency check after importing a \
+      "Setting this flag disables the consistency check after importing a \
        full-mode snapshot. This improves performances but is strongly \
-       unrecommended as the snapshot could contain a corrupted chain."
+       discouraged because the snapshot could contain a corrupted chain."
     in
     value & flag & info ~doc ["no-check"]
 
   let disable_compress =
     let open Cmdliner.Arg in
     let doc =
-      "Setting this flag disable the snapshot compression. This slightly \
+      "Setting this flag disables the snapshot compression. This slightly \
        speeds up of the export process but the snapshot will occupy more \
-       on-disk space."
+       space on disk."
     in
     value & flag & info ~doc ["no-compress"]
 
@@ -328,12 +344,19 @@ module Term = struct
           ~docv:"FILE.json"
           ["sandbox"])
 
+  let import_legacy =
+    let open Cmdliner in
+    let doc = "Force import command to process a legacy snapshot file." in
+    Arg.(
+      value & flag
+      & info ~docs:Node_shared_arg.Manpage.misc_section ~doc ["legacy"])
+
   let term =
     let open Cmdliner.Term in
     ret
       ( const process $ subcommand_arg $ Node_shared_arg.Term.args $ file_arg
       $ block $ disable_check $ disable_compress $ export_rolling $ reconstruct
-      $ sandbox )
+      $ sandbox $ import_legacy )
 end
 
 module Manpage = struct
