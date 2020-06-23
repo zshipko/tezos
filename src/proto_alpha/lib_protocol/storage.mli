@@ -44,6 +44,20 @@ module Block_priority : sig
   val init : Raw_context.t -> int -> Raw_context.t tzresult Lwt.t
 end
 
+module Make_index (H : Storage_description.INDEX) : sig
+  type t = H.t
+
+  val path_length : int
+
+  val to_path : t -> string list -> string list
+
+  val of_path : string list -> t option
+
+  type 'a ipath = 'a * t
+
+  val args : ('a, t, 'a ipath) Storage_description.args
+end
+
 module Roll : sig
   (** Storage from this submodule must only be accessed through the
       module `Roll`. *)
