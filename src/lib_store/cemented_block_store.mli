@@ -243,6 +243,8 @@ val iter_cemented_file :
   cemented_blocks_file ->
   unit tzresult Lwt.t
 
+val clean_indexes : t -> Int32.t -> unit
+
 (** [check_indexes_consistency ?post_step ?genesis_hash cemented_store
     history_mode] iterates over a partially initialized
     [cemented_store] that contains both chunks of blocks and indexes

@@ -239,6 +239,13 @@ val swap_floating_store :
     in [block_store] to finish if any. *)
 val await_merging : block_store -> unit tzresult Lwt.t
 
+val do_the_magic :
+  t ->
+  string ->
+  from_block:'a * int32 ->
+  to_block:Block_hash.t * int32 ->
+  unit tzresult Lwt.t
+
 (** [merge_stores block_store ?finalizer ~nb_blocks_to_preserve
     ~history_mode ~from_block ~to_block] triggers a merge as described
     in the above description. This will result, {b asynchronously},

@@ -920,7 +920,7 @@ module Chain = struct
         return (succ nb_blocks_to_preserve, min_level_to_preserve)
     | None ->
         (* If no metadata is found (e.g. may happen after a snapshot
-         import), keep the blocks until the caboose *)
+           import), keep the blocks until the caboose *)
         let min_level_to_preserve = snd chain_state.caboose in
         (* + 1, it's a size *)
         let nb_blocks_to_preserve =
@@ -2089,10 +2089,24 @@ let switch_history_mode main_chain_store previous_history_mode new_history_mode
         ~new_history_mode
         previous_history_mode
       >>=? fun new_caboose ->
-      Cemented_block_store.comply_to_history_mode
-        (Block_store.cemented_block_store main_chain_store.block_store)
-        new_history_mode
+      Chain.current_head main_chain_store
+      >>= fun _current_head ->
+      (* Block_store.do_the_magic
+       *   main_chain_store.block_store
+       *   main_chain_store.chain_dir
+       *   ~from_block:(Block.descriptor current_head)
+       *   ~to_block:new_caboose
+       * >>=? fun () -> *)
+      let cemented_block_store =
+        Block_store.cemented_block_store main_chain_store.block_store
+      in
+      (* Cemented_block_store.clean_indexes cemented_block_store (snd new_caboose) ; *)
+      Cemented_block_store.trigger_gc cemented_block_store new_history_mode
       >>= fun () ->
+      (* Cemented_block_store.comply_to_history_mode
+       *   cemented_block_store
+       *   new_history_mode
+       * >>= fun () -> *)
       Chain.set_savepoint main_chain_store new_savepoint
       >>=? fun () -> Chain.set_caboose main_chain_store new_caboose
   | (Full n, Full m) ->

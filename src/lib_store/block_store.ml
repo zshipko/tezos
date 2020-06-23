@@ -196,6 +196,7 @@ let mem block_store key =
                  predecessor_hash ))
 
 let read_block ~read_metadata block_store key_kind =
+  Format.printf "reading_block@." ;
   Lwt_idle_waiter.task block_store.merge_scheduler (fun () ->
       (* Resolve the hash *)
       get_hash block_store key_kind
@@ -218,16 +219,23 @@ let read_block ~read_metadata block_store key_kind =
                   Lwt.return_some block
               | None ->
                   (* Lastly, look in the cemented blocks *)
+                  Format.printf "get_cemented@." ;
                   Cemented_block_store.get_cemented_block_by_hash
                     ~read_metadata
                     block_store.cemented_store
                     adjusted_hash
+                  >>= fun res ->
+                  Format.printf "get_cemented ok@." ;
+                  Lwt.return res
             in
             Block_cache.get_opt_lwt
               block_store.block_cache
               fetch_block
               adjusted_hash
             >>= fun block -> return block)
+  >>= fun res ->
+  Format.printf "reading_block ok@." ;
+  Lwt.return res
 
 let read_block_metadata block_store key_kind =
   Lwt_idle_waiter.task block_store.merge_scheduler (fun () ->
@@ -467,6 +475,27 @@ let try_remove_temporary_stores block_store =
   Lwt.catch
     (fun () -> Lwt_utils_unix.remove_dir rw_index_tmp)
     (fun _ -> Lwt.return_unit)
+
+let do_the_magic block_store chain_dir ~from_block ~to_block =
+  let ro_store = List.hd block_store.ro_floating_block_stores in
+  let rw_store = block_store.rw_floating_block_store in
+  block_store.ro_floating_block_stores <-
+    block_store.rw_floating_block_store :: block_store.ro_floating_block_stores ;
+  Floating_block_store.init ~chain_dir ~readonly:false RW_TMP
+  >>= fun new_rw_store ->
+  block_store.rw_floating_block_store <- new_rw_store ;
+  Floating_block_store.init ~chain_dir ~readonly:false RO_TMP
+  >>= fun new_ro_store ->
+  update_floating_stores
+    ~ro_store
+    ~rw_store
+    ~new_store:new_ro_store
+    ~from_block
+    ~to_block
+    ~nb_blocks_to_preserve:Int32.(to_int (sub (snd from_block) (snd to_block)))
+  >>=? fun _ ->
+  Floating_block_store.close new_ro_store
+  >>= fun () -> swap_all_floating_stores block_store ~new_ro_store
 
 let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
     ~nb_blocks_to_preserve ~history_mode ~from_block ~to_block () =

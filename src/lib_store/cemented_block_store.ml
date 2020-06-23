@@ -231,10 +231,13 @@ let find_block_file cemented_store block_level =
 
 (* Hypothesis: the table is ordered. *)
 let compute_location cemented_store block_level =
+  Format.printf "compute_location@." ;
   match find_block_file cemented_store block_level with
   | None ->
+      Format.printf "compute_location ok none@." ;
       None
   | Some {start_level; filename; _} ->
+      Format.printf "compute_location ok some@." ;
       Some (filename, Int32.(to_int (sub block_level start_level)))
 
 let is_cemented cemented_store hash =
@@ -364,15 +367,20 @@ let get_lowest_cemented_level cemented_store =
     None
 
 let get_highest_cemented_level cemented_store =
+  Format.printf "Get_highest@." ;
   let nb_cemented_blocks = Array.length cemented_store.cemented_blocks_files in
   if nb_cemented_blocks > 0 then
+    let () = Format.printf "Get_highest ok Some@." in
     Some
       cemented_store.cemented_blocks_files.(nb_cemented_blocks - 1).end_level
-  else (* No cemented blocks*)
+  else
+    (* No cemented blocks*)
+    let () = Format.printf "Get_highest ok None@." in
     None
 
 (* FIXME handle I/O errors *)
 let get_cemented_block_by_level (cemented_store : t) ~read_metadata level =
+  Format.printf "Get_cemented_block_by_level@." ;
   match get_highest_cemented_level cemented_store with
   | None ->
       Lwt.return_none
@@ -407,10 +415,13 @@ let read_block_metadata cemented_store block_level =
   read_block_metadata cemented_store block_level
 
 let get_cemented_block_by_hash ~read_metadata (cemented_store : t) hash =
+  Format.printf "get_cemented_by_hash@." ;
   match get_cemented_block_level cemented_store hash with
   | None ->
+      Format.printf "get_cemented_by_hash ok none@." ;
       Lwt.return_none
   | Some level ->
+      Format.printf "get_cemented_by_hash ok some@." ;
       get_cemented_block_by_level ~read_metadata cemented_store level
 
 (* Hypothesis:
@@ -532,6 +543,20 @@ let cement_blocks ?(check_consistency = true) (cemented_store : t)
   if write_metadata then cement_blocks_metadata cemented_store blocks
   else return_unit
 
+let clean_indexes cemented_store last_level_to_purge =
+  (* Start by updating the indexes by filtering blocks that are
+           below the offset *)
+  Cemented_block_hash_index.filter
+    cemented_store.cemented_block_hash_index
+    (fun (level, _) ->
+      if Compare.Int32.(level > last_level_to_purge) then
+        Format.printf "level %ld was cleaed@." level
+      else () ;
+      Compare.Int32.(level > last_level_to_purge)) ;
+  Cemented_block_level_index.filter
+    cemented_store.cemented_block_level_index
+    (fun (_, level) -> Compare.Int32.(level > last_level_to_purge))
+
 let comply_to_history_mode cemented_store = function
   | History_mode.Archive ->
       assert false
@@ -568,7 +593,6 @@ let comply_to_history_mode cemented_store = function
         let (files_to_remove, files_to_keep) =
           List.split_n (nb_files - offset) cemented_files
         in
-        (* FIXME clean indexes ? Or it will be automatically done at next merge *)
         Lwt_list.iter_s
           (fun cemented_block_file ->
             let cemented_file =
@@ -632,10 +656,21 @@ let trigger_gc cemented_store = function
            below the offset *)
         Cemented_block_hash_index.filter
           cemented_store.cemented_block_hash_index
-          (fun (level, _) -> Compare.Int32.(level > last_level_to_purge)) ;
+          (fun (level, _) ->
+            if Compare.Int32.(level > last_level_to_purge) then
+              Format.printf "cleaning level %ld@." level ;
+            Compare.Int32.(level > last_level_to_purge)) ;
         Cemented_block_level_index.filter
           cemented_store.cemented_block_level_index
           (fun (_, level) -> Compare.Int32.(level > last_level_to_purge)) ;
+        Cemented_block_hash_index.flush
+          ~with_fsync:true
+          cemented_store.cemented_block_hash_index ;
+        Cemented_block_level_index.flush
+          ~with_fsync:true
+          cemented_store.cemented_block_level_index ;
+        Lwt_unix.sleep 5.
+        >>= fun () ->
         let (files_to_remove, _files_to_keep) =
           List.split_n (nb_files - offset) cemented_files
         in

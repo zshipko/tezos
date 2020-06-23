@@ -260,7 +260,7 @@ let test ~test_descr ~from_hm ~to_hm ~nb_blocks_to_bake
   Error_monad.protect
     (fun () ->
       Store.switch_history_mode chain_store from_hm to_hm
-      >>=? fun () -> (* Store.close_store store >>= fun () ->  *) return_false)
+      >>=? fun () -> Store.close_store store >>= fun () -> return_false)
     ~on_error:(function
       | [Store_errors.Incorrect_history_mode_switch _] ->
           return

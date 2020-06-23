@@ -439,6 +439,7 @@ let append_cycle ?(constants = default_protocol_constants) ?max_operations_ttl
 let assert_presence_in_store ?(with_metadata = false) chain_store blocks =
   Lwt_list.iter_s
     (fun b ->
+      Format.printf "Looking of block at level %ld@." (Store.Block.level b) ;
       let hash = Store.Block.hash b in
       Store.Block.read_block_opt chain_store hash
       >>= function
@@ -470,6 +471,7 @@ let assert_presence_in_store ?(with_metadata = false) chain_store blocks =
 let assert_absence_in_store chain_store blocks =
   Lwt_list.iter_s
     (fun b ->
+      Format.printf "Looking abs of block at level %ld@." (Store.Block.level b) ;
       Store.Block.(read_block_opt chain_store (hash b))
       >>= function
       | None ->
