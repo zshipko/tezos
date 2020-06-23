@@ -460,7 +460,7 @@ let get_block chain_state = function
       | `Alias (`Checkpoint, _) ->
           State.Chain.checkpoint chain_state
           >>= fun checkpoint -> Lwt.return (Block_header.hash checkpoint)
-      | `Alias (`Save_point, _) ->
+      | `Alias (`Savepoint, _) ->
           State.Chain.save_point chain_state
           >>= fun (_, save_point) -> Lwt.return save_point
       | `Alias (`Caboose, _) ->

@@ -53,7 +53,6 @@ type result = {
   validation_store : validation_store;
   block_metadata : Bytes.t;
   ops_metadata : Bytes.t list list;
-  forking_testchain : bool;
 }
 
 val result_encoding : result Data_encoding.t
