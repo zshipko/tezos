@@ -171,6 +171,11 @@ unit:client_base:
   script:
     - dune build @src/lib_client_base/runtest
 
+unit:context:
+  <<: *test_definition
+  script:
+    - dune build @src/lib_context/runtest
+
 unit:crypto:
   <<: *test_definition
   script:
@@ -236,10 +241,15 @@ unit:stdlib_unix:
   script:
     - dune build @src/lib_stdlib_unix/runtest
 
-unit:storage:
+unit:store/legacy_store:
   <<: *test_definition
   script:
-    - dune build @src/lib_storage/runtest
+    - dune build @src/lib_store/legacy_store/runtest
+
+unit:store:
+  <<: *test_definition
+  script:
+    - dune build @src/lib_store/runtest
 
 unit:src/proto_006_PsCARTHA/lib_client:
   <<: *test_definition
@@ -495,6 +505,18 @@ integration:injection:
   <<: *integration_python_definition
   script:
     - poetry run pytest tests/test_injection.py -s --log-dir=tmp
+  stage: test
+
+integration:legacy_snapshots:
+  <<: *integration_python_definition
+  script:
+    - poetry run pytest tests/test_legacy_snapshots.py -s --log-dir=tmp
+  stage: test
+
+integration:legacy_upgrade:
+  <<: *integration_python_definition
+  script:
+    - poetry run pytest tests/test_legacy_upgrade.py -s --log-dir=tmp
   stage: test
 
 integration:many_bakers:
@@ -995,6 +1017,11 @@ opam:tezos-codec:
   variables:
     package: tezos-codec
 
+opam:tezos-context:
+  <<: *opam_definition
+  variables:
+    package: tezos-context
+
 opam:tezos-crypto:
   <<: *opam_definition
   variables:
@@ -1109,6 +1136,11 @@ opam:tezos-event-logging:
   <<: *opam_definition
   variables:
     package: tezos-event-logging
+
+opam:tezos-legacy-store:
+  <<: *opam_definition
+  variables:
+    package: tezos-legacy-store
 
 opam:tezos-lmdb:
   <<: *opam_definition
@@ -1370,10 +1402,10 @@ opam:tezos-stdlib-unix:
   variables:
     package: tezos-stdlib-unix
 
-opam:tezos-storage:
+opam:tezos-store:
   <<: *opam_definition
   variables:
-    package: tezos-storage
+    package: tezos-store
 
 opam:tezos-test-services:
   <<: *opam_definition
