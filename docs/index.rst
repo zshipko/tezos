@@ -118,6 +118,7 @@ in the :ref:`introduction <howtoget>`.
    whitedoc/the_big_picture
    whitedoc/p2p
    whitedoc/validation
+   whitedoc/storage
    whitedoc/sync
    whitedoc/micheline
    whitedoc/michelson
