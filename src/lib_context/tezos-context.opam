@@ -20,4 +20,9 @@ build: [
   ["dune" "build" "-p" name "-j" jobs]
   ["dune" "runtest" "-p" name "-j" jobs] {with-test}
 ]
+pin-depends: [
+  ["index.dev" "git+https://github.com/mirage/index#master"]
+  ["irmin.dev" "git+https://github.com/mirage/irmin#master"]
+  ["irmin-pack.dev" "git+https://github.com/mirage/irmin#master"]
+]
 synopsis: "Tezos: on-disk context abstraction for `tezos-node`"
