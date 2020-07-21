@@ -209,7 +209,7 @@ let spawn_config_init ?(network = "sandbox") ?net_port ?rpc_port ?history_mode
     | Some Archive ->
         ["--history-mode"; "archive"]
     | Some Rolling ->
-        ["--history-mode"; "experimental-rolling"] ) )
+        ["--history-mode"; "rolling"] ) )
 
 let config_init ?network ?net_port ?rpc_port ?history_mode node =
   spawn_config_init ?network ?net_port ?rpc_port ?history_mode node
