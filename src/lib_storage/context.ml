@@ -433,7 +433,11 @@ let fork_test_chain v ~protocol ~expiration =
 
 let init ?patch_context ?mapsize:_ ?(readonly = false) root =
   Store.Repo.v
-    (Irmin_pack.config ~readonly ?index_log_size:!index_log_size root)
+    (Irmin_pack.config
+       ~readonly
+       ~index_throttle:`Overcommit_memory
+       ?index_log_size:!index_log_size
+       root)
   >>= fun repo ->
   let v = {path = root; repo; patch_context; readonly} in
   Lwt.return v
