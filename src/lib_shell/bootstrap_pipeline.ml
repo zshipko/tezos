@@ -369,6 +369,7 @@ let headers_fetch_worker_loop pipeline =
       >>= fun () -> Lwt_canceler.cancel pipeline.canceler
   | Error err ->
       pipeline.errors <- pipeline.errors @ err ;
+      Fmt.epr "XXX 1\n%!";
       Bootstrap_pipeline_event.(emit unexpected_error_while_fetching_headers)
         ()
       >>= fun () -> Lwt_canceler.cancel pipeline.canceler
@@ -430,6 +431,7 @@ let rec operations_fetch_worker_loop pipeline =
       >>= fun () -> Lwt_canceler.cancel pipeline.canceler
   | Error err ->
       pipeline.errors <- pipeline.errors @ err ;
+      Fmt.epr "XXX 2\n%!";
       Bootstrap_pipeline_event.(emit unexpected_error_while_fetching_headers)
         ()
       >>= fun () -> Lwt_canceler.cancel pipeline.canceler
@@ -478,6 +480,7 @@ let rec validation_worker_loop pipeline =
       Lwt_canceler.cancel pipeline.canceler
   | Error err ->
       pipeline.errors <- pipeline.errors @ err ;
+      Fmt.epr "XXX 3\n%!";
       Bootstrap_pipeline_event.(emit unexpected_error_while_fetching_headers)
         ()
       >>= fun () -> Lwt_canceler.cancel pipeline.canceler

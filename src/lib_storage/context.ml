@@ -271,13 +271,18 @@ let syncs index = Store.sync index.repo
 let exists index key =
   if index.readonly then syncs index ;
   Store.Commit.of_hash index.repo (Hash.of_context_hash key)
-  >|= function None -> false | Some _ -> true
+  >|= function None ->
+  Fmt.epr "exists not found %a\n%!" (Irmin.Type.pp Hash.t)
+  (Hash.of_context_hash key);
+  false
+  | Some _ -> true
 
 let checkout index key =
   if index.readonly then syncs index ;
   Store.Commit.of_hash index.repo (Hash.of_context_hash key)
   >>= function
   | None ->
+      Fmt.epr "checkout not found %a\n%!" (Irmin.Type.pp Hash.t) (Hash.of_context_hash key);
       Lwt.return_none
   | Some commit ->
       let tree = Store.Commit.tree commit in
