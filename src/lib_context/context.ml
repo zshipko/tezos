@@ -110,12 +110,15 @@ let reporter () =
 
 let index_log_size = ref None
 
+let overcommit = ref false
+
 let () =
   let verbose () =
     Logs.set_level (Some Logs.Debug) ;
     Logs.set_reporter (reporter ())
   in
   let index_log_size n = index_log_size := Some (int_of_string n) in
+  let overcommit () = overcommit := true in
   match Unix.getenv "TEZOS_STORAGE" with
   | exception Not_found ->
       ()
@@ -125,6 +128,8 @@ let () =
         (function
           | "v" | "verbose" | "vv" ->
               verbose ()
+          | "overcommit" ->
+              overcommit ()
           | v -> (
             match String.split '=' v with
             | ["index-log-size"; n] ->
@@ -503,8 +508,15 @@ let fork_test_chain v ~protocol ~expiration =
 (*-- Initialisation ----------------------------------------------------------*)
 
 let init ?patch_context ?(readonly = false) root =
+  let index_throttle =
+    if !overcommit then `Overcommit_memory else `Block_writes
+  in
   Store.Repo.v
-    (Irmin_pack.config ~readonly ?index_log_size:!index_log_size root)
+    (Irmin_pack.config
+       ~readonly
+       ?index_log_size:!index_log_size
+       ~index_throttle
+       root)
   >>= fun repo ->
   let v = {path = root; repo; patch_context; readonly} in
   Lwt.return v
