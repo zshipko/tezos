@@ -225,7 +225,7 @@ module Conf = struct
 end
 
 module Store =
-  Irmin_pack.Make_ext (Conf) (Irmin.Metadata.None) (Contents)
+  Irmin_pack.Make_ext_layered (Conf) (Irmin.Metadata.None) (Contents)
     (Irmin.Path.String_list)
     (Irmin.Branch.String)
     (Hash)
@@ -307,7 +307,12 @@ let unshallow context =
               >|= fun _ -> ())
         children)
 
+let counter = ref 0
+
+let first = ref true
+
 let raw_commit ~time ?(message = "") context =
+  counter := succ !counter ;
   let info =
     Irmin.Info.v ~date:(Time.Protocol.to_seconds time) ~author:"Tezos" message
   in
@@ -315,7 +320,17 @@ let raw_commit ~time ?(message = "") context =
   unshallow context
   >>= fun () ->
   Store.Commit.v context.index.repo ~info ~parents context.tree
-  >|= fun h ->
+  >>= fun h ->
+  ( if !first then (
+    first := false ;
+    Store.freeze ~max:[h] context.index.repo )
+  else Lwt.return_unit )
+  >>= fun () ->
+  ( if !counter = 4000 then (
+    counter := 0 ;
+    Store.freeze ~max:[h] context.index.repo )
+  else Lwt.return_unit )
+  >|= fun () ->
   Store.Tree.clear context.tree ;
   h
 
@@ -431,9 +446,19 @@ let fork_test_chain v ~protocol ~expiration =
 
 (*-- Initialisation ----------------------------------------------------------*)
 
+let config ?readonly ?index_log_size ~index_throttle root =
+  let conf =
+    Irmin_pack.config ?readonly ?index_log_size ~index_throttle root
+  in
+  Irmin_pack.config_layers ~conf ~copy_in_upper:true ~with_lower:true ()
+
 let init ?patch_context ?mapsize:_ ?(readonly = false) root =
   Store.Repo.v
-    (Irmin_pack.config ~readonly ?index_log_size:!index_log_size ~index_throttle:`Overcommit_memory root)
+    (config
+       ~readonly
+       ?index_log_size:!index_log_size
+       ~index_throttle:`Overcommit_memory
+       root)
   >>= fun repo ->
   let v = {path = root; repo; patch_context; readonly} in
   Lwt.return v
