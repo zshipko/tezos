@@ -432,16 +432,31 @@ let fork_test_chain v ~protocol ~expiration =
 (*-- Initialisation ----------------------------------------------------------*)
 
 let init ?patch_context ?mapsize:_ ?(readonly = false) root =
-  Store.Repo.v
-    (Irmin_pack.config ~readonly ?index_log_size:!index_log_size ~index_throttle:`Overcommit_memory root)
-  >>= fun repo ->
-  let v = {path = root; repo; patch_context; readonly} in
-  Lwt.return v
+  let config =
+    Irmin_pack.config
+      ~readonly
+      ?index_log_size:!index_log_size
+      ~index_throttle:`Overcommit_memory
+      root
+  in
+  let open_store () =
+    Store.Repo.v config
+    >>= fun repo ->
+    let v = {path = root; repo; patch_context; readonly} in
+    Lwt.return v
+  in
+  Lwt.catch open_store (function
+      | Irmin_pack.Unsupported_version `V1 ->
+          Logs.app (fun l -> l "migrating store to v2, this may take a while") ;
+          Store.migrate config ;
+          Logs.app (fun l -> l "migration ended, opening store") ;
+          open_store ()
+      | exn ->
+          Lwt.fail exn)
 
 let with_timer f =
   let t0 = Sys.time () in
-  f () >|= fun () ->
-  Sys.time () -. t0
+  f () >|= fun () -> Sys.time () -. t0
 
 let close index =
   with_timer (fun () -> Store.Repo.close index.repo)
