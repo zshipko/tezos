@@ -569,10 +569,21 @@ let config ?readonly root =
   Irmin_pack.config_layers ~conf ~copy_in_upper:true ~with_lower:true ()
 
 let init ?patch_context ?(readonly = false) root =
-  Store.Repo.v (config ~readonly root)
-  >>= fun repo ->
-  let v = {path = root; repo; patch_context; readonly} in
-  Lwt.return v
+  let config = config ~readonly root in
+  let open_store () =
+    Store.Repo.v config
+    >>= fun repo ->
+    let v = {path = root; repo; patch_context; readonly} in
+    Lwt.return v
+  in
+  Lwt.catch open_store (function
+      | Irmin_pack.Unsupported_version `V1 ->
+          Logs.app (fun l -> l "Migrating store to v2, this may take a while") ;
+          Store.migrate config ;
+          Logs.app (fun l -> l "Migration ended, opening the store") ;
+          open_store ()
+      | exn ->
+          Lwt.fail exn)
 
 let close index = Store.Repo.close index.repo
 
