@@ -117,6 +117,9 @@ let () =
     Logs.set_level (Some Logs.Debug) ;
     Logs.set_reporter (reporter ())
   in
+  (* while testing the layered store, print stats and logs from irmin *)
+  Logs.set_level (Some Logs.App) ;
+  Logs.set_reporter (reporter ()) ;
   let index_log_size n = index_log_size := Some (int_of_string n) in
   let overcommit () = overcommit := true in
   match Unix.getenv "TEZOS_STORAGE" with
@@ -375,6 +378,28 @@ let counter = ref 0
 
 let first = ref true
 
+let pp_stats () =
+  let stats = Irmin_layers.Stats.get () in
+  let pp_comma ppf () = Fmt.pf ppf "," in
+  let copied_objects =
+    List.map2 (fun x y -> x + y) stats.copied_contents stats.copied_commits
+    |> List.map2 (fun x y -> x + y) stats.copied_nodes
+    |> List.map2 (fun x y -> x + y) stats.copied_branches
+  in
+  Format.printf
+    "%a Irmin stats: nb_freeze = %d copied_objects = %a waiting_freeze  = %a \
+     completed_freeze = %a \n\
+     @."
+    Time.System.pp_hum
+    (Systime_os.now ())
+    stats.nb_freeze
+    Fmt.(list ~sep:pp_comma int)
+    copied_objects
+    Fmt.(list ~sep:pp_comma float)
+    stats.waiting_freeze
+    Fmt.(list ~sep:pp_comma float)
+    stats.completed_freeze
+
 let raw_commit ~time ?(message = "") context =
   counter := succ !counter ;
   let info =
@@ -387,11 +412,13 @@ let raw_commit ~time ?(message = "") context =
   >>= fun h ->
   ( if !first then (
     first := false ;
+    pp_stats () ;
     Store.freeze ~max:[h] context.index.repo )
   else Lwt.return_unit )
   >>= fun () ->
   ( if !counter = 4000 then (
     counter := 0 ;
+    pp_stats () ;
     Store.freeze ~max:[h] context.index.repo )
   else Lwt.return_unit )
   >|= fun () ->
