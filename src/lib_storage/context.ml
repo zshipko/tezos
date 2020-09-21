@@ -34,11 +34,12 @@ let reporter () =
   let report src level ~over k msgf =
     let k _ = over () ; k () in
     let with_stamp h _tags k fmt =
-      let dt = Mtime.Span.to_us (Mtime_clock.elapsed ()) in
+      let dt = Systime_os.now () in
       Fmt.kpf
         k
         Fmt.stderr
-        ("%+04.0fus %a %a @[" ^^ fmt ^^ "@]@.")
+        ("%a %a %a @[" ^^ fmt ^^ "@]@.")
+        Time.System.pp_hum
         dt
         Fmt.(styled `Magenta string)
         (Logs.Src.name src)
@@ -53,9 +54,10 @@ let index_log_size = ref None
 
 let () =
   let verbose () =
-    Logs.set_level (Some Logs.Debug) ;
+    Logs.set_level (Some Logs.App) ;
     Logs.set_reporter (reporter ())
   in
+  verbose () ;
   let index_log_size n = index_log_size := Some (int_of_string n) in
   match Unix.getenv "TEZOS_STORAGE" with
   | exception Not_found ->
@@ -349,7 +351,7 @@ let raw_commit ~time ?(message = "") context =
     Store.freeze ~max:[h] context.index.repo )
   else Lwt.return_unit )
   >>= fun () ->
-  ( if !counter = 4000 then (
+  ( if !counter = 200 then (
     counter := 0 ;
     pp_stats () ;
     Store.freeze ~max:[h] context.index.repo )
