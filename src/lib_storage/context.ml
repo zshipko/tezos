@@ -313,6 +313,11 @@ let counter = ref 0
 
 let first = ref true
 
+let _pp_commit_stats () =
+  let num_objects = Irmin_layers.Stats.get_adds () in
+  Irmin_layers.Stats.reset_adds () ;
+  Format.printf "Irmin stats: Objects created by commit %d \n@." num_objects
+
 let pp_stats () =
   let stats = Irmin_layers.Stats.get () in
   let pp_comma ppf () = Fmt.pf ppf "," in
@@ -357,6 +362,7 @@ let raw_commit ~time ?(message = "") context =
     Store.freeze ~max:[h] context.index.repo )
   else Lwt.return_unit )
   >|= fun () ->
+  (* pp_commit_stats () ; *)
   Store.Tree.clear context.tree ;
   h
 
