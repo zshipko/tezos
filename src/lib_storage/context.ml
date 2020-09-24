@@ -310,29 +310,14 @@ let unshallow context =
 
 let counter = ref 0
 
-let first = ref true
-
-let pp_stats () =
-  let stats = Irmin_layers.Stats.get () in
-  let copied_objects =
-    List.map2 (fun x y -> x + y) stats.copied_contents stats.copied_commits
-    |> List.map2 (fun x y -> x + y) stats.copied_nodes
-    |> List.map2 (fun x y -> x + y) stats.copied_branches
-  in
+let pp_stats  () =
+  let cumulative_num_objects = Irmin_layers.Stats.get_adds () in
+  let num_objects = cumulative_num_objects - !counter in
   Format.printf
-    "Irmin stats: nb_freeze = %d copied_objects = %a waiting_freeze  = %a \
-     completed_freeze = %a \n\
-     @."
-    stats.nb_freeze
-    Fmt.(list ~sep:comma int)
-    copied_objects
-    Fmt.(list ~sep:comma float)
-    stats.waiting_freeze
-    Fmt.(list ~sep:comma float)
-    stats.completed_freeze
+    "Irmin stats: Objects created by commit %d \n\
+     @." num_objects; counter := cumulative_num_objects
 
-let raw_commit ~time ?(message = "") context =
-  counter := succ !counter ;
+  let raw_commit ~time ?(message = "") context =
   let info =
     Irmin.Info.v ~date:(Time.Protocol.to_seconds time) ~author:"Tezos" message
   in
@@ -340,19 +325,8 @@ let raw_commit ~time ?(message = "") context =
   unshallow context
   >>= fun () ->
   Store.Commit.v context.index.repo ~info ~parents context.tree
-  >>= fun h ->
-  ( if !first then (
-    first := false ;
-    pp_stats () ;
-    Store.freeze ~max:[h] context.index.repo )
-  else Lwt.return_unit )
-  >>= fun () ->
-  ( if !counter = 200 then (
-    counter := 0 ;
-    pp_stats () ;
-    Store.freeze ~max:[h] context.index.repo )
-  else Lwt.return_unit )
-  >|= fun () ->
+  >|= fun h ->
+  pp_stats ();
   Store.Tree.clear context.tree ;
   h
 
