@@ -81,7 +81,7 @@ module Types = struct
     chain_db : Distributed_db.chain_db;
     block_validator : Block_validator.t;
     (* callback to chain_validator *)
-    notify_new_block : State.Block.t -> unit;
+    notify_new_block : State.Block.t -> unit tzresult Lwt.t;
     notify_termination : unit -> unit;
     limits : limits;
   }
@@ -498,7 +498,7 @@ let table =
   in
   Worker.create_table (Dropbox {merge})
 
-let create ?(notify_new_block = fun _ -> ())
+let create ?(notify_new_block = fun _ -> return_unit)
     ?(notify_termination = fun _ -> ()) limits block_validator chain_db peer_id
     =
   let name = (State.Chain.id (Distributed_db.chain_state chain_db), peer_id) in

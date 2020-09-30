@@ -66,7 +66,7 @@ module Request = struct
   type 'a t =
     | Request_validation : {
         chain_db : Distributed_db.chain_db;
-        notify_new_block : State.Block.t -> unit;
+        notify_new_block : State.Block.t -> unit tzresult;
         canceler : Lwt_canceler.t option;
         peer : P2p_peer.Id.t option;
         hash : Block_hash.t;
@@ -220,8 +220,7 @@ let on_request : type r. t -> r Request.t -> r tzresult Lwt.t =
                   ?peer
                   ~timeout:bv.limits.protocol_timeout
                   block ;
-                notify_new_block block ;
-                return (Ok (Some block))
+                notify_new_block block >>=? fun () -> return (Ok (Some block))
             | Error err as error ->
                 if
                   List.exists
@@ -303,8 +302,8 @@ let create limits db validation_process ~start_testchain =
 
 let shutdown = Worker.shutdown
 
-let validate w ?canceler ?peer ?(notify_new_block = fun _ -> ()) chain_db hash
-    (header : Block_header.t) operations =
+let validate w ?canceler ?peer ?(notify_new_block = fun _ -> return_unit)
+    chain_db hash (header : Block_header.t) operations =
   let bv = Worker.state w in
   let chain_state = Distributed_db.chain_state chain_db in
   should_validate_block w chain_state hash

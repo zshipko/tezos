@@ -185,12 +185,15 @@ let notify_new_block w block =
     nv.parameters.parent ;
   Lwt_watcher.notify nv.valid_block_input block ;
   Lwt_watcher.notify nv.parameters.global_valid_block_input block ;
-  Worker.Queue.push_request_now w (Validated block)
+  Worker.Queue.push_request_and_wait w (Validated block)
+  >>=? fun _ -> return_unit
 
 (* Called for every validated block coming from a remote peer_id. *)
 let notify_new_foreign_block w peer_id block =
-  notify_new_block w block ;
-  update_synchronisation_state w (State.Block.header block, peer_id)
+  notify_new_block w block
+  >>=? fun () ->
+  update_synchronisation_state w (State.Block.header block, peer_id) ;
+  return_unit
 
 let with_activated_peer_validator w peer_id f =
   let nv = Worker.state w in

@@ -126,7 +126,7 @@ type t = {
   chain_db : Distributed_db.chain_db;
   locator : Block_locator.t;
   block_validator : Block_validator.t;
-  notify_new_block : State.Block.t -> unit;
+  notify_new_block : State.Block.t -> unit tzresult Lwt.t;
   fetched_headers : (Block_hash.t * Block_header.t) list Lwt_pipe.t;
   fetched_blocks :
     (Block_hash.t * Block_header.t * Operation.t list list tzresult Lwt.t)
@@ -517,7 +517,7 @@ let rec validation_worker_loop pipeline =
 
     It intializes two pipes so that promises can communicate each
    others (see diagram at the begining of the file). *)
-let create ?(notify_new_block = fun _ -> ()) ~block_header_timeout
+let create ?(notify_new_block = fun _ -> return_unit) ~block_header_timeout
     ~block_operations_timeout block_validator peer_id chain_db locator =
   let canceler = Lwt_canceler.create () in
   let fetched_headers =
