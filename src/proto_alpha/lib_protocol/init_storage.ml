@@ -24,6 +24,64 @@
 (*                                                                           *)
 (*****************************************************************************)
 
+module Migrate_from_007_to_008 = struct
+  let rec path_remove_prefix = function
+    | (h1 :: t1, h2 :: t2) when String.(equal h1 h2) ->
+        path_remove_prefix (t1, t2)
+    | ([], t2) ->
+        return t2
+    | (_, _) ->
+        (*can't happens because the path have been digged starting with that
+          prefix *)
+        assert false
+
+  let fold_keys (type t) ~index ~init ~f ~index_path ctxt =
+    let (module Index : Storage_functors.INDEX with type t = t) = index in
+    let rec dig len path acc =
+      if Compare.Int.(len <= 0) then
+        path_remove_prefix (index_path, path)
+        >>=? fun key_path ->
+        match Index.of_path key_path with
+        | None ->
+            (* can't happens as the path have been digged and can't be false *)
+            assert false
+        | Some value ->
+            f path value acc
+      else
+        Raw_context.fold ctxt path ~init:(Ok acc) ~f:(fun k acc ->
+            Lwt.return acc
+            >>=? fun acc ->
+            match k with `Dir k | `Key k -> dig (len - 1) k acc)
+    in
+    dig Index.path_length index_path init
+
+  let migrate_indexed_storage (type t) ctxt ~from_index ~to_index ~index_path =
+    let (module To_index : Storage_functors.INDEX with type t = t) =
+      to_index
+    in
+    let tmp_index_path =
+      let rev_path = List.rev index_path in
+      List.rev (("tmp_" ^ List.hd rev_path) :: List.tl rev_path)
+    in
+    fold_keys
+      ~index:from_index
+      ~init:(ctxt, false)
+      ~f:(fun old_path value (ctxt, _has_value) ->
+        let new_path = tmp_index_path @ To_index.to_path value [] in
+        Raw_context.copy ctxt ~from:old_path ~to_:new_path
+        >>=? fun ctxt -> return (ctxt, true))
+      ~index_path
+      ctxt
+    >>=? fun (ctxt, has_value) ->
+    if has_value then
+      Raw_context.remove_rec ctxt index_path
+      >>= fun ctxt ->
+      Raw_context.copy ctxt tmp_index_path index_path
+      >>=? fun ctxt ->
+      Raw_context.remove_rec ctxt tmp_index_path >>= fun ctxt -> return ctxt
+    else return ctxt
+end
+
 (* This is the genesis protocol: initialise the state *)
 let prepare_first_block ctxt ~typecheck ~level ~timestamp ~fitness =
   Raw_context.prepare_first_block ~level ~timestamp ~fitness ctxt
