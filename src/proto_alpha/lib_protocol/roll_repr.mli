@@ -41,4 +41,6 @@ val to_int32 : roll -> Int32.t
 
 val ( = ) : roll -> roll -> bool
 
+module Index_007 : Storage_description.INDEX with type t = roll
+
 module Index : Storage_description.INDEX with type t = roll

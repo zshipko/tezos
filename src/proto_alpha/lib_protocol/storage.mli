@@ -62,6 +62,9 @@ module Roll : sig
   (** Storage from this submodule must only be accessed through the
       module `Roll`. *)
 
+  module Snapshoted_owner_index :
+    Storage_functors.INDEX with type t = Cycle_repr.t * int
+
   module Owner :
     Indexed_data_snapshotable_storage
       with type key = Roll_repr.t

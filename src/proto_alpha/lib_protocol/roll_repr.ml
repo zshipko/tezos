@@ -39,6 +39,31 @@ let rpc_arg = RPC_arg.like RPC_arg.int32 "roll"
 
 let to_int32 v = v
 
+module Index_007 = struct
+  type t = roll
+
+  let path_length = 3
+
+  let to_path roll l =
+    (Int32.to_string @@ Int32.logand roll (Int32.of_int 0xff))
+    :: ( Int32.to_string
+       @@ Int32.logand (Int32.shift_right_logical roll 8) (Int32.of_int 0xff)
+       )
+    :: Int32.to_string roll :: l
+
+  let of_path = function
+    | _ :: _ :: s :: _ ->
+        Int32.of_string_opt s
+    | _ ->
+        None
+
+  let rpc_arg = rpc_arg
+
+  let encoding = encoding
+
+  let compare = compare
+end
+
 module Index = struct
   type t = roll
 

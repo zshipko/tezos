@@ -174,6 +174,47 @@ let prepare_first_block ctxt ~typecheck ~level ~timestamp ~fitness =
         ~from_index:bigmap_index_007
         ~to_index:bigmap_index
         ~index_path:["big_maps"; "index"]
+      >>=? fun ctxt ->
+      let rolls_index_007 =
+        ( module Storage.Make_index (Roll_repr.Index_007)
+        : Storage_functors.INDEX
+          with type t = Roll_repr.t )
+      in
+      let rolls_index =
+        (module Storage.Make_index (Roll_repr.Index) : Storage_functors.INDEX
+          with type t = Roll_repr.t )
+      in
+      let snapshot_rolls_index_007 =
+        let (module Rolls_index_007) = rolls_index_007 in
+        ( module Storage_functors.Pair
+                   (Storage.Roll.Snapshoted_owner_index)
+                   (Rolls_index_007) : Storage_functors.INDEX
+          with type t = (Cycle_repr.t * int) * Roll_repr.t )
+      in
+      let snapshot_rolls_index =
+        let (module Rolls_index) = rolls_index in
+        ( module Storage_functors.Pair
+                   (Storage.Roll.Snapshoted_owner_index)
+                   (Rolls_index) : Storage_functors.INDEX
+          with type t = (Cycle_repr.t * int) * Roll_repr.t )
+      in
+      Migrate_from_007_to_008.migrate_indexed_storage
+        ctxt
+        ~from_index:rolls_index_007
+        ~to_index:rolls_index
+        ~index_path:["rolls"; "index"]
+      >>=? fun ctxt ->
+      Migrate_from_007_to_008.migrate_indexed_storage
+        ctxt
+        ~from_index:snapshot_rolls_index_007
+        ~to_index:snapshot_rolls_index
+        ~index_path:["rolls"; "owner"; "snapshot"]
+      >>=? fun ctxt ->
+      Migrate_from_007_to_008.migrate_indexed_storage
+        ctxt
+        ~from_index:rolls_index_007
+        ~to_index:rolls_index
+        ~index_path:["rolls"; "owner"; "current"]
 
 let prepare ctxt ~level ~predecessor_timestamp ~timestamp ~fitness =
   Raw_context.prepare ~level ~predecessor_timestamp ~timestamp ~fitness ctxt
