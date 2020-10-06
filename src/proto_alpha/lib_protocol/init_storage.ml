@@ -158,6 +158,22 @@ let prepare_first_block ctxt ~typecheck ~level ~timestamp ~fitness =
               @ ["delegated"] )
             ctxt)
         ctxt
+      >>=? fun ctxt ->
+      let bigmap_index_007 =
+        ( module Storage.Make_index (Storage.Big_map.Index_007)
+        : Storage_functors.INDEX
+          with type t = Storage.Big_map.id )
+      in
+      let bigmap_index =
+        ( module Storage.Make_index (Storage.Big_map.Index)
+        : Storage_functors.INDEX
+          with type t = Storage.Big_map.id )
+      in
+      Migrate_from_007_to_008.migrate_indexed_storage
+        ctxt
+        ~from_index:bigmap_index_007
+        ~to_index:bigmap_index
+        ~index_path:["big_maps"; "index"]
 
 let prepare ctxt ~level ~predecessor_timestamp ~timestamp ~fitness =
   Raw_context.prepare ~level ~predecessor_timestamp ~timestamp ~fitness ctxt

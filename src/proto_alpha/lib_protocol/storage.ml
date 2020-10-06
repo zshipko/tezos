@@ -339,6 +339,44 @@ module Big_map = struct
 
   module Index = Lazy_storage_kind.Big_map.Id
 
+  module Index_007 = struct
+    include Lazy_storage_kind.Big_map.Id
+
+    let path_length = 6 + path_length
+
+    let to_path c l =
+      let raw_key = Data_encoding.Binary.to_bytes_exn encoding c in
+      let (`Hex index_key) = Hex.of_bytes (Raw_hashes.blake2b raw_key) in
+      String.sub index_key 0 2 :: String.sub index_key 2 2
+      :: String.sub index_key 4 2 :: String.sub index_key 6 2
+      :: String.sub index_key 8 2 :: String.sub index_key 10 2 :: to_path c l
+
+    let of_path = function
+      | []
+      | [_]
+      | [_; _]
+      | [_; _; _]
+      | [_; _; _; _]
+      | [_; _; _; _; _]
+      | [_; _; _; _; _; _]
+      | _ :: _ :: _ :: _ :: _ :: _ :: _ :: _ :: _ ->
+          None
+      | index1 :: index2 :: index3 :: index4 :: index5 :: index6 :: tail ->
+          of_path tail
+          |> Option.map (fun c ->
+                 let raw_key = Data_encoding.Binary.to_bytes_exn encoding c in
+                 let (`Hex index_key) =
+                   Hex.of_bytes (Raw_hashes.blake2b raw_key)
+                 in
+                 assert (Compare.String.(String.sub index_key 0 2 = index1)) ;
+                 assert (Compare.String.(String.sub index_key 2 2 = index2)) ;
+                 assert (Compare.String.(String.sub index_key 4 2 = index3)) ;
+                 assert (Compare.String.(String.sub index_key 6 2 = index4)) ;
+                 assert (Compare.String.(String.sub index_key 8 2 = index5)) ;
+                 assert (Compare.String.(String.sub index_key 10 2 = index6)) ;
+                 c)
+  end
+
   module Indexed_context =
     Make_indexed_subcontext
       (Make_subcontext (Registered) (Raw_context)

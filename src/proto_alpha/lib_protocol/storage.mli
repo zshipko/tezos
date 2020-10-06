@@ -237,6 +237,10 @@ end
 module Big_map : sig
   type id = Lazy_storage_kind.Big_map.Id.t
 
+  module Index_007 : Storage_description.INDEX with type t = id
+
+  module Index : Storage_description.INDEX with type t = id
+
   module Next : sig
     val incr : Raw_context.t -> (Raw_context.t * id) tzresult Lwt.t
 
