@@ -125,7 +125,39 @@ let prepare_first_block ctxt ~typecheck ~level ~timestamp ~fitness =
         {index = voting_period_index; kind = Proposal; start_position}
       >>=? fun ctxt ->
       Storage.Vote.Pred_period_kind.init ctxt Promotion_vote
-      >>=? fun ctxt -> Storage.Sapling.Next.init ctxt
+      >>=? fun ctxt ->
+      Storage.Sapling.Next.init ctxt
+      >>=? fun ctxt ->
+      let contract_index_007 =
+        ( module Storage.Make_index (Contract_repr.Index_007)
+        : Storage_functors.INDEX
+          with type t = Contract_repr.t )
+      in
+      let contract_index =
+        ( module Storage.Make_index (Contract_repr.Index)
+        : Storage_functors.INDEX
+          with type t = Contract_repr.t )
+      in
+      Migrate_from_007_to_008.migrate_indexed_storage
+        ctxt
+        ~from_index:contract_index_007
+        ~to_index:contract_index
+        ~index_path:["contracts"; "index"]
+      >>=? fun ctxt ->
+      Storage.Contract.fold
+        ~init:(ok ctxt)
+        ~f:(fun contract ctxt ->
+          Lwt.return ctxt
+          >>=? fun ctxt ->
+          Migrate_from_007_to_008.migrate_indexed_storage
+            ~from_index:contract_index_007
+            ~to_index:contract_index
+            ~index_path:
+              ( ["contracts"; "index"]
+              @ Contract_repr.Index.to_path contract []
+              @ ["delegated"] )
+            ctxt)
+        ctxt
 
 let prepare ctxt ~level ~predecessor_timestamp ~timestamp ~fitness =
   Raw_context.prepare ~level ~predecessor_timestamp ~timestamp ~fitness ctxt
