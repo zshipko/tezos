@@ -153,3 +153,14 @@ val read_next_block : Lwt_unix.file_descr -> (t * int) Lwt.t
 (** Same as [read_next_block fd] but returns [None] if there was an
     error. *)
 val read_next_block_opt : Lwt_unix.file_descr -> (t * int) option Lwt.t
+
+(** [pread_block fd ~file_offset] reads from [fd] and decode the block
+    at offset [file_offset] in the descriptor. This returns the decoded
+    block along with the block length (number of bytes) of the encoded
+    block. This function may raise Unix.error errors, see Unix.read. *)
+val pread_block : Lwt_unix.file_descr -> file_offset:int -> (t * int) Lwt.t
+
+(** Same as [pread_block fd ~file_offset] but returns [None] if there
+    was an error. *)
+val pread_block_opt :
+  Lwt_unix.file_descr -> file_offset:int -> (t * int) option Lwt.t

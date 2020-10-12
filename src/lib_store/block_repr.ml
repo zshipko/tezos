@@ -201,14 +201,36 @@ let read_next_block fd =
   >>= fun () ->
   let block_length_int32 = Bytes.get_int32_be length_bytes 0 in
   let block_length = Int32.to_int block_length_int32 in
-  let block_bytes = Bytes.create (4 + block_length) in
+  let block_bytes = Bytes.extend length_bytes 0 block_length in
   Lwt_utils_unix.read_bytes ~pos:4 ~len:block_length fd block_bytes
   >>= fun () ->
-  Bytes.set_int32_be block_bytes 0 block_length_int32 ;
   Lwt.return
     (Data_encoding.Binary.of_bytes_exn encoding block_bytes, 4 + block_length)
 
 let read_next_block_opt fd =
   Lwt.catch
     (fun () -> read_next_block fd >>= fun b -> Lwt.return_some b)
+    (fun _exn -> Lwt.return_none)
+
+let pread_block fd ~file_offset =
+  (* Read length *)
+  let length_bytes = Bytes.create 4 in
+  Lwt_utils_unix.read_bytes ~file_offset ~pos:0 ~len:4 fd length_bytes
+  >>= fun () ->
+  let block_length_int32 = Bytes.get_int32_be length_bytes 0 in
+  let block_length = Int32.to_int block_length_int32 in
+  let block_bytes = Bytes.extend length_bytes 0 block_length in
+  Lwt_utils_unix.read_bytes
+    ~file_offset:(file_offset + 4)
+    ~pos:4
+    ~len:block_length
+    fd
+    block_bytes
+  >>= fun () ->
+  Lwt.return
+    (Data_encoding.Binary.of_bytes_exn encoding block_bytes, 4 + block_length)
+
+let pread_block_opt fd ~file_offset =
+  Lwt.catch
+    (fun () -> pread_block fd ~file_offset >>= fun b -> Lwt.return_some b)
     (fun _exn -> Lwt.return_none)

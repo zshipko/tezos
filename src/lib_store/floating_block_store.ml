@@ -57,33 +57,15 @@ let find_predecessors floating_store hash =
 
 let read_block floating_store hash =
   Lwt_idle_waiter.task floating_store.scheduler (fun () ->
-      try
-        let {offset; _} =
-          Floating_block_index.find floating_store.floating_block_index hash
-        in
-        (* Read dynamic length prefix *)
-        let length_bytes = Bytes.create 4 in
-        Lwt_utils_unix.read_bytes
-          ~file_offset:offset
-          ~pos:0
-          ~len:4
-          floating_store.fd
-          length_bytes
-        >>= fun () ->
-        let length = Data_encoding.(Binary.of_bytes_exn int31 length_bytes) in
-        let block_bytes = Bytes.extend length_bytes 0 length in
-        Lwt_utils_unix.read_bytes
-          ~file_offset:(offset + 4)
-          ~pos:4
-          ~len:length
-          floating_store.fd
-          block_bytes
-        >>= fun () ->
-        let block =
-          Data_encoding.Binary.of_bytes_exn Block_repr.encoding block_bytes
-        in
-        Lwt.return_some block
-      with Not_found -> Lwt.return_none)
+      Lwt.catch
+        (fun () ->
+          let {offset; _} =
+            Floating_block_index.find floating_store.floating_block_index hash
+          in
+          Block_repr.pread_block_opt floating_store.fd ~file_offset:offset
+          >>= function
+          | Some (block, _) -> Lwt.return_some block | None -> Lwt.return_none)
+        (fun _ -> Lwt.return_none))
 
 let locked_write_block floating_store ~offset ~block ~predecessors =
   ( match Data_encoding.Binary.to_bytes_opt Block_repr.encoding block with
