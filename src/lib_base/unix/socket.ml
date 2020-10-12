@@ -144,12 +144,17 @@ let send fd encoding message =
 let recv ?timeout fd encoding =
   let header_buf = Bytes.create message_len_size in
   protect (fun () ->
-      Lwt_utils_unix.read_bytes ?timeout ~len:message_len_size fd header_buf
+      Lwt_utils_unix.read_bytes_with_timeout
+        ?timeout
+        ~len:message_len_size
+        fd
+        header_buf
       >|= ok)
   >>=? fun () ->
   let len = Tezos_stdlib.TzEndian.get_uint16 header_buf 0 in
   let buf = Bytes.create len in
-  protect (fun () -> Lwt_utils_unix.read_bytes ?timeout ~len fd buf >|= ok)
+  protect (fun () ->
+      Lwt_utils_unix.read_bytes_with_timeout ?timeout ~len fd buf >|= ok)
   >>=? fun () ->
   match Data_encoding.Binary.read encoding buf 0 len with
   | Error re ->

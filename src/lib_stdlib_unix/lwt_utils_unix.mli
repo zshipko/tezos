@@ -26,18 +26,29 @@
 open Error_monad
 
 (** [default_net_timeout] is the default timeout used by functions in
-   this library which admit a timeout value, i.e. [read_bytes],
+   this library which admit a timeout value, i.e. [read_bytes_with_timeout],
    [Socket.connect], [Socket.recv]. *)
 val default_net_timeout : Ptime.Span.t ref
 
-(** [read_bytes ?timeout ?file_offset ?pos ?len fd buf] reads
+(** [read_bytes_with_timeout ?timeout ?file_offset ?pos ?len fd buf] reads
     [len-pos] bytes from [fd] into [bytes]. If [file_offset] is given,
     {!Lwt_unix.pread} will be used instead of {!Lwt_unix.read}.
 
     @raise Lwt_unix.Timeout if the operation failed to finish within a
     [timeout] time span. *)
-val read_bytes :
+val read_bytes_with_timeout :
   ?timeout:Ptime.Span.t ->
+  ?file_offset:int ->
+  ?pos:int ->
+  ?len:int ->
+  Lwt_unix.file_descr ->
+  bytes ->
+  unit Lwt.t
+
+(** [read_bytes ?file_offset ?pos ?len fd buf] reads
+    [len-pos] bytes from [fd] into [bytes]. If [file_offset] is given,
+    {!Lwt_unix.pread} will be used instead of {!Lwt_unix.read}. *)
+val read_bytes :
   ?file_offset:int ->
   ?pos:int ->
   ?len:int ->

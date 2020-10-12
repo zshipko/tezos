@@ -42,8 +42,8 @@ let () =
 
 let default_net_timeout = ref (Ptime.Span.of_int_s 8)
 
-let read_bytes ?(timeout = !default_net_timeout) ?file_offset ?(pos = 0) ?len
-    fd buf =
+let read_bytes_with_timeout ?(timeout = !default_net_timeout) ?file_offset
+    ?(pos = 0) ?len fd buf =
   let buflen = Bytes.length buf in
   let len = match len with None -> buflen - pos | Some l -> l in
   if pos < 0 || pos + len > buflen then invalid_arg "read_bytes" ;
@@ -63,6 +63,29 @@ let read_bytes ?(timeout = !default_net_timeout) ?file_offset ?(pos = 0) ?len
       | 0 ->
           Lwt.fail End_of_file
           (* other endpoint cleanly closed its connection *)
+      | nb_read' ->
+          inner (nb_read + nb_read') (pos + nb_read') (len - nb_read')
+  in
+  inner 0 pos len
+
+let read_bytes ?file_offset ?(pos = 0) ?len fd buf =
+  let buflen = Bytes.length buf in
+  let len = match len with None -> buflen - pos | Some l -> l in
+  if pos < 0 || pos + len > buflen then invalid_arg "read_bytes" ;
+  let rec inner nb_read pos len =
+    if len = 0 then Lwt.return_unit
+    else
+      let reader =
+        match file_offset with
+        | None ->
+            Lwt_unix.read
+        | Some fo ->
+            Lwt_unix.pread ~file_offset:(fo + nb_read)
+      in
+      reader fd buf pos len
+      >>= function
+      | 0 ->
+          Lwt.fail End_of_file
       | nb_read' ->
           inner (nb_read + nb_read') (pos + nb_read') (len - nb_read')
   in
