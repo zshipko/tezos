@@ -133,24 +133,19 @@ let get_highest_cemented_level chain_store =
   Cemented_block_store.get_highest_cemented_level
     (Block_store.cemented_block_store chain_store.block_store)
 
-(* Will that block be compatible with the current state of the store? *)
+(* Will that block be compatible with the current checkpoint. *)
 let locked_is_acceptable_block chain_state (hash, level) =
-  let level_limit =
-    Block_repr.last_allowed_fork_level chain_state.current_head_metadata
-  in
-  (* The block must at least be above the highest cemented block
-         (or savepoint when no blocks are cemented) *)
-  if Compare.Int32.(level_limit >= level) then Lwt.return_false
+  let (checkpoint_hash, checkpoint_level) = chain_state.checkpoint in
+  if Compare.Int32.(checkpoint_level < level) then
+    (* the predecessor is assumed compatible. *)
+    Lwt.return_true
+  else if Compare.Int32.(checkpoint_level = level) then
+    Lwt.return (Block_hash.equal hash checkpoint_hash)
   else
-    let (checkpoint_hash, checkpoint_level) = chain_state.checkpoint in
-    if Compare.Int32.(checkpoint_level < level) then
-      (* the predecessor is assumed compatible. *)
-      Lwt.return_true
-    else if Compare.Int32.(checkpoint_level = level) then
-      Lwt.return (Block_hash.equal hash checkpoint_hash)
-    else
-      Stored_data.read chain_state.current_head
-      >>= fun head -> Lwt.return (Block_repr.level head < checkpoint_level)
+    (* level < checkpoint_level *)
+    (* valid only if the current head is lower than the checkpoint. *)
+    Stored_data.read chain_state.current_head
+    >>= fun head -> Lwt.return (Block_repr.level head < checkpoint_level)
 
 let create_lockfile ~chain_dir =
   Lwt_unix.openfile
