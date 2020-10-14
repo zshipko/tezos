@@ -176,7 +176,8 @@ end = struct
 
   let t : t Irmin.Type.t =
     Irmin.Type.map
-      ~cli:(pp, of_string)
+      ~pp
+      ~of_string
       Irmin.Type.(string_of (`Fixed H.digest_size))
       ~short_hash
       H.of_raw_string
