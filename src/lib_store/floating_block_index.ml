@@ -88,4 +88,4 @@ module Block_info = struct
 end
 
 (* Hashmap from block's hashes to location *)
-include Index_unix.Make (Block_key) (Block_info)
+include Index_unix.Make (Block_key) (Block_info) (Index.Cache.Unbounded)

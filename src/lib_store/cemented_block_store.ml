@@ -33,10 +33,12 @@ open Store_errors
    <blocks> are prefixed by 4 bytes of length
 *)
 (* On-disk index of block's hashes to level *)
-module Cemented_block_level_index = Index_unix.Make (Block_key) (Block_level)
+module Cemented_block_level_index =
+  Index_unix.Make (Block_key) (Block_level) (Index.Cache.Unbounded)
 
 (* On-disk index of block's level to hash *)
-module Cemented_block_hash_index = Index_unix.Make (Block_level) (Block_key)
+module Cemented_block_hash_index =
+  Index_unix.Make (Block_level) (Block_key) (Index.Cache.Unbounded)
 
 type cemented_blocks_file = {
   start_level : int32;
