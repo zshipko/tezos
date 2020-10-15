@@ -320,19 +320,21 @@ let current_test_chain_key = ["test_chain"]
 
 let current_data_key = ["data"]
 
-let restore_integrity ?ppf index =
-  match Store.integrity_check ?ppf ~auto_repair:true index.repo with
-  | Ok (`Fixed n) ->
-      Ok (Some n)
-  | Ok `No_error ->
-      Ok None
-  | Error (`Cannot_fix msg) ->
-      error (failure "%s" msg)
-  | Error (`Corrupted n) ->
-      error
-        (failure
-           "unable to fix the corrupted context: %d bad entries detected"
-           n)
+let restore_integrity ?ppf index = ignore ppf ; ignore index ; Ok None
+
+(* let l = Store.integrity_check ?ppf ~auto_repair:true index.repo in
+ *
+ * | Ok (`Fixed n) ->
+ *     Ok (Some n)
+ * | Ok `No_error ->
+ *     Ok None
+ * | Error (`Cannot_fix msg) ->
+ *     error (failure "%s" msg)
+ * | Error (`Corrupted n) ->
+ *     error
+ *       (failure
+ *          "unable to fix the corrupted context: %d bad entries detected"
+ *          n) *)
 
 let syncs index = Store.sync index.repo
 
@@ -375,10 +377,6 @@ let unshallow context =
               >|= fun _ -> ())
         children)
 
-let counter = ref 0
-
-let first = ref true
-
 let pp_commit_stats () =
   let num_objects = Irmin_layers.Stats.get_adds () in
   Irmin_layers.Stats.reset_adds () ;
@@ -407,7 +405,6 @@ let pp_stats () =
     stats.completed_freeze
 
 let raw_commit ~time ?(message = "") context =
-  counter := succ !counter ;
   let info =
     Irmin.Info.v ~date:(Time.Protocol.to_seconds time) ~author:"Tezos" message
   in
@@ -415,22 +412,25 @@ let raw_commit ~time ?(message = "") context =
   unshallow context
   >>= fun () ->
   Store.Commit.v context.index.repo ~info ~parents context.tree
-  >>= fun h ->
+  >|= fun h ->
   pp_commit_stats () ;
-  ( if !first then (
-    first := false ;
-    pp_stats () ;
-    Store.freeze ~max:[h] context.index.repo )
-  else Lwt.return_unit )
-  >>= fun () ->
-  ( if !counter = 4000 then (
-    counter := 0 ;
-    pp_stats () ;
-    Store.freeze ~max:[h] context.index.repo )
-  else Lwt.return_unit )
-  >|= fun () ->
   Store.Tree.clear context.tree ;
   h
+
+let freeze ~max ~heads index =
+  (* TODO: allow to drop lower *)
+  if index.readonly then syncs index ;
+  let to_commit ctxt_hash =
+    let hash = Hash.of_context_hash ctxt_hash in
+    Store.Commit.of_hash index.repo hash
+    >>= function None -> assert false | Some commit -> Lwt.return commit
+  in
+  to_commit max
+  >>= fun max ->
+  Lwt_list.map_s to_commit heads
+  >>= fun heads ->
+  pp_stats () ;
+  Store.freeze ~max:[max] ~heads index.repo
 
 let hash ~time ?(message = "") context =
   let info =
