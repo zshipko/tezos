@@ -464,7 +464,7 @@ let apply ctxt chain_id ~policy
   in
   return (block_header, block_header_metadata, validation)
 
-let apply_and_store chain_store ?policy
+let apply_and_store ?(should_set_head = true) chain_store ?policy
     ?(operations = List.init nb_validation_passes (fun _ -> [])) pred =
   Store.Block.context chain_store pred
   >>=? fun ctxt ->
@@ -498,15 +498,17 @@ let apply_and_store chain_store ?policy
     ~operations
     validation_result
   >>=? function
-  | Some b ->
+  | Some b when should_set_head ->
       Store.Chain.set_head chain_store b >>=? fun _ -> return b
+  | Some b ->
+      return b
   | None ->
       assert false
 
 (* let hash = Block_header.hash header in
  * {hash; header; operations; context} *)
 
-let bake chain_store ?policy ?operation ?operations pred =
+let bake chain_store ?should_set_head ?policy ?operation ?operations pred =
   let operations =
     match (operation, operations) with
     | (Some op, Some ops) ->
@@ -518,7 +520,7 @@ let bake chain_store ?policy ?operation ?operations pred =
     | (None, None) ->
         None
   in
-  apply_and_store chain_store ?policy ?operations pred
+  apply_and_store ?should_set_head chain_store ?policy ?operations pred
 
 (********** Cycles ****************)
 
@@ -527,32 +529,33 @@ let get_constants chain_store b =
   Store.Block.context chain_store b
   >>=? fun ctxt -> Alpha_services.Constants.all (rpc_ctxt ctxt) b
 
-let bake_n chain_store ?policy n b =
+let bake_n chain_store ?should_set_head ?policy n b =
   Error_monad.fold_left_s
     (fun (bl, last) _ ->
-      bake chain_store ?policy last >>=? fun b -> return (b :: bl, b))
+      bake chain_store ?should_set_head ?policy last
+      >>=? fun b -> return (b :: bl, b))
     ([], b)
     (1 -- n)
   >>=? fun (bl, last) -> return (List.rev bl, last)
 
-let bake_until_cycle_end chain_store ?policy b =
+let bake_until_cycle_end chain_store ?should_set_head ?policy b =
   get_constants chain_store b
   >>=? fun Constants.{parametric = {blocks_per_cycle; _}; _} ->
   let current_level = Store.Block.level b in
   let current_level = Int32.rem current_level blocks_per_cycle in
   let delta = Int32.sub blocks_per_cycle current_level in
-  bake_n chain_store ?policy (Int32.to_int delta) b
+  bake_n ?should_set_head chain_store ?policy (Int32.to_int delta) b
 
-let bake_until_n_cycle_end chain_store ?policy n b =
+let bake_until_n_cycle_end chain_store ?should_set_head ?policy n b =
   Error_monad.fold_left_s
     (fun (bll, last) _ ->
-      bake_until_cycle_end chain_store ?policy last
+      bake_until_cycle_end ?should_set_head chain_store ?policy last
       >>=? fun (bl, last) -> return (bl :: bll, last))
     ([], b)
     (1 -- n)
   >>=? fun (bll, last) -> return (List.concat (List.rev bll), last)
 
-let bake_until_cycle chain_store ?policy cycle b =
+let bake_until_cycle chain_store ?should_set_head ?policy cycle b =
   get_constants chain_store b
   >>=? fun Constants.{parametric = {blocks_per_cycle; _}; _} ->
   let rec loop (bl, b) =
@@ -563,7 +566,7 @@ let bake_until_cycle chain_store ?policy cycle b =
     in
     if Int32.equal (Cycle.to_int32 cycle) current_cycle then return (bl, b)
     else
-      bake_until_cycle_end chain_store ?policy b
+      bake_until_cycle_end ?should_set_head chain_store ?policy b
       >>=? fun (bl', b') -> loop (bl @ bl', b')
   in
   loop ([b], b)
