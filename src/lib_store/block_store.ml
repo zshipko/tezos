@@ -489,118 +489,148 @@ let try_remove_temporary_stores block_store =
     (fun _ -> Lwt.return_unit)
 
 let merge_stores block_store ?(finalizer = fun () -> Lwt.return_unit)
-    ~nb_blocks_to_preserve ~history_mode ~from_block ~to_block () =
+    ~nb_blocks_to_preserve ~history_mode ~from_block ~to_block ~heads index ()
+    =
   (* Do not allow multiple merges *)
   Lwt_mutex.lock block_store.merge_mutex
   >>= fun () ->
   Store_events.Event.(emit start_merging_stores) (from_block, to_block)
   >>= fun () ->
-  let merge_start = Systime_os.now () in
-  (* Force waiting for a potential previous merging operation *)
-  let chain_dir = block_store.chain_dir in
-  Lwt_idle_waiter.force_idle block_store.merge_scheduler (fun () ->
-      assert (block_store.merging_thread = None) ;
-      let (_, final_level) = to_block in
-      let (_, initial_level) = from_block in
-      assert (Compare.Int32.(final_level >= initial_level)) ;
-      (* Move the rw in the ro stores *)
-      assert (List.length block_store.ro_floating_block_stores = 1) ;
-      let ro_store = List.hd block_store.ro_floating_block_stores in
-      let rw_store = block_store.rw_floating_block_store in
-      block_store.ro_floating_block_stores <-
-        block_store.rw_floating_block_store
-        :: block_store.ro_floating_block_stores ;
-      Floating_block_store.init ~chain_dir ~readonly:false RW_TMP
-      >>= fun new_rw_store ->
-      block_store.rw_floating_block_store <- new_rw_store ;
-      (* Create the merging thread that we want to run in background *)
-      let create_merging_thread () : unit tzresult Lwt.t =
-        Floating_block_store.init ~chain_dir ~readonly:false RO_TMP
-        >>= fun new_ro_store ->
-        Lwt.catch
-          (fun () ->
-            update_floating_stores
-              ~ro_store
-              ~rw_store
-              ~new_store:new_ro_store
-              ~from_block
-              ~to_block
-              ~nb_blocks_to_preserve
-            >>=? fun blocks_to_cement ->
-            match history_mode with
-            | History_mode.Archive ->
-                (* In archive, we store the metadatas *)
-                cement_blocks ~write_metadata:true block_store blocks_to_cement
-            | (Full {offset} | Rolling {offset}) when offset > 0 ->
-                (* If the [offset] > 0 then the cemented store's gc
-                 should be called to clean-up old cycles. *)
-                cement_blocks ~write_metadata:true block_store blocks_to_cement
-                >>=? fun () ->
-                (* Clean-up the files that are below the offset *)
-                Cemented_block_store.trigger_gc
-                  block_store.cemented_store
-                  history_mode
-                >>= return
-            | Full {offset} ->
-                assert (offset = 0) ;
-                (* In full, we do not store the metadata *)
-                cement_blocks
-                  ~write_metadata:false
-                  block_store
-                  blocks_to_cement
-            | Rolling {offset} ->
-                assert (offset = 0) ;
-                (* Drop the blocks *)
-                return_unit)
-          (fun exn ->
-            Floating_block_store.close new_ro_store >>= fun () -> Lwt.fail exn)
-        >>=? fun () ->
-        (* Swapping stores: hard-lock *)
-        Lwt_idle_waiter.force_idle block_store.merge_scheduler (fun () ->
-            move_all_floating_stores block_store ~new_ro_store
-            >>=? fun () ->
-            (* The clean-up will unset the [merging_thread] *)
-            return_unit)
-      in
-      (* Clean-up on cancel/exn *)
-      let merging_thread =
-        let cleanup () =
-          block_store.merging_thread <- None ;
-          try_remove_temporary_stores block_store
+  Lwt_list.map_s
+    (fun h ->
+      read_block ~read_metadata:false block_store (Block (h, 0))
+      >>= function
+      | Ok None | Error _ ->
+          assert false
+      | Ok (Some b) ->
+          Lwt.return (Block_repr.context b))
+    heads
+  >>= fun heads ->
+  read_block ~read_metadata:false block_store (Block (fst to_block, 0))
+  >>= function
+  | Ok None | Error _ ->
+      assert false
+  | Ok (Some b) ->
+      let final_block_ctxt = Block_repr.context b in
+      let merge_start = Systime_os.now () in
+      (* Force waiting for a potential previous merging operation *)
+      let chain_dir = block_store.chain_dir in
+      Lwt_idle_waiter.force_idle block_store.merge_scheduler (fun () ->
+          assert (block_store.merging_thread = None) ;
+          let (_, final_level) = to_block in
+          let (_, initial_level) = from_block in
+          assert (Compare.Int32.(final_level >= initial_level)) ;
+          (* Move the rw in the ro stores *)
+          assert (List.length block_store.ro_floating_block_stores = 1) ;
+          let ro_store = List.hd block_store.ro_floating_block_stores in
+          let rw_store = block_store.rw_floating_block_store in
+          block_store.ro_floating_block_stores <-
+            block_store.rw_floating_block_store
+            :: block_store.ro_floating_block_stores ;
+          Floating_block_store.init ~chain_dir ~readonly:false RW_TMP
+          >>= fun new_rw_store ->
+          block_store.rw_floating_block_store <- new_rw_store ;
+          (* Do not freeze in the asynchronous thread, instead do it in the critical section *)
+          (* That shouldn't be done here *)
+          Context.freeze ~max:final_block_ctxt ~heads index
           >>= fun () ->
-          Lwt_mutex.unlock block_store.merge_mutex ;
-          Lwt.return_unit
-        in
-        Lwt.catch
-          (fun () ->
-            Lwt.finalize
+          (* Create the merging thread that we want to run in background *)
+          let create_merging_thread () : unit tzresult Lwt.t =
+            Floating_block_store.init ~chain_dir ~readonly:false RO_TMP
+            >>= fun new_ro_store ->
+            Lwt.catch
               (fun () ->
-                create_merging_thread ()
-                >>=? fun () -> finalizer () >>= fun () -> return_unit)
-              (fun () -> cleanup ()))
-          (fun exn ->
-            Format.kasprintf
-              (fun t -> fail (Merge_error t))
-              "%s"
-              (Printexc.to_string exn))
-      in
-      Lwt.async (fun () ->
-          merging_thread
-          >>= function
-          | Ok () ->
-              let merge_end = Systime_os.now () in
-              let merging_time = Ptime.diff merge_end merge_start in
-              Store_events.Event.(emit end_merging_stores) merging_time
-              >>= fun () -> Lwt.return_unit
-          | Error e ->
-              (* FIXME how to handle failures here *)
-              let msg = Format.asprintf "%a" pp_print_error e in
-              Store_events.Event.(emit merge_error) (from_block, to_block, msg)
-              >>= fun () -> Lwt.return_unit) ;
-      block_store.merging_thread <- Some (final_level, merging_thread) ;
-      (* Temporary stores in place and the merging thread was
+                update_floating_stores
+                  ~ro_store
+                  ~rw_store
+                  ~new_store:new_ro_store
+                  ~from_block
+                  ~to_block
+                  ~nb_blocks_to_preserve
+                >>=? fun blocks_to_cement ->
+                ( match history_mode with
+                | History_mode.Archive ->
+                    (* In archive, we store the metadatas *)
+                    cement_blocks
+                      ~write_metadata:true
+                      block_store
+                      blocks_to_cement
+                | (Full {offset} | Rolling {offset}) when offset > 0 ->
+                    (* If the [offset] > 0 then the cemented store's gc
+                 should be called to clean-up old cycles. *)
+                    cement_blocks
+                      ~write_metadata:true
+                      block_store
+                      blocks_to_cement
+                    >>=? fun () ->
+                    (* Clean-up the files that are below the offset *)
+                    Cemented_block_store.trigger_gc
+                      block_store.cemented_store
+                      history_mode
+                    >>= return
+                | Full {offset} ->
+                    assert (offset = 0) ;
+                    (* In full, we do not store the metadata *)
+                    cement_blocks
+                      ~write_metadata:false
+                      block_store
+                      blocks_to_cement
+                | Rolling {offset} ->
+                    assert (offset = 0) ;
+                    (* Drop the blocks *)
+                    return_unit )
+                >>=? fun () -> return_unit)
+              (fun exn ->
+                Floating_block_store.close new_ro_store
+                >>= fun () -> Lwt.fail exn)
+            >>=? fun () ->
+            (* Swapping stores: hard-lock *)
+            Lwt_idle_waiter.force_idle block_store.merge_scheduler (fun () ->
+                move_all_floating_stores block_store ~new_ro_store
+                >>=? fun () ->
+                (* The clean-up will unset the [merging_thread] *)
+                return_unit)
+          in
+          (* Clean-up on cancel/exn *)
+          let merging_thread =
+            let cleanup () =
+              block_store.merging_thread <- None ;
+              try_remove_temporary_stores block_store
+              >>= fun () ->
+              Lwt_mutex.unlock block_store.merge_mutex ;
+              Lwt.return_unit
+            in
+            Lwt.catch
+              (fun () ->
+                Lwt.finalize
+                  (fun () ->
+                    create_merging_thread ()
+                    >>=? fun () -> finalizer () >>= fun () -> return_unit)
+                  (fun () -> cleanup ()))
+              (fun exn ->
+                Format.kasprintf
+                  (fun t -> fail (Merge_error t))
+                  "%s"
+                  (Printexc.to_string exn))
+          in
+          Lwt.async (fun () ->
+              merging_thread
+              >>= function
+              | Ok () ->
+                  let merge_end = Systime_os.now () in
+                  let merging_time = Ptime.diff merge_end merge_start in
+                  Store_events.Event.(emit end_merging_stores) merging_time
+                  >>= fun () -> Lwt.return_unit
+              | Error e ->
+                  (* FIXME how to handle failures here *)
+                  let msg = Format.asprintf "%a" pp_print_error e in
+                  Store_events.Event.(emit merge_error)
+                    (from_block, to_block, msg)
+                  >>= fun () -> Lwt.return_unit) ;
+          block_store.merging_thread <- Some (final_level, merging_thread) ;
+          (* Temporary stores in place and the merging thread was
          started: we can now release the hard-lock. *)
-      Lwt.return_unit)
+          Lwt.return_unit)
 
 let load ~chain_dir ~genesis_block ~readonly =
   let cemented_blocks_dir = Naming.(chain_dir // cemented_blocks_directory) in

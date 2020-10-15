@@ -266,6 +266,8 @@ val merge_stores :
   history_mode:History_mode.t ->
   from_block:block_descriptor ->
   to_block:block_descriptor ->
+  heads:Block_hash.t list ->
+  Context.index ->
   unit ->
   unit Lwt.t
 

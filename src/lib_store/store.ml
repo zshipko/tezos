@@ -1019,6 +1019,11 @@ module Chain = struct
        is occuring. *)
     lock_for_write chain_store.lockfile
     >>= fun () ->
+    let index = chain_store.global_store.context_index in
+    Stored_data.read chain_state.alternate_heads
+    >>= fun alternate_heads ->
+    let heads = Block_hash.Map.bindings alternate_heads |> List.map fst in
+    let heads = Block.hash new_head :: heads in
     (* The main part of this function is asynchronous so it returns
        immediately *)
     Block_store.merge_stores
@@ -1028,6 +1033,8 @@ module Chain = struct
       ~history_mode
       ~from_block
       ~to_block
+      ~heads
+      index
       ()
     >>= fun () ->
     (* The returned updated values are to be set in the memory
