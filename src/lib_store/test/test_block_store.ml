@@ -124,12 +124,14 @@ let test_consecutive_concurrent_merges block_store =
     Block_store.merge_stores
       block_store
       ~history_mode:Archive
+      ~heads:[]
       ~from_block:(descr (List.hd chunk))
       ~to_block:(descr (List.hd (List.rev chunk)))
       ~nb_blocks_to_preserve:0
       ~finalizer:(fun () ->
         assert_presence_in_block_store block_store chunk
         >>= function Ok () -> Lwt.return_unit | _ -> assert false)
+      (assert false)
       ()
   in
   let threads = List.map merge_chunk [chunk1; chunk2; chunk3; chunk4] in
@@ -148,12 +150,14 @@ let test_big_merge block_store =
   Block_store.merge_stores
     block_store
     ~history_mode:Archive
+    ~heads:[]
     ~from_block:(descr (List.hd blocks))
     ~to_block:(descr head)
     ~nb_blocks_to_preserve:0
     ~finalizer:(fun () ->
       assert_presence_in_block_store block_store blocks
       >>= function Ok () -> Lwt.return_unit | _ -> assert false)
+    (assert false)
     ()
   >>= fun () ->
   assert_presence_in_block_store ~with_metadata:false block_store blocks
@@ -195,9 +199,11 @@ let test_merge_with_branches block_store =
   Block_store.merge_stores
     block_store
     ~history_mode:Archive
+    ~heads:[]
     ~nb_blocks_to_preserve:0
     ~from_block
     ~to_block
+    (assert false)
     ()
   >>= fun () ->
   Block_store.await_merging block_store
@@ -222,12 +228,14 @@ let test_archive_merge block_store =
     Block_store.merge_stores
       block_store
       ~history_mode:Archive
+      ~heads:[]
       ~nb_blocks_to_preserve:0
       ~from_block:(descr (List.hd chunk))
       ~to_block:(descr (List.hd (List.rev chunk)))
       ~finalizer:(fun () ->
         assert_presence_in_block_store block_store chunk
         >>= function Ok () -> Lwt.return_unit | _ -> assert false)
+      (assert false)
       ()
   in
   let threads = List.map merge_chunk [chunk1; chunk2; chunk3; chunk4] in
@@ -251,12 +259,14 @@ let test_full_2_merge block_store =
     Block_store.merge_stores
       block_store
       ~history_mode:(Full {offset = 2})
+      ~heads:[]
       ~from_block:(descr (List.hd chunk))
       ~to_block:(descr (List.hd (List.rev chunk)))
       ~nb_blocks_to_preserve:0
       ~finalizer:(fun () ->
         assert_presence_in_block_store block_store chunk
         >>= function Ok () -> Lwt.return_unit | _ -> assert false)
+      (assert false)
       ()
   in
   let threads = List.map merge_chunk [chunk1; chunk2; chunk3; chunk4] in
@@ -289,9 +299,11 @@ let test_rolling_0_merge block_store =
     Block_store.merge_stores
       block_store
       ~history_mode:(Rolling {offset = 0})
+      ~heads:[]
       ~nb_blocks_to_preserve:(nb_blocks / 8)
       ~from_block:(descr (List.hd chunk))
       ~to_block:(descr (List.hd (List.rev chunk)))
+      (assert false)
       ()
   in
   let threads = List.map merge_chunk [chunk1; chunk2; chunk3; chunk4] in
@@ -325,9 +337,11 @@ let test_rolling_2_merge block_store =
     Block_store.merge_stores
       block_store
       ~nb_blocks_to_preserve:0
+      ~heads:[]
       ~history_mode:(Rolling {offset = 2})
       ~from_block:(descr (List.hd chunk))
       ~to_block:(descr (List.hd (List.rev chunk)))
+      (assert false)
       ()
   in
   let threads = List.map merge_chunk [chunk1; chunk2; chunk3; chunk4] in
