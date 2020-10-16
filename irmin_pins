@@ -1,0 +1,6 @@
+index.dev                                                           git    git+https://github.com/mirage/index#master
+irmin.2.2.0                                                         git    git+https://github.com/icristescu/irmin#some_fixes
+irmin-layers.2.2.0                                                  git    git+https://github.com/icristescu/irmin#some_fixes
+irmin-pack.2.2.0                                                    git    git+https://github.com/icristescu/irmin#some_fixes
+irmin-type.2.2.0                                                    git    git+https://github.com/icristescu/irmin#some_fixes
+ppx_irmin.2.2.0                                                     git    git+https://github.com/icristescu/irmin#some_fixes
