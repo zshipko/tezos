@@ -110,16 +110,19 @@ let reporter () =
 
 let index_log_size = ref None
 
-let overcommit = ref false
+let overcommit = ref true
 
 let () =
-  let verbose () =
+  let verbose_app () =
+    Logs.set_level (Some Logs.App) ;
+    Logs.set_reporter (reporter ())
+  in
+  let verbose_debug () =
     Logs.set_level (Some Logs.Debug) ;
     Logs.set_reporter (reporter ())
   in
   (* while testing the layered store, print stats and logs from irmin *)
-  Logs.set_level (Some Logs.App) ;
-  Logs.set_reporter (reporter ()) ;
+  verbose_app () ;
   let index_log_size n = index_log_size := Some (int_of_string n) in
   let overcommit () = overcommit := true in
   match Unix.getenv "TEZOS_STORAGE" with
@@ -129,8 +132,10 @@ let () =
       let args = String.split ',' v in
       List.iter
         (function
-          | "v" | "verbose" | "vv" ->
-              verbose ()
+          | "v" | "verbose" ->
+              verbose_app ()
+          | "vv" ->
+              verbose_debug ()
           | "overcommit" ->
               overcommit ()
           | v -> (
@@ -325,21 +330,30 @@ let current_test_chain_key = ["test_chain"]
 
 let current_data_key = ["data"]
 
-let restore_integrity ?ppf index = ignore ppf ; ignore index ; Ok None
-
-(* let l = Store.integrity_check ?ppf ~auto_repair:true index.repo in
- *
- * | Ok (`Fixed n) ->
- *     Ok (Some n)
- * | Ok `No_error ->
- *     Ok None
- * | Error (`Cannot_fix msg) ->
- *     error (failure "%s" msg)
- * | Error (`Corrupted n) ->
- *     error
- *       (failure
- *          "unable to fix the corrupted context: %d bad entries detected"
- *          n) *)
+let restore_integrity ?ppf index =
+  let l = Store.integrity_check ?ppf ~auto_repair:true index.repo in
+  let rec report expected = function
+    | Error (`Cannot_fix msg, layer) :: _ when expected = `Cannot_fix ->
+        error (failure "%s in layer %a" msg Irmin_layers.Layer_id.pp layer)
+    | Error (`Corrupted n, layer) :: _ when expected = `Corrupted ->
+        error
+          (failure
+             "unable to fix the corrupted context: %d bad entries detected in \
+              layer %a"
+             n
+             Irmin_layers.Layer_id.pp
+             layer)
+    | Ok (`Fixed n) :: _ when expected = `Fixed ->
+        Ok (Some n)
+    | _ :: tl ->
+        report expected tl
+    | [] ->
+        raise Not_found
+  in
+  try report `Cannot_fix l
+  with Not_found -> (
+    try report `Corrupted l
+    with Not_found -> ( try report `Fixed l with Not_found -> Ok None ) )
 
 let syncs index = Store.sync index.repo
 
@@ -382,10 +396,17 @@ let unshallow context =
               >|= fun _ -> ())
         children)
 
-let pp_commit_stats () =
+let total = ref 0
+
+let pp_commit_stats h =
   let num_objects = Irmin_layers.Stats.get_adds () in
+  total := !total + num_objects ;
   Irmin_layers.Stats.reset_adds () ;
-  Format.printf "Irmin stats: Objects created by commit %d \n@." num_objects
+  Format.printf
+    "Irmin stats: Objects created by commit %a = %d \n@."
+    Store.Commit.pp_hash
+    h
+    num_objects
 
 let pp_stats () =
   let stats = Irmin_layers.Stats.get () in
@@ -398,6 +419,7 @@ let pp_stats () =
   Format.printf
     "%a Irmin stats: nb_freeze = %d copied_objects = %a waiting_freeze  = %a \
      completed_freeze = %a \n\
+    \  objects added in upper since last freeze = %d \n\
      @."
     Time.System.pp_hum
     (Systime_os.now ())
@@ -408,6 +430,8 @@ let pp_stats () =
     stats.waiting_freeze
     Fmt.(list ~sep:pp_comma float)
     stats.completed_freeze
+    !total ;
+  total := 0
 
 let raw_commit ~time ?(message = "") context =
   let info =
@@ -418,11 +442,11 @@ let raw_commit ~time ?(message = "") context =
   >>= fun () ->
   Store.Commit.v context.index.repo ~info ~parents context.tree
   >|= fun h ->
-  pp_commit_stats () ;
+  pp_commit_stats h ;
   Store.Tree.clear context.tree ;
   h
 
-let freeze ~max ~heads index =
+let freeze ?recovery ~max ~heads index =
   (* TODO: allow to drop lower *)
   if index.readonly then syncs index ;
   let to_commit ctxt_hash =
@@ -435,7 +459,7 @@ let freeze ~max ~heads index =
   Lwt_list.map_s to_commit heads
   >>= fun heads ->
   pp_stats () ;
-  Store.freeze ~min_upper:[max] ~max:heads index.repo
+  Store.freeze ?recovery ~min_upper:[max] ~max:heads index.repo
 
 let hash ~time ?(message = "") context =
   let info =
@@ -572,7 +596,12 @@ let config ?readonly root =
       ~index_throttle
       root
   in
-  Irmin_pack.config_layers ~conf ~copy_in_upper:true ~with_lower:true ()
+  Irmin_pack.config_layers
+    ~conf
+    ~copy_in_upper:true
+    ~with_lower:false
+    ~blocking_copy_size:8000
+    ()
 
 let init ?patch_context ?(readonly = false) root =
   let config = config ~readonly root in
@@ -580,6 +609,10 @@ let init ?patch_context ?(readonly = false) root =
     Store.Repo.v config
     >>= fun repo ->
     let v = {path = root; repo; patch_context; readonly} in
+    if Store.needs_recovery repo then
+      Format.printf
+        "Node aborted during a freeze; set recovery flag to true at next call \
+         to freeze." ;
     Lwt.return v
   in
   Lwt.catch open_store (function
