@@ -172,14 +172,19 @@ end = struct
                Error_monad.pp_print_error
                err))
 
-  let short_hash t = Irmin.Type.(short_hash string (H.to_raw_string t))
+  let hash_key = Irmin.Type.(unstage (short_hash string))
+
+  let short_hash t = hash_key (H.to_raw_string t)
+
+  let staged_short_hash =
+    Irmin.Type.(stage @@ fun ?seed t -> hash_key ?seed (H.to_raw_string t))
 
   let t : t Irmin.Type.t =
     Irmin.Type.map
       ~pp
       ~of_string
       Irmin.Type.(string_of (`Fixed H.digest_size))
-      ~short_hash
+      ~short_hash:staged_short_hash
       H.of_raw_string
       H.to_raw_string
 
@@ -430,7 +435,7 @@ let freeze ~max ~heads index =
   Lwt_list.map_s to_commit heads
   >>= fun heads ->
   pp_stats () ;
-  Store.freeze ~max:[max] ~heads index.repo
+  Store.freeze ~min_upper:[max] ~max:heads index.repo
 
 let hash ~time ?(message = "") context =
   let info =
