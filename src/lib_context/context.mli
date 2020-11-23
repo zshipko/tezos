@@ -294,6 +294,13 @@ val check_protocol_commit_consistency :
   parents_contexts:Context_hash.t list ->
   bool Lwt.t
 
+(** Offline integrity checking and statistics for contexts. *)
+module Checks : sig
+  module Pack : Irmin_pack.Checks.S
+
+  module Index : Index.Checks.S
+end
+
 (**/**)
 
 (** {b Warning} For testing purposes only *)
