@@ -61,6 +61,7 @@ type argument =
   | Bootstrap_threshold of int  (** [--bootstrap-threshold] (deprecated) *)
   | Synchronisation_threshold of int  (** [--synchronisation-threshold] *)
   | Connections of int  (** [--connections] *)
+  | Sync_latency of int  (** [--sync-latency] *)
   | Private_mode  (** [--private-mode] *)
   | Peer of string  (** [--peer] *)
 

@@ -33,6 +33,7 @@ type argument =
   | Bootstrap_threshold of int
   | Synchronisation_threshold of int
   | Connections of int
+  | Sync_latency of int
   | Private_mode
   | Peer of string
 
@@ -55,6 +56,8 @@ let make_argument = function
       ["--synchronisation-threshold"; string_of_int x]
   | Connections x ->
       ["--connections"; string_of_int x]
+  | Sync_latency x ->
+      ["--sync-latency"; string_of_int x]
   | Private_mode ->
       ["--private-mode"]
   | Peer x ->
