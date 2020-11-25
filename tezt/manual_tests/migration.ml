@@ -108,14 +108,20 @@ let migration ?yes_node_path ?yes_wallet context protocol =
   let data_dir = Temp.dir "tezos-node-test" in
   let* () = Process.run "cp" ["-R"; context ^ "/."; data_dir] in
   let* node =
-    Node.init ~rpc_port:19731 ~net_port:18731 ~data_dir [Connections 0]
+    Node.init
+      ~rpc_port:19731
+      ~net_port:18731
+      ~data_dir
+      [Connections 0; Synchronisation_threshold 0; Sync_latency 65535]
   in
   let* client = Client.init ~node () in
-  let* json = RPC.get_current_level ~node client in
-  let level = JSON.(json |-> "level" |> as_int) in
+  let* level_json = RPC.get_current_level client in
+  let level_level_before = JSON.(level_json |-> "level" |> as_int) in
+  Log.info "current level %l" level_level_before ;
   let* () = Node.terminate node in
+  let migration_level = level_level_before + 1 in
+  Log.info "migration level %l" migration_level ;
   Log.info "Updating node config with user_activated_upgrade" ;
-  let migration_level = level + 1 in
   update_config_with_user_activated
     (data_dir ^ "/config.json")
     migration_level
@@ -128,7 +134,11 @@ let migration ?yes_node_path ?yes_wallet context protocol =
       ~data_dir
       []
   in
-  let* () = Node.run node [Connections 0] in
+  let* () =
+    Node.run
+      node
+      [Connections 0; Synchronisation_threshold 0; Sync_latency 65535]
+  in
   let* () = Node.wait_for_ready node in
   Log.info "Creating yes-wallet dir" ;
   let* base_dir =
@@ -142,32 +152,15 @@ let migration ?yes_node_path ?yes_wallet context protocol =
   in
   let client = Client.create ~base_dir ~node () in
   Log.info "Bake and wait until migration is finished" ;
-  let* () = bake_with_foundation client in
-  let* _until_mig = Node.wait_for_level node migration_level in
-  let* levels_in_current_cycle = RPC.get_levels_in_curent_cycle client in
-  let last_block_of_cycle =
-    JSON.(levels_in_current_cycle |-> "last" |> as_int)
-  in
-  let* prev_level = RPC.get_current_level client in
-  let prev_cycle = JSON.(prev_level |-> "cycle" |> as_int) in
-  Log.info "Bake until new cycle" ;
   let* () =
-    repeat
-      (last_block_of_cycle - migration_level + 1)
-      (fun () -> bake_with_foundation client)
+    repeat (migration_level - level_level_before) (fun () ->
+        bake_with_foundation client)
   in
-  let* _until_end_of_cycle = Node.wait_for_level node last_block_of_cycle in
-  let* after_level = RPC.get_current_level client in
-  let after_cycle = JSON.(after_level |-> "cycle" |> as_int) in
-  if prev_cycle + 1 <> after_cycle then
-    Test.fail
-      "The cycle of current level is %d where it was expected to be %d "
-      prev_cycle
-      after_cycle
-  else unit
+  let* _wait_migration = Node.wait_for_level node migration_level in
+  unit
 
-let protocol = Constant.alpha.hash
+let protocol = "PsyTYe6ognsMjiBpBqSx2u3MTb7RVTpe5g5oDufZ5KEPSiUr5sE"
 
-let context = "~/tezos-node-test"
+let context = "./tezos-node-mainnet"
 
 let register () = migration context protocol
