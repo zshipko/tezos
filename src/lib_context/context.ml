@@ -110,7 +110,7 @@ let reporter () =
 
 let index_log_size = ref None
 
-let overcommit = ref true
+let overcommit = ref false
 
 let () =
   let verbose_app () =
@@ -303,7 +303,7 @@ module Conf = struct
 end
 
 module Store =
-  Irmin_pack.Make_ext_layered (Conf) (Irmin.Metadata.None) (Contents)
+  Irmin_pack.Layered.Make_ext (Conf) (Irmin.Metadata.None) (Contents)
     (Irmin.Path.String_list)
     (Irmin.Branch.String)
     (Hash)
@@ -396,17 +396,33 @@ let unshallow context =
               >|= fun _ -> ())
         children)
 
+let count = ref 0
 let total = ref 0
 
-let pp_commit_stats h =
+let commit_stats () =
   let num_objects = Irmin_layers.Stats.get_adds () in
   total := !total + num_objects ;
   Irmin_layers.Stats.reset_adds () ;
-  Format.printf
+  (*Format.printf
     "Irmin stats: Objects created by commit %a = %d \n@."
     Store.Commit.pp_hash
     h
-    num_objects
+    num_objects*)
+  num_objects
+
+let maxrss_stat () =
+  let get_maxrss () =
+    let usage = Rusage.(get Self) in
+    let ( / ) = Int64.div in
+    Int64.to_int (usage.maxrss / 1024L / 1024L)
+  in
+  let objs = commit_stats () in
+  Format.printf
+    "commit_number %d, maxrss %d, objects %d\n%!"
+    !count
+    (get_maxrss ())
+    objs ;
+  incr count
 
 let pp_stats () =
   let stats = Irmin_layers.Stats.get () in
@@ -442,7 +458,7 @@ let raw_commit ~time ?(message = "") context =
   >>= fun () ->
   Store.Commit.v context.index.repo ~info ~parents context.tree
   >|= fun h ->
-  pp_commit_stats h ;
+  maxrss_stat ();
   Store.Tree.clear context.tree ;
   h
 
@@ -600,7 +616,7 @@ let config ?readonly root =
     ~conf
     ~copy_in_upper:true
     ~with_lower:false
-    ~blocking_copy_size:8000
+    ~blocking_copy_size:1000000
     ()
 
 let init ?patch_context ?(readonly = false) root =
