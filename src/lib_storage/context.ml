@@ -307,9 +307,17 @@ let raw_commit ~time ?(message = "") context =
   unshallow context
   >>= fun () ->
   Store.Commit.v context.index.repo ~info ~parents context.tree
-  >|= fun h ->
+  >>= fun h ->
   Store.Tree.clear context.tree ;
-  h
+  Store.Tree.find_tree context.tree ["data"] >>= fun topt ->
+  begin match topt with
+    | None -> assert false
+    | Some tree ->
+        let h = Store.Tree.hash tree in
+        Format.eprintf "commit hash of data/: %a@."
+          Context_hash.pp (Hash.to_context_hash h)
+  end;
+  Lwt.return h
 
 let hash ~time ?(message = "") context =
   let info =
