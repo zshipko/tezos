@@ -55,7 +55,9 @@ module Migrate_from_007_to_008 = struct
     in
     dig Index.path_length index_path init
 
-  let migrate_indexed_storage (type t) ctxt ~from_index ~to_index ~index_path =
+  let migrate_indexed_storage (type t) ?(log=true) ctxt ~from_index ~to_index ~index_path =
+    (if log then Logging.lwt_log_error "migrate_indexed_storage_008 %s"  (String.concat "/" index_path)
+     else Lwt.return ()) >>= fun () ->
     let (module To_index : Storage_functors.INDEX with type t = t) =
       to_index
     in
@@ -63,16 +65,20 @@ module Migrate_from_007_to_008 = struct
       let rev_path = List.rev index_path in
       List.rev (("tmp_" ^ List.hd rev_path) :: List.tl rev_path)
     in
+    let cntr = ref 0 in
     fold_keys
       ~index:from_index
       ~init:(ctxt, false)
       ~f:(fun old_path value (ctxt, _has_value) ->
         let new_path = tmp_index_path @ To_index.to_path value [] in
+        incr cntr;
         Raw_context.copy ctxt ~from:old_path ~to_:new_path
         >>=? fun ctxt -> return (ctxt, true))
       ~index_path
       ctxt
     >>=? fun (ctxt, has_value) ->
+    (if log then Logging.lwt_log_error "migrate_indexed_storage_008 %s copied %d" (String.concat "/" index_path) !cntr
+     else Lwt.return ()) >>= fun () ->
     if has_value then
       Raw_context.remove_rec ctxt index_path
       >>= fun ctxt ->
@@ -149,7 +155,7 @@ let prepare_first_block ctxt ~typecheck ~level ~timestamp ~fitness =
         ~f:(fun contract ctxt ->
           Lwt.return ctxt
           >>=? fun ctxt ->
-          Migrate_from_007_to_008.migrate_indexed_storage
+          Migrate_from_007_to_008.migrate_indexed_storage ~log:false
             ~from_index:contract_index_007
             ~to_index:contract_index
             ~index_path:
