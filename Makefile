@@ -21,17 +21,10 @@ DOCKER_DEPS_MINIMAL_IMAGE_VERSION := minimal--${opam_repository_tag}
 COVERAGE_REPORT := _coverage_report
 MERLIN_INSTALLED := $(shell opam list merlin --installed --silent 2> /dev/null; echo $$?)
 
-ifeq ($(filter ${opam_version}.%,${current_opam_version}),)
-$(error Unexpected opam version (found: ${current_opam_version}, expected: ${opam_version}.*))
-endif
-
 current_ocaml_version := $(shell opam exec -- ocamlc -version)
 
 .PHONY: all
 all: generate_dune
-ifneq (${current_ocaml_version},${ocaml_version})
-	$(error Unexpected ocaml version (found: ${current_ocaml_version}, expected: ${ocaml_version}))
-endif
 	@dune build \
 		src/bin_node/main.exe \
 		src/bin_validation/main_validator.exe \
