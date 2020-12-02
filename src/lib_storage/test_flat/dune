@@ -1,0 +1,15 @@
+(executable
+ (name test)
+ (modules test)
+  (libraries tezos-base
+            tezos-storage
+            tezos-stdlib-unix
+	    tezos-shell-services
+	    tezos-shell
+)
+ (flags (:standard -open Tezos_base__TzPervasives
+                   -open Tezos_storage
+                   -open Tezos_stdlib_unix
+		   -open Tezos_shell
+		   )))
+
