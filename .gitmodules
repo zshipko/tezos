@@ -1,0 +1,9 @@
+[submodule "dev/repr"]
+	path = dev/repr
+	url = https://github.com/mirage/repr
+[submodule "dev/index"]
+	path = dev/index
+	url = https://github.com/mirage/index
+[submodule "dev/irmin"]
+	path = dev/irmin
+	url = https://github.com/mirage/irmin
