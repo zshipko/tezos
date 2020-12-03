@@ -25,67 +25,40 @@
 (*****************************************************************************)
 
 module Migrate_from_007_to_008 = struct
-  let rec path_remove_prefix = function
-    | (h1 :: t1, h2 :: t2) when String.(equal h1 h2) ->
-        path_remove_prefix (t1, t2)
-    | ([], t2) ->
-        return t2
-    | (_, _) ->
-        (*can't happens because the path have been digged starting with that
-          prefix *)
-        assert false
-
-  let fold_keys (type t) ~index ~init ~f ~index_path ctxt =
-    let (module Index : Storage_functors.INDEX with type t = t) = index in
-    let rec dig len path acc =
-      if Compare.Int.(len <= 0) then
-        path_remove_prefix (index_path, path)
-        >>=? fun key_path ->
-        match Index.of_path key_path with
-        | None ->
-            (* can't happens as the path have been digged and can't be false *)
-            assert false
-        | Some value ->
-            f path value acc
-      else
-        Raw_context.fold ctxt path ~init:(Ok acc) ~f:(fun k acc ->
-            Lwt.return acc
-            >>=? fun acc ->
-            match k with `Dir k | `Key k -> dig (len - 1) k acc)
+  let fold_keys (type t) ~from_index ~to_index ~init ~f ~index_path ctxt =
+    let (module From_index : Storage_functors.INDEX with type t = t) =
+      from_index
     in
-    dig Index.path_length index_path init
-
-  let migrate_indexed_storage (type t) ?(log=true) ctxt ~from_index ~to_index ~index_path =
-    (if log then Logging.lwt_log_error "migrate_indexed_storage_008 %s"  (String.concat "/" index_path)
-     else Lwt.return ()) >>= fun () ->
     let (module To_index : Storage_functors.INDEX with type t = t) =
       to_index
     in
-    let tmp_index_path =
-      let rev_path = List.rev index_path in
-      List.rev (("tmp_" ^ List.hd rev_path) :: List.tl rev_path)
-    in
+    Raw_context.fold_rec ctxt ~depth:From_index.path_length index_path ~init
+      ~f:(fun path v acc ->
+        match From_index.of_path path with
+        | Some i ->
+           let new_path = To_index.to_path i [] in
+           f new_path v acc
+        | None ->
+           Lwt.return acc)
+
+  let migrate_indexed_storage ?(log = true) ctxt ~from_index ~to_index ~index_path =
     let cntr = ref 0 in
     fold_keys
-      ~index:from_index
-      ~init:(ctxt, false)
-      ~f:(fun old_path value (ctxt, _has_value) ->
-        let new_path = tmp_index_path @ To_index.to_path value [] in
+      ~from_index ~to_index
+      ~init:(Raw_context.empty_cursor ctxt, false)
+      ~f:(fun new_path v (acc, _) ->
         incr cntr;
-        Raw_context.copy ctxt ~from:old_path ~to_:new_path
-        >>=? fun ctxt -> return (ctxt, true))
+        Raw_context.copy_cursor acc ~from:v ~to_:new_path
+        >|= fun acc -> (acc, true))
       ~index_path
       ctxt
-    >>=? fun (ctxt, has_value) ->
-    (if log then Logging.lwt_log_error "migrate_indexed_storage_008 %s copied %d" (String.concat "/" index_path) !cntr
+    >>= fun (cursor, has_value) ->
+    (if log then Logging.lwt_log_error
+                   "migrate_indexed_storage_008 %s copied %d"
+                   (String.concat "/" index_path) !cntr
      else Lwt.return ()) >>= fun () ->
-    if has_value then
-      Raw_context.remove_rec ctxt index_path
-      >>= fun ctxt ->
-      Raw_context.copy ctxt tmp_index_path index_path
-      >>=? fun ctxt ->
-      Raw_context.remove_rec ctxt tmp_index_path >>= fun ctxt -> return ctxt
-    else return ctxt
+    if has_value then Raw_context.set_cursor ctxt index_path cursor
+    else Lwt.return ctxt
 end
 
 (* This is the genesis protocol: initialise the state *)
@@ -149,7 +122,7 @@ let prepare_first_block ctxt ~typecheck ~level ~timestamp ~fitness =
         ~from_index:contract_index_007
         ~to_index:contract_index
         ~index_path:["contracts"; "index"]
-      >>=? fun ctxt ->
+      >>= fun ctxt ->
       Storage.Contract.fold
         ~init:(ok ctxt)
         ~f:(fun contract ctxt ->
@@ -162,7 +135,8 @@ let prepare_first_block ctxt ~typecheck ~level ~timestamp ~fitness =
               ( ["contracts"; "index"]
               @ Contract_repr.Index.to_path contract []
               @ ["delegated"] )
-            ctxt)
+              ctxt
+          >>= return)
         ctxt
       >>=? fun ctxt ->
       let bigmap_index_007 =
@@ -180,7 +154,7 @@ let prepare_first_block ctxt ~typecheck ~level ~timestamp ~fitness =
         ~from_index:bigmap_index_007
         ~to_index:bigmap_index
         ~index_path:["big_maps"; "index"]
-      >>=? fun ctxt ->
+      >>= fun ctxt ->
       let rolls_index_007 =
         ( module Storage.Make_index (Roll_repr.Index_007)
         : Storage_functors.INDEX
@@ -209,18 +183,19 @@ let prepare_first_block ctxt ~typecheck ~level ~timestamp ~fitness =
         ~from_index:rolls_index_007
         ~to_index:rolls_index
         ~index_path:["rolls"; "index"]
-      >>=? fun ctxt ->
+      >>= fun ctxt ->
       Migrate_from_007_to_008.migrate_indexed_storage
         ctxt
         ~from_index:snapshot_rolls_index_007
         ~to_index:snapshot_rolls_index
         ~index_path:["rolls"; "owner"; "snapshot"]
-      >>=? fun ctxt ->
+      >>= fun ctxt ->
       Migrate_from_007_to_008.migrate_indexed_storage
         ctxt
         ~from_index:rolls_index_007
         ~to_index:rolls_index
         ~index_path:["rolls"; "owner"; "current"]
+      >>= return
 
 let prepare ctxt ~level ~predecessor_timestamp ~timestamp ~fitness =
   Raw_context.prepare ~level ~predecessor_timestamp ~timestamp ~fitness ctxt

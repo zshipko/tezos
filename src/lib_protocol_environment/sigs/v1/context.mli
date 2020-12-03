@@ -59,3 +59,15 @@ val register_resolver :
   'a Base58.encoding -> (t -> string -> 'a list Lwt.t) -> unit
 
 val complete : t -> string -> string list Lwt.t
+
+type cursor
+
+val empty_cursor: t -> cursor
+
+val set_cursor: t -> key -> cursor -> t Lwt.t
+
+val copy_cursor : cursor -> from:cursor -> to_:key -> cursor Lwt.t
+
+val fold_rec :
+  ?depth:int ->
+  t -> key -> init:'a -> f:(key -> cursor -> 'a -> 'a Lwt.t) -> 'a Lwt.t

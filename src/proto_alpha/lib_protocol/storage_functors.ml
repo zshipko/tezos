@@ -73,6 +73,12 @@ module Make_subcontext (R : REGISTER) (C : Raw_context.T) (N : NAME) :
 
   type context = t
 
+  type cursor = C.cursor
+
+  let empty_cursor = C.empty_cursor
+
+  let copy_cursor = C.copy_cursor
+
   let name_length = List.length N.name
 
   let to_key k = N.name @ k
@@ -100,6 +106,11 @@ module Make_subcontext (R : REGISTER) (C : Raw_context.T) (N : NAME) :
   let remove t k = C.remove t (to_key k)
 
   let remove_rec t k = C.remove_rec t (to_key k)
+
+  let set_cursor t k = C.set_cursor t (to_key k)
+
+  let fold_rec ?depth t k ~init ~f =
+    C.fold_rec ?depth t (to_key k) ~init ~f:(fun k v acc -> f (of_key k) v acc)
 
   let copy t ~from ~to_ = C.copy t ~from:(to_key from) ~to_:(to_key to_)
 
@@ -699,6 +710,12 @@ module Make_indexed_subcontext (C : Raw_context.T) (I : INDEX) :
 
     type context = t
 
+    type cursor = C.cursor
+
+    let empty_cursor c =
+      let (t, _) = unpack c in
+      C.empty_cursor t
+
     let to_key i k = I.to_path i k
 
     let of_key k = Misc.remove_elem_from_list I.path_length k
@@ -780,6 +797,12 @@ module Make_indexed_subcontext (C : Raw_context.T) (I : INDEX) :
       C.check_enough_gas t g
 
     let description = description
+
+    let set_cursor _ _ _ = failwith "TODO"
+
+    let copy_cursor _ ~from:_ ~to_:_ = failwith "TODO"
+
+    let fold_rec ?depth:_ _ _ ~init:_ ~f:_= failwith "TODO"
   end
 
   let resolve t prefix =

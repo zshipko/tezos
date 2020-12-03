@@ -346,6 +346,8 @@ let test_dump {idx; block3b; _} =
 
 (******************************************************************************)
 
+let () = Logs.set_level (Some Logs.Debug)
+
 let tests : (string * (t -> unit Lwt.t)) list =
   [ ("simple", test_simple);
     ("continuation", test_continuation);

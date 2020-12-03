@@ -222,6 +222,22 @@ module type T = sig
     f:(Context.key_or_dir -> 'a -> 'a Lwt.t) ->
     'a Lwt.t
 
+  type cursor
+
+  val empty_cursor: t -> cursor
+
+  val set_cursor: context -> key -> cursor -> context Lwt.t
+
+  val copy_cursor : cursor -> from:cursor -> to_:key -> cursor Lwt.t
+
+  val fold_rec :
+    ?depth:int ->
+    context ->
+    key ->
+    init:'a ->
+    f:(key -> cursor -> 'a -> 'a Lwt.t) ->
+    'a Lwt.t
+
   (** Recursively list all subkeys of a given key. *)
   val keys : context -> key -> key list Lwt.t
 

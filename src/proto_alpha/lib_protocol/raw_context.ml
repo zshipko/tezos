@@ -640,6 +640,22 @@ module type T = sig
     f:(Context.key_or_dir -> 'a -> 'a Lwt.t) ->
     'a Lwt.t
 
+  type cursor
+
+  val empty_cursor: t -> cursor
+
+  val set_cursor: context -> key -> cursor -> context Lwt.t
+
+  val copy_cursor : cursor -> from:cursor -> to_:key -> cursor Lwt.t
+
+  val fold_rec :
+    ?depth:int ->
+    context ->
+    key ->
+    init:'a ->
+    f:(key -> cursor -> 'a -> 'a Lwt.t) ->
+    'a Lwt.t
+
   val keys : context -> key -> key list Lwt.t
 
   val fold_keys :
@@ -719,11 +735,24 @@ let copy ctxt ~from ~to_ =
   | Some context ->
       ok {ctxt with context}
 
+type cursor = Context.cursor
+
+let empty_cursor ctxt = Context.empty_cursor ctxt.context
+
+let set_cursor ctxt key c =
+  Context.set_cursor ctxt.context key c
+  >|= fun context -> { ctxt with context }
+
+let copy_cursor = Context.copy_cursor
+
 let fold ctxt k ~init ~f = Context.fold ctxt.context k ~init ~f
 
 let keys ctxt k = Context.keys ctxt.context k
 
 let fold_keys ctxt k ~init ~f = Context.fold_keys ctxt.context k ~init ~f
+
+let fold_rec ?depth ctxt k ~init ~f =
+  Context.fold_rec ?depth ctxt.context k ~init ~f
 
 let project x = x
 

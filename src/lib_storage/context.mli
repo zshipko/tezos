@@ -81,7 +81,19 @@ val remove_rec : context -> key -> t Lwt.t
 (** [copy] returns None if the [from] key is not bound *)
 val copy : context -> from:key -> to_:key -> context option Lwt.t
 
+type cursor
+
+val empty_cursor: t -> cursor
+
+val set_cursor: context -> key -> cursor -> context Lwt.t
+
+val copy_cursor : cursor -> from:cursor -> to_:key -> cursor Lwt.t
+
 type key_or_dir = [`Key of key | `Dir of key]
+
+val fold_rec :
+  ?depth:int ->
+  context -> key -> init:'a -> f:(key -> cursor -> 'a -> 'a Lwt.t) -> 'a Lwt.t
 
 (** [fold] iterates over elements under a path (not recursive). Iteration order
     is nondeterministic. *)

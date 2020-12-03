@@ -17,19 +17,9 @@ let index_path = ["rolls"; "owner"; "snapshot"]
 let index_path = ["rolls"; "owner"; "snapshot"; "296"]
 *)
 
-let depth = 8 - List.length index_path
+let depth = 8
 
 let pp_key ppf k = Format.pp_print_string ppf (String.concat "/" (""::k))
-
-let fold_keys ~init ~f ~index_path ctxt =
-  let rec dig len path acc =
-    if Compare.Int.(len <= 0) then
-      f path acc
-    else
-      Context.fold ctxt path ~init:acc ~f:(fun k acc ->
-          match k with `Dir k | `Key k -> dig (len - 1) k acc)
-  in
-  dig depth index_path init
 
 let job =
   Context.init context_dir
@@ -37,24 +27,17 @@ let job =
   let hash = Context_hash.of_b58check_exn context_hash in
   Context.checkout index hash >>= fun ctxtopt ->
   let ctxt = match ctxtopt with None -> assert false | Some ctxt -> ctxt in
-  fold_keys ~init:(ctxt,0) ~f: (fun k (ctxt,i) ->
+  let dir = Context.empty_cursor ctxt in
+  Context.fold_rec ~depth ctxt index_path ~init:(dir, 0) ~f: (fun k v (dir, i) ->
       let to_ = match k with
-        | [x1; x2; "snapshot"; d1; d2; _d3; _d4; d5] ->
-            [x1; x2; "tmp_snapshot"; d1; d2; d5]
-        | _ -> assert false
+        | [_; _; "snapshot"; d1; d2; _d3; _d4; d5] ->
+            [d1; d2; d5]
+        | p -> Fmt.epr "XXX path=%a\n%!" Fmt.(Dump.list string) p; assert false
       in
-(*
-      Format.eprintf "copying from %a to %a@."
-        pp_key k pp_key to_;
-*)
-       Context.copy ctxt ~from:k ~to_ >>= function
-       | None ->
-           Format.eprintf "copying failed: from %a to %a@."
-             pp_key k pp_key to_;
-           assert false
-       | Some ctxt -> Lwt.return (ctxt, i+1))
-     ~index_path ctxt
-   >>= fun (ctxt,files) ->
+      Context.copy_cursor dir ~from:v ~to_ >|= fun dir ->
+      (dir, i+1))
+  >>= fun (dir, files) ->
+  Context.set_cursor ctxt ["rolls"; "owner"; "tmp_snapshot"] dir >>= fun ctxt ->
    Format.eprintf "copied: %d@." files;
    Context.commit ~time:Time.Protocol.epoch ctxt
    >>= fun ch ->

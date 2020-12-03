@@ -73,6 +73,12 @@ module Make_subcontext (R : REGISTER) (C : Raw_context.T) (N : NAME) :
 
   type context = t
 
+  type cursor = C.cursor
+
+  let empty_cursor = C.empty_cursor
+
+  let copy_cursor = C.copy_cursor
+
   let name_length = List.length N.name
 
   let to_key k = N.name @ k
@@ -98,6 +104,11 @@ module Make_subcontext (R : REGISTER) (C : Raw_context.T) (N : NAME) :
   let delete t k = C.delete t (to_key k)
 
   let remove t k = C.remove t (to_key k)
+
+  let set_cursor t k = C.set_cursor t (to_key k)
+
+  let fold_rec ?depth t k ~init ~f =
+    C.fold_rec ?depth t (to_key k) ~init ~f:(fun k v acc -> f k v acc)
 
   let remove_rec t k = C.remove_rec t (to_key k)
 
@@ -658,24 +669,25 @@ module Make_indexed_subcontext (C : Raw_context.T) (I : INDEX) :
   let clear t = C.remove_rec t [] >|= fun t -> C.project t
 
   let fold_keys t ~init ~f =
-    let rec dig i path acc =
-      if Compare.Int.(i <= 0) then
+    C.fold_rec t [] ~depth:I.path_length ~init ~f:(fun path _ acc ->
+        if Compare.Int.(I.path_length <> List.length path) then (
+          Logging.log_error "%d %d %S"
+            I.path_length (List.length path)
+            (String.concat "/" (List.map String.escaped path));
+          assert false
+        );
         match I.of_path path with
         | None ->
+           Logging.log_error "XXX fold_keys %s" (String.concat "/" path);
             assert false
         | Some path ->
-            f path acc
-      else
-        C.fold t path ~init:acc ~f:(fun k acc ->
-            match k with
-            | `Dir k ->
-                dig (i - 1) k acc
-            | `Key _ ->
-                Lwt.return acc)
-    in
-    dig I.path_length [] init
+           f path acc)
 
-  let keys t = fold_keys t ~init:[] ~f:(fun i acc -> Lwt.return (i :: acc))
+  let keys t =
+    try fold_keys t ~init:[] ~f:(fun i acc -> Lwt.return (i :: acc))
+    with Assert_failure _ ->
+      Logging.log_error "keys";
+      assert false
 
   let list t k = C.fold t k ~init:[] ~f:(fun k acc -> Lwt.return (k :: acc))
 
@@ -698,6 +710,12 @@ module Make_indexed_subcontext (C : Raw_context.T) (I : INDEX) :
     type t = C.t I.ipath
 
     type context = t
+
+    type cursor = C.cursor
+
+    let empty_cursor c =
+      let (t, _) = unpack c in
+      C.empty_cursor t
 
     let to_key i k = I.to_path i k
 
@@ -780,6 +798,12 @@ module Make_indexed_subcontext (C : Raw_context.T) (I : INDEX) :
       C.check_enough_gas t g
 
     let description = description
+
+    let set_cursor _ _ _ = failwith "TODO"
+
+    let copy_cursor _ ~from:_ ~to_:_ = failwith "TODO"
+
+    let fold_rec ?depth:_ _ _ ~init:_ ~f:_= failwith "TODO"
   end
 
   let resolve t prefix =

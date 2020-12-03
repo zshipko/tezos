@@ -630,6 +630,7 @@ let compute_predecessors ~genesis_hash oldest_level block_hashes i =
   step 0 1 []
 
 let check_context_hash_consistency block_validation_result block_header =
+  Fmt.epr "HASH: %a\n%!" Context_hash.pp block_header.Block_header.shell.context;
   fail_unless
     (Context_hash.equal
        block_validation_result.Tezos_validation.Block_validation.context_hash
