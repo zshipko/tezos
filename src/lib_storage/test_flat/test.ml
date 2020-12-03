@@ -32,11 +32,11 @@ let fold_keys ~init ~f ~index_path ctxt =
   dig depth index_path init
 
 let job =
+  Memtrace.trace_if_requested ();
   Context.init context_dir
   >>= fun index ->
-  Context.checkout index
-    (Context_hash.of_b58check_exn context_hash)
-  >>= fun ctxtopt ->
+  let hash = Context_hash.of_b58check_exn context_hash in
+  Context.checkout index hash >>= fun ctxtopt ->
   let ctxt = match ctxtopt with None -> assert false | Some ctxt -> ctxt in
   fold_keys ~init:(ctxt,0) ~f: (fun k (ctxt,i) ->
       let to_ = match k with

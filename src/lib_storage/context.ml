@@ -106,15 +106,21 @@ end = struct
                Error_monad.pp_print_error
                err))
 
-  let short_hash t = Irmin.Type.(short_hash string (H.to_raw_string t))
+  let short_hash_string  = Irmin.Type.(unstage (short_hash string))
+
+  let short_hash =
+    Irmin.Type.stage @@ fun ?seed t ->
+    short_hash_string ?seed (H.to_raw_string t)
 
   let t : t Irmin.Type.t =
     Irmin.Type.map
-      ~cli:(pp, of_string)
+      ~pp ~of_string
       Irmin.Type.(string_of (`Fixed H.digest_size))
       ~short_hash
       H.of_raw_string
       H.to_raw_string
+
+  let short_hash = (Irmin.Type.unstage short_hash) ?seed:None
 
   let hash_size = H.digest_size
 
