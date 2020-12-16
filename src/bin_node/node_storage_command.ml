@@ -61,7 +61,12 @@ module Term = struct
         name = "stat-pack";
         description = "Print high-level statistics about the pack file.";
         term = Pack.Stat.term;
-      } ]
+      };
+      {
+        name = "reconstruct-index";
+        description = "Reconstruct index from pack file.";
+        term = Pack.Reconstruct_index.term;
+     } ]
 
   let dispatch_subcommand = function
     | None ->
