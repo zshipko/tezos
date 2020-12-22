@@ -87,22 +87,22 @@ let () =
       "The requested history mode for the snapshot is not compatible with the \
        given storage."
     ~pp:(fun ppf (requested, stored) ->
-      Format.fprintf
-        ppf
-        "The requested history mode (%a) for the snapshot export is not \
-         compatible with the given storage (running with history mode %a)."
-        History_mode.pp_short
-        requested
-        History_mode.pp_short
-        stored)
+        Format.fprintf
+          ppf
+          "The requested history mode (%a) for the snapshot export is not \
+           compatible with the given storage (running with history mode %a)."
+          History_mode.pp_short
+          requested
+          History_mode.pp_short
+          stored)
     (obj2
        (req "stored" History_mode.encoding)
        (req "requested" History_mode.encoding))
     (function
       | Incompatible_history_mode {requested; stored} ->
-          Some (requested, stored)
+        Some (requested, stored)
       | _ ->
-          None)
+        None)
     (fun (requested, stored) -> Incompatible_history_mode {requested; stored}) ;
   register_error_kind
     `Permanent
@@ -110,24 +110,24 @@ let () =
     ~title:"Invalid export block"
     ~description:"Invalid block provided for snapshot export."
     ~pp:(fun ppf (hash, reason) ->
-      Format.fprintf
-        ppf
-        "The selected block %a is invalid: %s."
-        (Option.pp ~default:"(n/a)" Block_hash.pp)
-        hash
-        ( match reason with
-        | `Pruned ->
-            "the block is too old and has been pruned"
-        | `Pruned_pred ->
-            "its predecessor has been pruned"
-        | `Unknown ->
-            "the block is unknown"
-        | `Genesis ->
-            "the genesis block is not a valid export point"
-        | `Caboose ->
-            "the caboose block is not a valid export point"
-        | `Not_enough_pred ->
-            "not enough of the block's predecessors are known" ))
+        Format.fprintf
+          ppf
+          "The selected block %a is invalid: %s."
+          (Option.pp ~default:"(n/a)" Block_hash.pp)
+          hash
+          ( match reason with
+            | `Pruned ->
+              "the block is too old and has been pruned"
+            | `Pruned_pred ->
+              "its predecessor has been pruned"
+            | `Unknown ->
+              "the block is unknown"
+            | `Genesis ->
+              "the genesis block is not a valid export point"
+            | `Caboose ->
+              "the caboose block is not a valid export point"
+            | `Not_enough_pred ->
+              "not enough of the block's predecessors are known" ))
     (obj2
        (opt "block" Block_hash.encoding)
        (req
@@ -141,9 +141,9 @@ let () =
                ("not_enough_pred", `Not_enough_pred) ])))
     (function
       | Invalid_export_block {block; reason} ->
-          Some (block, reason)
+        Some (block, reason)
       | _ ->
-          None)
+        None)
     (fun (block, reason) -> Invalid_export_block {block; reason}) ;
   register_error_kind
     `Permanent
@@ -151,10 +151,10 @@ let () =
     ~title:"Invalid export path"
     ~description:"Invalid path to export snapshot"
     ~pp:(fun ppf path ->
-      Format.fprintf
-        ppf
-        "Failed to export snapshot: the file or directory %s already exists."
-        path)
+        Format.fprintf
+          ppf
+          "Failed to export snapshot: the file or directory %s already exists."
+          path)
     (obj1 (req "path" string))
     (function Invalid_export_path path -> Some path | _ -> None)
     (fun path -> Invalid_export_path path) ;
@@ -164,7 +164,7 @@ let () =
     ~title:"Snapshot file not found"
     ~description:"The snapshot file cannot be found."
     ~pp:(fun ppf given_file ->
-      Format.fprintf ppf "The snapshot file %s does not exists." given_file)
+        Format.fprintf ppf "The snapshot file %s does not exists." given_file)
     (obj1 (req "given_snapshot_file" string))
     (function Snapshot_file_not_found file -> Some file | _ -> None)
     (fun file -> Snapshot_file_not_found file) ;
@@ -174,21 +174,21 @@ let () =
     ~title:"Inconsistent protocol hash"
     ~description:"The announced protocol hash doesn't match the computed hash."
     ~pp:(fun ppf (oph, oph') ->
-      Format.fprintf
-        ppf
-        "Inconsistent protocol_hash. Expected: %a, got %a."
-        Protocol_hash.pp
-        oph
-        Protocol_hash.pp
-        oph')
+        Format.fprintf
+          ppf
+          "Inconsistent protocol_hash. Expected: %a, got %a."
+          Protocol_hash.pp
+          oph
+          Protocol_hash.pp
+          oph')
     (obj2
        (req "expected" Protocol_hash.encoding)
        (req "got" Protocol_hash.encoding))
     (function
       | Inconsistent_protocol_hash {expected; got} ->
-          Some (expected, got)
+        Some (expected, got)
       | _ ->
-          None)
+        None)
     (fun (expected, got) -> Inconsistent_protocol_hash {expected; got}) ;
   register_error_kind
     `Permanent
@@ -196,21 +196,21 @@ let () =
     ~title:"Inconsistent context hash"
     ~description:"The announced context hash doesn't match the computed hash."
     ~pp:(fun ppf (oph, oph') ->
-      Format.fprintf
-        ppf
-        "Inconsistent context_hash. Expected: %a, got %a."
-        Context_hash.pp
-        oph
-        Context_hash.pp
-        oph')
+        Format.fprintf
+          ppf
+          "Inconsistent context_hash. Expected: %a, got %a."
+          Context_hash.pp
+          oph
+          Context_hash.pp
+          oph')
     (obj2
        (req "expected" Context_hash.encoding)
        (req "got" Context_hash.encoding))
     (function
       | Inconsistent_context_hash {expected; got} ->
-          Some (expected, got)
+        Some (expected, got)
       | _ ->
-          None)
+        None)
     (fun (expected, got) -> Inconsistent_context_hash {expected; got}) ;
   register_error_kind
     `Permanent
@@ -218,11 +218,11 @@ let () =
     ~title:"Inconsistent context"
     ~description:"Inconsistent context after restore."
     ~pp:(fun ppf h ->
-      Format.fprintf
-        ppf
-        "Failed to checkout context %a after restoring it."
-        Context_hash.pp
-        h)
+        Format.fprintf
+          ppf
+          "Failed to checkout context %a after restoring it."
+          Context_hash.pp
+          h)
     (obj1 (req "context_hash" Context_hash.encoding))
     (function Inconsistent_context h -> Some h | _ -> None)
     (fun h -> Inconsistent_context h) ;
@@ -232,7 +232,7 @@ let () =
     ~title:"Protocol import cannot decode"
     ~description:"Failed to decode file when importing protocol"
     ~pp:(fun ppf filename ->
-      Format.fprintf ppf "Cannot decode the protocol in file: %s" filename)
+        Format.fprintf ppf "Cannot decode the protocol in file: %s" filename)
     (obj1 (req "filename" string))
     (function Cannot_decode_protocol filename -> Some filename | _ -> None)
     (fun filename -> Cannot_decode_protocol filename) ;
@@ -242,10 +242,10 @@ let () =
     ~title:"Cannot write metadata"
     ~description:"Cannot write metadata while exporting snapshot."
     ~pp:(fun ppf msg ->
-      Format.fprintf
-        ppf
-        "Cannot write metadata while exporting snapshot: %s."
-        msg)
+        Format.fprintf
+          ppf
+          "Cannot write metadata while exporting snapshot: %s."
+          msg)
     (obj1 (req "msg" string))
     (function Cannot_write_metadata msg -> Some msg | _ -> None)
     (fun msg -> Cannot_write_metadata msg) ;
@@ -255,7 +255,7 @@ let () =
     ~title:"Cannot read metadata"
     ~description:"Cannot read snapshot's metadata."
     ~pp:(fun ppf msg ->
-      Format.fprintf ppf "Cannot read snapshot's metadata: %s." msg)
+        Format.fprintf ppf "Cannot read snapshot's metadata: %s." msg)
     (obj1 (req "msg" string))
     (function Cannot_read_metadata msg -> Some msg | _ -> None)
     (fun msg -> Cannot_read_metadata msg) ;
@@ -265,22 +265,22 @@ let () =
     ~title:"Inconsistent floating store"
     ~description:"The floating block store is inconsistent."
     ~pp:(fun ppf (target_blk, first_blk) ->
-      Format.fprintf
-        ppf
-        "Failed to export floating store, the first block %a is above the \
-         target block %a (broken invariant)."
-        pp_block_descriptor
-        first_blk
-        pp_block_descriptor
-        target_blk)
+        Format.fprintf
+          ppf
+          "Failed to export floating store, the first block %a is above the \
+           target block %a (broken invariant)."
+          pp_block_descriptor
+          first_blk
+          pp_block_descriptor
+          target_blk)
     (obj2
        (req "target" block_descriptor_encoding)
        (req "first" block_descriptor_encoding))
     (function
       | Inconsistent_floating_store (target, first) ->
-          Some (target, first)
+        Some (target, first)
       | _ ->
-          None)
+        None)
     (fun (target, first) -> Inconsistent_floating_store (target, first)) ;
   register_error_kind
     `Permanent
@@ -288,12 +288,12 @@ let () =
     ~title:"Missing target block in floating stores"
     ~description:"Floating stores does not contain the target block."
     ~pp:(fun ppf target_blk ->
-      Format.fprintf
-        ppf
-        "Failed to export floating blocks as the target block %a cannot be \
-         found."
-        pp_block_descriptor
-        target_blk)
+        Format.fprintf
+          ppf
+          "Failed to export floating blocks as the target block %a cannot be \
+           found."
+          pp_block_descriptor
+          target_blk)
     (obj1 (req "target" block_descriptor_encoding))
     (function Missing_target_block descr -> Some descr | _ -> None)
     (fun descr -> Missing_target_block descr) ;
@@ -303,7 +303,7 @@ let () =
     ~title:"Cannot read floating stores"
     ~description:"Unable to read floating stores."
     ~pp:(fun ppf msg ->
-      Format.fprintf ppf "Cannot read the floating blocks stores: %s" msg)
+        Format.fprintf ppf "Cannot read the floating blocks stores: %s" msg)
     (obj1 (req "msg" string))
     (function Cannot_read_floating_store msg -> Some msg | _ -> None)
     (fun msg -> Cannot_read_floating_store msg) ;
@@ -313,9 +313,9 @@ let () =
     ~title:"Cannot retrieve block interval"
     ~description:"Cannot retrieve block interval from store"
     ~pp:(fun ppf () ->
-      Format.fprintf
-        ppf
-        "Cannot retrieve block interval: failed to retrieve blocks.")
+        Format.fprintf
+          ppf
+          "Cannot retrieve block interval: failed to retrieve blocks.")
     unit
     (function Cannot_retrieve_block_interval -> Some () | _ -> None)
     (fun () -> Cannot_retrieve_block_interval) ;
@@ -326,10 +326,10 @@ let () =
     ~description:
       "Encountered an invalid cemented file while restoring the cemented store"
     ~pp:(fun ppf file ->
-      Format.fprintf
-        ppf
-        "Failed to restore cemented blocks. Encountered an invalid file '%s'."
-        file)
+        Format.fprintf
+          ppf
+          "Failed to restore cemented blocks. Encountered an invalid file '%s'."
+          file)
     (obj1 (req "file" string))
     (function Invalid_cemented_file s -> Some s | _ -> None)
     (fun s -> Invalid_cemented_file s) ;
@@ -339,10 +339,10 @@ let () =
     ~title:"Missing cemented file"
     ~description:"Cannot find cemented file while restoring cemented store"
     ~pp:(fun ppf file ->
-      Format.fprintf
-        ppf
-        "Failed to restore cemented blocks. The cycle '%s' is missing."
-        file)
+        Format.fprintf
+          ppf
+          "Failed to restore cemented blocks. The cycle '%s' is missing."
+          file)
     (obj1 (req "cycle" string))
     (function Missing_cemented_file s -> Some s | _ -> None)
     (fun s -> Missing_cemented_file s) ;
@@ -352,9 +352,9 @@ let () =
     ~title:"Corrupted floating store"
     ~description:"Failed to read floating store"
     ~pp:(fun ppf () ->
-      Format.fprintf
-        ppf
-        "Failed to restore floating blocks. The floating store is corrupted.")
+        Format.fprintf
+          ppf
+          "Failed to restore floating blocks. The floating store is corrupted.")
     unit
     (function Corrupted_floating_store -> Some () | _ -> None)
     (fun () -> Corrupted_floating_store) ;
@@ -364,10 +364,10 @@ let () =
     ~title:"Protocol import invalid file"
     ~description:"Failed to import protocol as the filename is invalid"
     ~pp:(fun ppf filename ->
-      Format.fprintf
-        ppf
-        "Failed to import protocol. The protocol file '%s' is invalid"
-        filename)
+        Format.fprintf
+          ppf
+          "Failed to import protocol. The protocol file '%s' is invalid"
+          filename)
     (obj1 (req "filename" string))
     (function Invalid_protocol_file filename -> Some filename | _ -> None)
     (fun filename -> Invalid_protocol_file filename) ;
@@ -377,7 +377,7 @@ let () =
     ~title:"target block validation failed"
     ~description:"Failed to validate the target block."
     ~pp:(fun ppf (h, errs) ->
-      Format.fprintf ppf "Failed to validate block %a: %s" Block_hash.pp h errs)
+        Format.fprintf ppf "Failed to validate block %a: %s" Block_hash.pp h errs)
     (obj2 (req "block" Block_hash.encoding) (req "errors" string))
     (function
       | Target_block_validation_failed (h, errs) -> Some (h, errs) | _ -> None)
@@ -388,10 +388,10 @@ let () =
     ~title:"Directory already exists"
     ~description:"The given data directory already exists."
     ~pp:(fun ppf s ->
-      Format.fprintf
-        ppf
-        "Failed to import snasphot as the given directory %s already exists."
-        s)
+        Format.fprintf
+          ppf
+          "Failed to import snasphot as the given directory %s already exists."
+          s)
     (obj1 (req "path" string))
     (function Directory_already_exists s -> Some s | _ -> None)
     (fun s -> Directory_already_exists s) ;
@@ -401,10 +401,10 @@ let () =
     ~title:"Empty floating store"
     ~description:"Floating store is empty."
     ~pp:(fun ppf () ->
-      Format.fprintf
-        ppf
-        "Failed to export floating blocks: the floating store does not \
-         contain any blocks (broken invariant).")
+        Format.fprintf
+          ppf
+          "Failed to export floating blocks: the floating store does not \
+           contain any blocks (broken invariant).")
     unit
     (function Empty_floating_store -> Some () | _ -> None)
     (fun () -> Empty_floating_store) ;
@@ -415,9 +415,9 @@ let () =
     ~description:
       "Inconsistent predecessors while validating a legacy snapshot."
     ~pp:(fun ppf () ->
-      Format.fprintf
-        ppf
-        "Failed to validate the predecessors: inconsistent hash.")
+        Format.fprintf
+          ppf
+          "Failed to validate the predecessors: inconsistent hash.")
     unit
     (function Inconsistent_predecessors -> Some () | _ -> None)
     (fun () -> Inconsistent_predecessors) ;
@@ -446,23 +446,23 @@ let () =
     ~description:
       "The imported chain is inconsistent with the target data directory."
     ~pp:(fun ppf (expected, got) ->
-      Format.fprintf
-        ppf
-        "The chain name contained in the snapshot file (%a) is not consistent \
-         with the network configured in the targeted data directory (%a). \
-         Please check your configuration file."
-        Distributed_db_version.Name.pp
-        expected
-        Distributed_db_version.Name.pp
-        got)
+        Format.fprintf
+          ppf
+          "The chain name contained in the snapshot file (%a) is not consistent \
+           with the network configured in the targeted data directory (%a). \
+           Please check your configuration file."
+          Distributed_db_version.Name.pp
+          expected
+          Distributed_db_version.Name.pp
+          got)
     (obj2
        (req "expected" Distributed_db_version.Name.encoding)
        (req "got" Distributed_db_version.Name.encoding))
     (function
       | Inconsistent_chain_import {expected; got} ->
-          Some (expected, got)
+        Some (expected, got)
       | _ ->
-          None)
+        None)
     (fun (expected, got) -> Inconsistent_chain_import {expected; got})
 
 type metadata = {
@@ -537,13 +537,13 @@ let write_snapshot_metadata metadata file =
   Lwt_utils_unix.Json.write_file file metadata_json
   >>= function
   | Error err ->
-      Format.kasprintf
-        (fun msg -> fail (Cannot_write_metadata msg))
-        "%a"
-        pp_print_error
-        err
+    Format.kasprintf
+      (fun msg -> fail (Cannot_write_metadata msg))
+      "%a"
+      pp_print_error
+      err
   | Ok () ->
-      return_unit
+    return_unit
 
 let read_snapshot_metadata ~snapshot_file =
   let filename = Naming.(snapshot_file // Snapshot.metadata) in
@@ -552,24 +552,24 @@ let read_snapshot_metadata ~snapshot_file =
   in
   protect
     ~on_error:(fun err ->
-      Format.kasprintf
-        (fun msg -> fail (Cannot_read_metadata msg))
-        "%a"
-        pp_print_error
-        err)
+        Format.kasprintf
+          (fun msg -> fail (Cannot_read_metadata msg))
+          "%a"
+          pp_print_error
+          err)
     (fun () ->
-      if Sys.is_directory snapshot_file then
-        Lwt_utils_unix.Json.read_file filename
-        >>=? fun json -> read_config json
-      else
-        let ic = Zip.open_in snapshot_file in
-        let entry = Zip.find_entry ic Naming.Snapshot.metadata in
-        let s = Zip.read_entry ic entry in
-        match Data_encoding.Json.from_string s with
-        | Ok json ->
-            read_config json
-        | Error err ->
-            fail (Cannot_read_metadata err))
+       if Sys.is_directory snapshot_file then
+         Lwt_utils_unix.Json.read_file filename
+         >>=? fun json -> read_config json
+       else
+         let ic = Zip.open_in snapshot_file in
+         let entry = Zip.find_entry ic Naming.Snapshot.metadata in
+         let s = Zip.read_entry ic entry in
+         match Data_encoding.Json.from_string s with
+         | Ok json ->
+           read_config json
+         | Error err ->
+           fail (Cannot_read_metadata err))
 
 let copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir
     (files : Cemented_block_store.cemented_blocks_file list) =
@@ -593,44 +593,44 @@ let copy_cemented_blocks ~src_cemented_dir ~dst_cemented_dir
   protect (fun () ->
       Lwt_utils_unix.display_progress
         ~pp_print_step:(fun fmt i ->
-          Format.fprintf
-            fmt
-            "Copying cemented blocks and populating indexes: %d/%d cycles"
-            i
-            nb_cycles)
+            Format.fprintf
+              fmt
+              "Copying cemented blocks and populating indexes: %d/%d cycles"
+              i
+              nb_cycles)
         (fun notify ->
-          (* Bound the number of copying threads *)
-          let tasks =
-            let rec loop acc l =
-              let (l, r) = List.split_n 20 l in
-              if r = [] then l :: acc else loop (l :: acc) r
-            in
-            loop [] files
-          in
-          Error_monad.iter_s
-            (Error_monad.iter_p (fun ({filename; _} as file) ->
-                 Cemented_block_store.iter_cemented_file
-                   ~cemented_blocks_dir:src_cemented_dir
-                   (fun block ->
-                     let hash = Block_repr.hash block in
-                     let level = Block_repr.level block in
-                     Cemented_block_level_index.replace
-                       fresh_level_index
-                       hash
-                       level ;
-                     Cemented_block_hash_index.replace
-                       fresh_hash_index
-                       level
-                       hash ;
-                     Lwt.return_unit)
-                   file
-                 >>=? fun () ->
-                 let cycle = Naming.(src_cemented_dir // filename) in
-                 Lwt_utils_unix.copy_file
-                   ~src:cycle
-                   ~dst:Naming.(dst_cemented_dir // filename)
-                 >>= fun () -> notify () >>= fun () -> return_unit))
-            tasks)
+           (* Bound the number of copying threads *)
+           let tasks =
+             let rec loop acc l =
+               let (l, r) = List.split_n 20 l in
+               if r = [] then l :: acc else loop (l :: acc) r
+             in
+             loop [] files
+           in
+           Error_monad.iter_s
+             (Error_monad.iter_p (fun ({filename; _} as file) ->
+                  Cemented_block_store.iter_cemented_file
+                    ~cemented_blocks_dir:src_cemented_dir
+                    (fun block ->
+                       let hash = Block_repr.hash block in
+                       let level = Block_repr.level block in
+                       Cemented_block_level_index.replace
+                         fresh_level_index
+                         hash
+                         level ;
+                       Cemented_block_hash_index.replace
+                         fresh_hash_index
+                         level
+                         hash ;
+                       Lwt.return_unit)
+                    file
+                  >>=? fun () ->
+                  let cycle = Naming.(src_cemented_dir // filename) in
+                  Lwt_utils_unix.copy_file
+                    ~src:cycle
+                    ~dst:Naming.(dst_cemented_dir // filename)
+                  >>= fun () -> notify () >>= fun () -> return_unit))
+             tasks)
       >>=? fun () ->
       Cemented_block_level_index.close fresh_level_index ;
       Cemented_block_hash_index.close fresh_hash_index ;
@@ -649,16 +649,16 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
   (* Retrieve first floating block *)
   Block_repr.read_next_block_opt floating_ro_fd
   >>= (function
-        | Some (block, _length) ->
+      | Some (block, _length) ->
+        return block
+      | None -> (
+          Block_repr.read_next_block_opt floating_rw_fd
+          >>= function
+          | Some (block, _length) ->
             return block
-        | None -> (
-            Block_repr.read_next_block_opt floating_rw_fd
-            >>= function
-            | Some (block, _length) ->
-                return block
-            | None ->
-                (* No block to read *)
-                fail Empty_floating_store ))
+          | None ->
+            (* No block to read *)
+            fail Empty_floating_store ))
   >>=? fun first_block ->
   let first_block_level = Block_repr.level first_block in
   if Compare.Int32.(limit_level < first_block_level) then
@@ -679,21 +679,21 @@ let export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block =
     let reading_thread =
       Lwt.finalize
         (fun () ->
-          Lwt.catch
-            (fun () ->
-              Lwt_unix.lseek floating_ro_fd 0 Unix.SEEK_SET
-              >>= fun _ ->
-              Floating_block_store.iter_s_raw_fd f floating_ro_fd
-              >>=? fun () ->
-              Lwt_unix.lseek floating_rw_fd 0 Unix.SEEK_SET
-              >>= fun _ ->
-              Floating_block_store.iter_s_raw_fd f floating_rw_fd
-              >>=? fun () -> fail (Missing_target_block export_block_descr))
-            (function
-              | Done ->
-                  return_unit
-              | exn ->
-                  fail (Cannot_read_floating_store (Printexc.to_string exn))))
+           Lwt.catch
+             (fun () ->
+                Lwt_unix.lseek floating_ro_fd 0 Unix.SEEK_SET
+                >>= fun _ ->
+                Floating_block_store.iter_s_raw_fd f floating_ro_fd
+                >>=? fun () ->
+                Lwt_unix.lseek floating_rw_fd 0 Unix.SEEK_SET
+                >>= fun _ ->
+                Floating_block_store.iter_s_raw_fd f floating_rw_fd
+                >>=? fun () -> fail (Missing_target_block export_block_descr))
+             (function
+               | Done ->
+                 return_unit
+               | exn ->
+                 fail (Cannot_read_floating_store (Printexc.to_string exn))))
         (fun () -> bpush#close ; Lwt.return_unit)
     in
     return (reading_thread, stream)
@@ -709,13 +709,13 @@ let export_protocols protocol_levels ~src_dir ~dst_dir =
   >>= fun fd ->
   Lwt.finalize
     (fun () ->
-      (* Export protocols table *)
-      let bytes =
-        Data_encoding.Binary.to_bytes_exn
-          Protocol_levels.encoding
-          protocol_levels
-      in
-      Lwt_utils_unix.write_bytes ~pos:0 fd bytes)
+       (* Export protocols table *)
+       let bytes =
+         Data_encoding.Binary.to_bytes_exn
+           Protocol_levels.encoding
+           protocol_levels
+       in
+       Lwt_utils_unix.write_bytes ~pos:0 fd bytes)
     (fun () -> Lwt_utils_unix.safe_close fd >>= fun _ -> Lwt.return_unit)
   >>= fun () ->
   Lwt_unix.opendir src_dir
@@ -729,33 +729,33 @@ let export_protocols protocol_levels ~src_dir ~dst_dir =
   let nb_proto_to_export = List.length proto_to_export in
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Copying protocols: %d/%d" i nb_proto_to_export)
+        Format.fprintf fmt "Copying protocols: %d/%d" i nb_proto_to_export)
     (fun notify ->
-      let rec copy_protocols () =
-        Lwt.catch
-          (fun () ->
-            Lwt_unix.readdir dir_handle
-            >>= function
-            | "." | ".." ->
+       let rec copy_protocols () =
+         Lwt.catch
+           (fun () ->
+              Lwt_unix.readdir dir_handle
+              >>= function
+              | "." | ".." ->
                 copy_protocols ()
-            | filename -> (
-              match Protocol_hash.of_b58check_opt filename with
-              | None ->
-                  return_unit
-              | Some ph ->
-                  ( if List.mem ph proto_to_export then
-                    Lwt_utils_unix.copy_file
-                      ~src:Naming.(src_dir // filename)
-                      ~dst:Naming.(dst_dir // filename)
-                    >>= fun () -> notify ()
-                  else Lwt.return_unit )
-                  >>= fun () -> copy_protocols () ))
-          (function
-            | End_of_file -> return_unit | exn -> Lwt.return (error_exn exn))
-      in
-      Lwt.finalize
-        (fun () -> copy_protocols ())
-        (fun () -> Lwt_unix.closedir dir_handle))
+              | filename -> (
+                  match Protocol_hash.of_b58check_opt filename with
+                  | None ->
+                    return_unit
+                  | Some ph ->
+                    ( if List.mem ph proto_to_export then
+                        Lwt_utils_unix.copy_file
+                          ~src:Naming.(src_dir // filename)
+                          ~dst:Naming.(dst_dir // filename)
+                        >>= fun () -> notify ()
+                      else Lwt.return_unit )
+                    >>= fun () -> copy_protocols () ))
+           (function
+             | End_of_file -> return_unit | exn -> Lwt.return (error_exn exn))
+       in
+       Lwt.finalize
+         (fun () -> copy_protocols ())
+         (fun () -> Lwt_unix.closedir dir_handle))
 
 (* Creates the requested export folder and its hierarchy *)
 let create_snapshot_dir ~snapshot_dir =
@@ -797,12 +797,12 @@ let check_export_block_validity chain_store block =
   >>=? fun block ->
   Store.Block.read_predecessor_opt chain_store block
   >>= (function
-        | None ->
-            fail
-              (Invalid_export_block
-                 {block = Some block_hash; reason = `Not_enough_pred})
-        | Some pred_block ->
-            return pred_block)
+      | None ->
+        fail
+          (Invalid_export_block
+             {block = Some block_hash; reason = `Not_enough_pred})
+      | Some pred_block ->
+        return pred_block)
   >>=? fun pred_block ->
   (* Make sure that the predecessor's context is known *)
   Store.Block.context_exists chain_store pred_block
@@ -815,11 +815,11 @@ let check_export_block_validity chain_store block =
   >>=? fun () ->
   Store.Block.get_block_metadata_opt chain_store block
   >>= (function
-        | None ->
-            fail
-              (Invalid_export_block {block = Some block_hash; reason = `Pruned})
-        | Some block_metadata ->
-            return block_metadata)
+      | None ->
+        fail
+          (Invalid_export_block {block = Some block_hash; reason = `Pruned})
+      | Some block_metadata ->
+        return block_metadata)
   >>=? fun block_metadata ->
   Store.Chain.caboose chain_store
   >>= fun (_, caboose_level) ->
@@ -845,14 +845,14 @@ let check_export_block_validity chain_store block =
    the current head is chosen. *)
 let retrieve_export_block chain_store block =
   ( match block with
-  | `Hash (h, distance) -> (
-      Store.Block.read_block_opt chain_store ~distance h
-      >>= function
-      | None ->
+    | `Hash (h, distance) -> (
+        Store.Block.read_block_opt chain_store ~distance h
+        >>= function
+        | None ->
           fail (Invalid_export_block {block = Some h; reason = `Unknown})
-      | Some block ->
+        | Some block ->
           return_some block )
-  | `Head distance ->
+    | `Head distance ->
       Store.Chain.current_head chain_store
       >>= fun current_head ->
       Store.Block.read_block_opt
@@ -860,26 +860,26 @@ let retrieve_export_block chain_store block =
         ~distance
         (Store.Block.hash current_head)
       >>= return
-  | `Level i ->
+    | `Level i ->
       Store.Block.read_block_by_level_opt chain_store i >>= return
-  | `Genesis ->
+    | `Genesis ->
       fail
         (Invalid_export_block
            {
              block = Some (Store.Chain.genesis chain_store).Genesis.block;
              reason = `Genesis;
            })
-  | `Alias (`Caboose, _) ->
+    | `Alias (`Caboose, _) ->
       Store.Chain.caboose chain_store
       >>= fun (caboose_hash, _) ->
       fail
         (Invalid_export_block {block = Some caboose_hash; reason = `Caboose})
-  | `Alias (`Checkpoint, distance) -> (
-      Store.Chain.checkpoint chain_store
-      >>= fun (checkpoint_hash, _) ->
-      Store.Block.read_block_opt chain_store checkpoint_hash
-      >>= function
-      | Some checkpoint_block ->
+    | `Alias (`Checkpoint, distance) -> (
+        Store.Chain.checkpoint chain_store
+        >>= fun (checkpoint_hash, _) ->
+        Store.Block.read_block_opt chain_store checkpoint_hash
+        >>= function
+        | Some checkpoint_block ->
           (* The checkpoint is known: we should have its context and caboose
              should be low enough to retrieve enough blocks. *)
           if distance = 0 then return_some checkpoint_block
@@ -889,7 +889,7 @@ let retrieve_export_block chain_store block =
               (Store.Block.hash checkpoint_block)
               ~distance
             >>= return
-      | None when distance = 0 ->
+        | None when distance = 0 ->
           Store.Chain.current_head chain_store
           >>= fun current_head ->
           (* Checkpoint might be in the future: take the head's last allowed
@@ -899,9 +899,9 @@ let retrieve_export_block chain_store block =
           let head_lafl = Store.Block.last_allowed_fork_level head_metadata in
           Store.Block.read_block_by_level chain_store head_lafl
           >>=? return_some
-      | None ->
+        | None ->
           return_none )
-  | `Alias (`Savepoint, distance) ->
+    | `Alias (`Savepoint, distance) ->
       Store.Chain.savepoint chain_store
       >>= fun (_, savepoint_level) ->
       Store.Block.read_block_by_level_opt
@@ -910,11 +910,11 @@ let retrieve_export_block chain_store block =
       >>= return )
   >>=? function
   | None ->
-      fail (Invalid_export_block {block = None; reason = `Unknown})
+    fail (Invalid_export_block {block = None; reason = `Unknown})
   | Some export_block ->
-      check_export_block_validity chain_store export_block
-      >>=? fun (pred_block, minimum_level_needed) ->
-      return (export_block, pred_block, minimum_level_needed)
+    check_export_block_validity chain_store export_block
+    >>=? fun (pred_block, minimum_level_needed) ->
+    return (export_block, pred_block, minimum_level_needed)
 
 (* Returns the list of cemented files to export and an optional list
    of remaining blocks. If the export block is cemented, we need to cut
@@ -931,8 +931,8 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
   let is_cemented =
     table_len > 0
     && Compare.Int32.(
-         export_block_level
-         <= table_arr.(table_len - 1).Cemented_block_store.end_level)
+        export_block_level
+        <= table_arr.(table_len - 1).Cemented_block_store.end_level)
   in
   if not is_cemented then
     (* Return either an empty list or the list of all cemented files *)
@@ -950,7 +950,7 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
       let (filtered_table, extra_cycles) =
         List.partition
           (fun {Cemented_block_store.end_level; _} ->
-            Compare.Int32.(export_block_level > end_level))
+             Compare.Int32.(export_block_level > end_level))
           table
       in
       assert (extra_cycles <> []) ;
@@ -961,17 +961,17 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
       else
         Store.Block.read_block_by_level chain_store extra_cycle.start_level
         >>=? (fun first_block_in_cycle ->
-               (* TODO explain this... *)
-               if
-                 Compare.Int32.(
-                   Store.Block.level first_block_in_cycle > export_block_level)
-               then
-                 (* When the cycles are short, we may keep more blocks in the
-                    floating store than in cemented *)
-                 Store.Chain.caboose chain_store
-                 >>= fun (_, caboose_level) ->
-                 Store.Block.read_block_by_level chain_store caboose_level
-               else return first_block_in_cycle)
+            (* TODO explain this... *)
+            if
+              Compare.Int32.(
+                Store.Block.level first_block_in_cycle > export_block_level)
+            then
+              (* When the cycles are short, we may keep more blocks in the
+                 floating store than in cemented *)
+              Store.Chain.caboose chain_store
+              >>= fun (_, caboose_level) ->
+              Store.Block.read_block_by_level chain_store caboose_level
+            else return first_block_in_cycle)
         >>=? fun first_block ->
         Store.Chain_traversal.path
           chain_store
@@ -979,13 +979,13 @@ let compute_cemented_table_and_extra_cycle chain_store ~src_cemented_dir
           ~to_block:export_block
         >>= function
         | None ->
-            fail Cannot_retrieve_block_interval
+          fail Cannot_retrieve_block_interval
         | Some floating_blocks ->
-            (* Don't forget to add the first block as
-               [Chain_traversal.path] does not include the lower-bound
-               block *)
-            let floating_blocks = first_block :: floating_blocks in
-            return (filtered_table, Some floating_blocks)
+          (* Don't forget to add the first block as
+             [Chain_traversal.path] does not include the lower-bound
+             block *)
+          let floating_blocks = first_block :: floating_blocks in
+          return (filtered_table, Some floating_blocks)
 
 let dump_context context_index ~snapshot_dir ~pred_block ~export_block =
   let block_data =
@@ -1005,11 +1005,11 @@ let dump_context context_index ~snapshot_dir ~pred_block ~export_block =
 let check_history_mode chain_store ~rolling =
   match (Store.Chain.history_mode chain_store : History_mode.t) with
   | Archive | Full _ ->
-      return_unit
+    return_unit
   | Rolling _ when rolling ->
-      return_unit
+    return_unit
   | Rolling _ as stored ->
-      fail (Incompatible_history_mode {stored; requested = Full {offset = 0}})
+    fail (Incompatible_history_mode {stored; requested = Full {offset = 0}})
 
 let export_floating_block_stream ~snapshot_dir floating_block_stream =
   Lwt_stream.is_empty floating_block_stream
@@ -1019,36 +1019,36 @@ let export_floating_block_stream ~snapshot_dir floating_block_stream =
     Lwt_utils_unix.display_progress
       ~every:10
       ~pp_print_step:(fun fmt i ->
-        Format.fprintf fmt "Copying floating blocks: %d blocks copied" i)
+          Format.fprintf fmt "Copying floating blocks: %d blocks copied" i)
       (fun notify ->
-        let floating_file =
-          Naming.(snapshot_dir // Snapshot.floating_blocks)
-        in
-        Lwt_unix.openfile floating_file Unix.[O_CREAT; O_TRUNC; O_WRONLY] 0o444
-        >>= fun fd ->
-        Lwt.finalize
-          (fun () ->
-            Lwt_stream.iter_s
-              (fun b -> write_floating_block fd b >>= fun () -> notify ())
-              floating_block_stream)
-          (fun () -> Lwt_utils_unix.safe_close fd >>= fun _ -> Lwt.return_unit))
+         let floating_file =
+           Naming.(snapshot_dir // Snapshot.floating_blocks)
+         in
+         Lwt_unix.openfile floating_file Unix.[O_CREAT; O_TRUNC; O_WRONLY] 0o444
+         >>= fun fd ->
+         Lwt.finalize
+           (fun () ->
+              Lwt_stream.iter_s
+                (fun b -> write_floating_block fd b >>= fun () -> notify ())
+                floating_block_stream)
+           (fun () -> Lwt_utils_unix.safe_close fd >>= fun _ -> Lwt.return_unit))
     >>= fun () -> return_unit
 
 let format_snapshot_export_path chain_name export_block export_mode = function
   | Some snapshot_file ->
-      snapshot_file
+    snapshot_file
   | None ->
-      (* The generated filename follows this pattern:
-         <NETWORK>-<BLOCK_HASH>-<BLOCK_LEVEL>.<SNAPSHOT_KIND> *)
-      Format.asprintf
-        "%a-%a-%ld.%a"
-        Distributed_db_version.Name.pp
-        chain_name
-        Block_hash.pp
-        (Store.Block.hash export_block)
-        (Store.Block.level export_block)
-        History_mode.pp_short
-        export_mode
+    (* The generated filename follows this pattern:
+       <NETWORK>-<BLOCK_HASH>-<BLOCK_LEVEL>.<SNAPSHOT_KIND> *)
+    Format.asprintf
+      "%a-%a-%ld.%a"
+      Distributed_db_version.Name.pp
+      chain_name
+      Block_hash.pp
+      (Store.Block.hash export_block)
+      (Store.Block.level export_block)
+      History_mode.pp_short
+      export_mode
 
 let ensure_valid_export_path snapshot_export_path =
   Lwt_unix.file_exists snapshot_export_path
@@ -1081,20 +1081,20 @@ let export_rolling ?snapshot_file ~store_dir ~context_dir ~snapshot_dir ~block
       ~from_block:minimum_block
       ~to_block:pred_block
     >>= (function
-          | None ->
-              fail Cannot_retrieve_block_interval
-          | Some blocks ->
-              (* Don't forget to add the first block as
-                 [Chain_traversal.path] does not include the
-                 lower-bound block *)
-              return (minimum_block :: blocks))
+        | None ->
+          fail Cannot_retrieve_block_interval
+        | Some blocks ->
+          (* Don't forget to add the first block as
+             [Chain_traversal.path] does not include the
+             lower-bound block *)
+          return (minimum_block :: blocks))
     >>=? fun floating_blocks ->
     (* Prune all blocks except for the export_block's predecessor *)
     let floating_block_stream =
       Lwt_stream.of_list
         (List.filter_map
            (fun b ->
-             Some {(Store.Unsafe.repr_of_block b) with metadata = None})
+              Some {(Store.Unsafe.repr_of_block b) with metadata = None})
            floating_blocks)
     in
     (* Protocols *)
@@ -1106,8 +1106,8 @@ let export_rolling ?snapshot_file ~store_dir ~context_dir ~snapshot_dir ~block
       Protocol_levels.(
         filter
           (fun level {block; _} ->
-            level >= Store.Block.proto_level minimum_block
-            || Store.Block.is_genesis chain_store (fst block))
+             level >= Store.Block.proto_level minimum_block
+             || Store.Block.is_genesis chain_store (fst block))
           protocol_levels)
     in
     return
@@ -1198,43 +1198,43 @@ let export_full ?snapshot_file ~store_dir ~context_dir ~snapshot_dir
     >>= fun rw_fd ->
     Lwt.catch
       (fun () ->
-        let src_cemented_dir =
-          Naming.(chain_dir // cemented_blocks_directory)
-        in
-        (* Compute the necessary cemented table *)
-        compute_cemented_table_and_extra_cycle
-          chain_store
-          ~src_cemented_dir
-          ~export_block
-        >>=? fun (cemented_table, extra_floating_blocks) ->
-        Store.Chain.all_protocol_levels chain_store
-        >>= fun protocol_levels ->
-        let block_store = Store.Unsafe.get_block_store chain_store in
-        let cemented_store = Block_store.cemented_block_store block_store in
-        let should_filter_indexes =
-          match
-            Cemented_block_store.get_highest_cemented_level cemented_store
-          with
-          | None ->
-              false
-          | Some max_cemented_level ->
-              Compare.Int32.(
-                max_cemented_level > Store.Block.level export_block)
-        in
-        return
-          ( export_mode,
-            export_block,
-            pred_block,
-            protocol_levels,
-            (src_cemented_dir, cemented_table),
-            (ro_fd, rw_fd),
-            extra_floating_blocks,
-            should_filter_indexes,
-            snapshot_export_path ))
+         let src_cemented_dir =
+           Naming.(chain_dir // cemented_blocks_directory)
+         in
+         (* Compute the necessary cemented table *)
+         compute_cemented_table_and_extra_cycle
+           chain_store
+           ~src_cemented_dir
+           ~export_block
+         >>=? fun (cemented_table, extra_floating_blocks) ->
+         Store.Chain.all_protocol_levels chain_store
+         >>= fun protocol_levels ->
+         let block_store = Store.Unsafe.get_block_store chain_store in
+         let cemented_store = Block_store.cemented_block_store block_store in
+         let should_filter_indexes =
+           match
+             Cemented_block_store.get_highest_cemented_level cemented_store
+           with
+           | None ->
+             false
+           | Some max_cemented_level ->
+             Compare.Int32.(
+               max_cemented_level > Store.Block.level export_block)
+         in
+         return
+           ( export_mode,
+             export_block,
+             pred_block,
+             protocol_levels,
+             (src_cemented_dir, cemented_table),
+             (ro_fd, rw_fd),
+             extra_floating_blocks,
+             should_filter_indexes,
+             snapshot_export_path ))
       (fun exn ->
-        Lwt_utils_unix.safe_close ro_fd
-        >>= fun _ ->
-        Lwt_utils_unix.safe_close rw_fd >>= fun _ -> Lwt.return (error_exn exn))
+         Lwt_utils_unix.safe_close ro_fd
+         >>= fun _ ->
+         Lwt_utils_unix.safe_close rw_fd >>= fun _ -> Lwt.return (error_exn exn))
   in
   Store.Unsafe.open_for_snapshot_export
     ~store_dir
@@ -1270,14 +1270,14 @@ let export_full ?snapshot_file ~store_dir ~context_dir ~snapshot_dir
     Lwt_utils_unix.safe_close floating_rw_fd >>= fun _ -> Lwt.return_unit
   in
   ( match extra_floating_blocks with
-  | Some floating_blocks ->
+    | Some floating_blocks ->
       finalizer ()
       >>= fun () ->
       return
         ( return_unit,
           Lwt_stream.of_list
             (List.map Store.Unsafe.repr_of_block floating_blocks) )
-  | None ->
+    | None ->
       (* The export block is in the floating stores, copy all the
          floating stores until the block is reached *)
       export_floating_blocks ~floating_ro_fd ~floating_rw_fd ~export_block
@@ -1297,81 +1297,81 @@ let zip_snapshot dir out =
   Lwt_utils_unix.display_progress
     ~every:1
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Compressing snapshot: %d files treated" i)
+        Format.fprintf fmt "Compressing snapshot: %d files treated" i)
     (fun notify ->
-      if not (Sys.file_exists dir && Sys.is_directory dir) then
-        fail
-          (Snapshot_export_failure
-             (Format.sprintf "unable to retrieve snapshot directory %s" dir))
-      else
-        let oc = Zip.open_out out in
-        Lwt.finalize
-          (fun () ->
-            let rec zip_dir pathacc dir =
-              let files = Lwt_unix.files_of_directory dir in
-              Lwt_stream.iter_s
-                (fun file ->
-                  if
-                    file = Filename.current_dir_name
-                    || file = Filename.parent_dir_name
-                  then Lwt.return_unit
-                  else
-                    let file = Filename.concat dir file in
-                    if Sys.is_directory file then (
-                      Zip.add_entry
-                        ""
-                        oc
-                        ( Filename.(concat pathacc (basename file))
-                        ^ Filename.dir_sep ) ;
-                      zip_dir Filename.(concat pathacc (basename file)) file )
-                    else (
-                      Zip.copy_file_to_entry
-                        file
-                        oc
-                        Filename.(concat pathacc (basename file)) ;
-                      notify () ))
-                files
-            in
-            zip_dir "" dir >>= return)
-          (fun () -> Zip.close_out oc ; Lwt.return_unit))
+       if not (Sys.file_exists dir && Sys.is_directory dir) then
+         fail
+           (Snapshot_export_failure
+              (Format.sprintf "unable to retrieve snapshot directory %s" dir))
+       else
+         let oc = Zip.open_out out in
+         Lwt.finalize
+           (fun () ->
+              let rec zip_dir pathacc dir =
+                let files = Lwt_unix.files_of_directory dir in
+                Lwt_stream.iter_s
+                  (fun file ->
+                     if
+                       file = Filename.current_dir_name
+                       || file = Filename.parent_dir_name
+                     then Lwt.return_unit
+                     else
+                       let file = Filename.concat dir file in
+                       if Sys.is_directory file then (
+                         Zip.add_entry
+                           ""
+                           oc
+                           ( Filename.(concat pathacc (basename file))
+                             ^ Filename.dir_sep ) ;
+                         zip_dir Filename.(concat pathacc (basename file)) file )
+                       else (
+                         Zip.copy_file_to_entry
+                           file
+                           oc
+                           Filename.(concat pathacc (basename file)) ;
+                         notify () ))
+                  files
+              in
+              zip_dir "" dir >>= return)
+           (fun () -> Zip.close_out oc ; Lwt.return_unit))
 
 let unzip_snapshot zipfile path =
   Lwt_utils_unix.display_progress
     ~every:1
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Inflating snapshot: %d files decompressed" i)
+        Format.fprintf fmt "Inflating snapshot: %d files decompressed" i)
     (fun notify ->
-      let ic = Zip.open_in zipfile in
-      Lwt.finalize
-        (fun () ->
-          let entries = Zip.entries ic in
-          let make_path path =
-            if Sys.file_exists path then Lwt.return_unit
+       let ic = Zip.open_in zipfile in
+       Lwt.finalize
+         (fun () ->
+            let entries = Zip.entries ic in
+            let make_path path =
+              if Sys.file_exists path then Lwt.return_unit
+              else
+                String.split_path (Filename.dirname path)
+                |> Lwt_list.iter_s (fun s -> Lwt_utils_unix.create_dir s)
+            in
+            if not (List.length entries > 0) then
+              fail
+                (Snapshot_import_failure
+                   "compressed snapshot does not contain any entries")
             else
-              String.split_path (Filename.dirname path)
-              |> Lwt_list.iter_s (fun s -> Lwt_utils_unix.create_dir s)
-          in
-          if not (List.length entries > 0) then
-            fail
-              (Snapshot_import_failure
-                 "compressed snapshot does not contain any entries")
-          else
-            Lwt_list.iter_s
-              (fun entry ->
-                make_path (Filename.dirname entry.Zip.filename)
-                >>= fun () ->
-                if entry.Zip.is_directory then
-                  Lwt_utils_unix.create_dir
-                    (Filename.concat path entry.filename)
-                else (
-                  Zip.copy_entry_to_file
-                    ic
-                    entry
-                    (Filename.concat path entry.filename) ;
-                  notify () ))
-              entries
-            >>= return)
-        (fun () -> Zip.close_in ic ; Lwt.return_unit))
+              Lwt_list.iter_s
+                (fun entry ->
+                   make_path (Filename.dirname entry.Zip.filename)
+                   >>= fun () ->
+                   if entry.Zip.is_directory then
+                     Lwt_utils_unix.create_dir
+                       (Filename.concat path entry.filename)
+                   else (
+                     Zip.copy_entry_to_file
+                       ic
+                       entry
+                       (Filename.concat path entry.filename) ;
+                     notify () ))
+                entries
+              >>= return)
+         (fun () -> Zip.close_in ic ; Lwt.return_unit))
 
 let export ?snapshot_file ?(rolling = false) ?(compress = true) ~block
     ~store_dir ~context_dir ~chain_name genesis =
@@ -1385,80 +1385,80 @@ let export ?snapshot_file ?(rolling = false) ?(compress = true) ~block
     >>= fun () ->
     Lwt_list.iter_s
       (fun path ->
-        Lwt.catch
-          (fun () ->
-            if Sys.is_directory path then Lwt_utils_unix.remove_dir path
-            else Lwt_unix.unlink path)
-          (fun _ -> Lwt.return_unit))
+         Lwt.catch
+           (fun () ->
+              if Sys.is_directory path then Lwt_utils_unix.remove_dir path
+              else Lwt_unix.unlink path)
+           (fun _ -> Lwt.return_unit))
       path
   in
   protect
     ~on_error:(fun errors ->
-      dir_cleaner [snapshot_dir] >>= fun () -> Lwt.return (Error errors))
+        dir_cleaner [snapshot_dir] >>= fun () -> Lwt.return (Error errors))
     (fun () ->
-      ( if rolling then
-        export_rolling
-          ?snapshot_file
-          ~store_dir
-          ~context_dir
-          ~snapshot_dir
-          ~block
-          ~rolling
-          ~chain_name
-          genesis
-      else
-        export_full
-          ?snapshot_file
-          ~store_dir
-          ~context_dir
-          ~snapshot_dir
-          ~dst_cemented_dir
-          ~block
-          ~rolling
-          ~chain_name
-          genesis )
-      >>=? fun ( export_mode,
-                 export_block,
-                 protocol_levels,
-                 written_context_elements,
-                 (reading_thread, floating_block_stream),
-                 snapshot_export_path ) ->
-      export_floating_block_stream ~snapshot_dir floating_block_stream
-      >>=? fun () ->
-      reading_thread
-      >>=? fun () ->
-      export_protocols
-        protocol_levels
-        ~src_dir:Naming.(store_dir // protocol_store_directory)
-        ~dst_dir:dst_protocol_dir
-      >>=? fun () ->
-      let metadata =
-        {
-          version = current_version;
-          chain_name;
-          history_mode = export_mode;
-          block_hash = Store.Block.hash export_block;
-          level = Store.Block.level export_block;
-          timestamp = Store.Block.timestamp export_block;
-          context_elements = written_context_elements;
-        }
-      in
-      write_snapshot_metadata
-        metadata
-        Naming.(snapshot_dir // Snapshot.metadata)
-      >>=? fun () -> return snapshot_export_path)
+       ( if rolling then
+           export_rolling
+             ?snapshot_file
+             ~store_dir
+             ~context_dir
+             ~snapshot_dir
+             ~block
+             ~rolling
+             ~chain_name
+             genesis
+         else
+           export_full
+             ?snapshot_file
+             ~store_dir
+             ~context_dir
+             ~snapshot_dir
+             ~dst_cemented_dir
+             ~block
+             ~rolling
+             ~chain_name
+             genesis )
+       >>=? fun ( export_mode,
+                  export_block,
+                  protocol_levels,
+                  written_context_elements,
+                  (reading_thread, floating_block_stream),
+                  snapshot_export_path ) ->
+       export_floating_block_stream ~snapshot_dir floating_block_stream
+       >>=? fun () ->
+       reading_thread
+       >>=? fun () ->
+       export_protocols
+         protocol_levels
+         ~src_dir:Naming.(store_dir // protocol_store_directory)
+         ~dst_dir:dst_protocol_dir
+       >>=? fun () ->
+       let metadata =
+         {
+           version = current_version;
+           chain_name;
+           history_mode = export_mode;
+           block_hash = Store.Block.hash export_block;
+           level = Store.Block.level export_block;
+           timestamp = Store.Block.timestamp export_block;
+           context_elements = written_context_elements;
+         }
+       in
+       write_snapshot_metadata
+         metadata
+         Naming.(snapshot_dir // Snapshot.metadata)
+       >>=? fun () -> return snapshot_export_path)
   >>=? fun snapshot_export_path ->
   protect
     ~on_error:(fun errors ->
-      dir_cleaner [snapshot_dir; snapshot_export_path]
-      >>= fun () -> Lwt.return (Error errors))
+        dir_cleaner [snapshot_dir; snapshot_export_path]
+        >>= fun () -> Lwt.return (Error errors))
     (fun () ->
-      ( if compress then
-        zip_snapshot snapshot_dir snapshot_export_path
-        >>=? fun () -> Lwt_utils_unix.remove_dir snapshot_dir >>= return
-      else Lwt_unix.rename snapshot_dir snapshot_export_path >>= return )
-      >>=? fun () ->
-      lwt_emit (Export_success snapshot_export_path) >>= fun () -> return_unit)
+       ( if compress then
+           zip_snapshot snapshot_dir snapshot_export_path
+           >>=? fun () -> Lwt_utils_unix.remove_dir snapshot_dir >>= return
+         else Lwt_unix.rename snapshot_dir snapshot_export_path >>= return )
+       >>=? fun () ->
+       lwt_emit (Export_success snapshot_export_path) >>= fun () -> return_unit)
 
 let restore_cemented_blocks ?(check_consistency = true) ~should_rename
     ~snapshot_cemented_dir ~dst_cemented_dir ~genesis_hash =
@@ -1475,94 +1475,94 @@ let restore_cemented_blocks ?(check_consistency = true) ~should_rename
       snapshot_cemented_dir // Naming.cemented_block_hash_index_directory)
   in
   ( if should_rename then Lwt_unix.rename snapshot_cemented_dir dst_cemented_dir
-  else Lwt.return_unit )
+    else Lwt.return_unit )
   >>= fun () ->
   ( if
     (not should_rename)
     && Sys.file_exists dst_level_dir
     && Sys.file_exists dst_hash_dir
-  then
-    Lwt_utils_unix.copy_dir
-      dst_level_dir
-      Naming.(dst_cemented_dir // cemented_block_level_index_directory)
-    >>= fun () ->
-    Lwt_utils_unix.copy_dir
-      dst_hash_dir
-      Naming.(dst_cemented_dir // cemented_block_hash_index_directory)
-  else Lwt.return_unit )
+    then
+      Lwt_utils_unix.copy_dir
+        dst_level_dir
+        Naming.(dst_cemented_dir // cemented_block_level_index_directory)
+      >>= fun () ->
+      Lwt_utils_unix.copy_dir
+        dst_hash_dir
+        Naming.(dst_cemented_dir // cemented_block_hash_index_directory)
+    else Lwt.return_unit )
   >>= fun () ->
   filter_s
     (function
       | file
         when file = Filename.current_dir_name
-             || file = Filename.parent_dir_name
-             || file = Naming.cemented_block_hash_index_directory
-             || file = Naming.cemented_block_level_index_directory ->
-          return_false
+          || file = Filename.parent_dir_name
+          || file = Naming.cemented_block_hash_index_directory
+          || file = Naming.cemented_block_level_index_directory ->
+        return_false
       | file ->
-          let is_valid =
-            match String.split_on_char '_' file with
-            | [s; e] ->
-                Int32.of_string_opt s <> None || Int32.of_string_opt e <> None
-            | _ ->
-                false
-          in
-          if not is_valid then fail (Invalid_cemented_file file)
-          else return_true)
+        let is_valid =
+          match String.split_on_char '_' file with
+          | [s; e] ->
+            Int32.of_string_opt s <> None || Int32.of_string_opt e <> None
+          | _ ->
+            false
+        in
+        if not is_valid then fail (Invalid_cemented_file file)
+        else return_true)
     files
   >>=? fun cemented_files ->
   let nb_cemented_files = List.length cemented_files in
   ( if (not should_rename) && nb_cemented_files > 0 then
-    (* Don't copy anything if it was just a renaming, the archive
-         inflating is enough. *)
-    Lwt_utils_unix.display_progress
-      ~pp_print_step:(fun fmt i ->
-        Format.fprintf
-          fmt
-          "Copying cycles: %d/%d (%d%%)"
-          i
-          nb_cemented_files
-          (100 * i / nb_cemented_files))
-      (fun notify ->
-        Lwt_list.iter_s
-          (fun file ->
-            let src = Naming.(snapshot_cemented_dir // file) in
-            let dst = Naming.(dst_cemented_dir // file) in
-            Lwt_utils_unix.copy_file ~src ~dst >>= fun () -> notify ())
-          cemented_files)
-  else Lwt.return_unit )
+      (* Don't copy anything if it was just a renaming, the archive
+           inflating is enough. *)
+      Lwt_utils_unix.display_progress
+        ~pp_print_step:(fun fmt i ->
+            Format.fprintf
+              fmt
+              "Copying cycles: %d/%d (%d%%)"
+              i
+              nb_cemented_files
+              (100 * i / nb_cemented_files))
+        (fun notify ->
+           Lwt_list.iter_s
+             (fun file ->
+                let src = Naming.(snapshot_cemented_dir // file) in
+                let dst = Naming.(dst_cemented_dir // file) in
+                Lwt_utils_unix.copy_file ~src ~dst >>= fun () -> notify ())
+             cemented_files)
+    else Lwt.return_unit )
   >>= fun () ->
   Cemented_block_store.init
     ~cemented_blocks_dir:dst_cemented_dir
     ~readonly:false
   >>=? fun cemented_store ->
   ( if check_consistency && nb_cemented_files > 0 then
-    iter_s
-      (fun cemented_file ->
-        if
-          not
-            (Array.exists
-               (fun {Cemented_block_store.filename; _} ->
-                 Compare.String.equal filename cemented_file)
-               (Cemented_block_store.cemented_blocks_files cemented_store))
-        then fail (Missing_cemented_file cemented_file)
-        else return_unit)
-      (List.sort compare cemented_files)
-    >>=? fun () ->
-    Lwt_utils_unix.display_progress
-      ~pp_print_step:(fun fmt i ->
-        Format.fprintf
-          fmt
-          "Restoring cycles consistency: %d/%d (%d%%)"
-          i
-          nb_cemented_files
-          (100 * i / nb_cemented_files))
-      (fun notify ->
-        Cemented_block_store.check_indexes_consistency
-          ~post_step:notify
-          ~genesis_hash
-          cemented_store)
-  else return_unit )
+      iter_s
+        (fun cemented_file ->
+           if
+             not
+               (Array.exists
+                  (fun {Cemented_block_store.filename; _} ->
+                     Compare.String.equal filename cemented_file)
+                  (Cemented_block_store.cemented_blocks_files cemented_store))
+           then fail (Missing_cemented_file cemented_file)
+           else return_unit)
+        (List.sort compare cemented_files)
+      >>=? fun () ->
+      Lwt_utils_unix.display_progress
+        ~pp_print_step:(fun fmt i ->
+            Format.fprintf
+              fmt
+              "Restoring cycles consistency: %d/%d (%d%%)"
+              i
+              nb_cemented_files
+              (100 * i / nb_cemented_files))
+        (fun notify ->
+           Cemented_block_store.check_indexes_consistency
+             ~post_step:notify
+             ~genesis_hash
+             cemented_store)
+    else return_unit )
   >>=? fun () ->
   Cemented_block_store.close cemented_store ;
   return_unit
@@ -1587,12 +1587,12 @@ let read_floating_blocks ~genesis_hash ~floating_blocks_file =
     let reading_thread =
       Lwt.finalize
         (fun () ->
-          Lwt_unix.lseek fd 0 Unix.SEEK_END
-          >>= fun eof_offset ->
-          Lwt_unix.lseek fd 0 Unix.SEEK_SET >>= fun _ -> loop eof_offset)
+           Lwt_unix.lseek fd 0 Unix.SEEK_END
+           >>= fun eof_offset ->
+           Lwt_unix.lseek fd 0 Unix.SEEK_SET >>= fun _ -> loop eof_offset)
         (fun () ->
-          bounded_push#close ;
-          Lwt_utils_unix.safe_close fd >>= fun _ -> Lwt.return_unit)
+           bounded_push#close ;
+           Lwt_utils_unix.safe_close fd >>= fun _ -> Lwt.return_unit)
     in
     return (reading_thread, stream)
 
@@ -1617,49 +1617,49 @@ let restore_protocols ~should_rename ~snapshot_protocol_dir ~dst_protocol_dir =
       (function
         | file
           when file = Filename.current_dir_name
-               || file = Filename.parent_dir_name
-               || file = Filename.basename protocol_tbl_filename ->
-            None
+            || file = Filename.parent_dir_name
+            || file = Filename.basename protocol_tbl_filename ->
+          None
         | file ->
-            Some file)
+          Some file)
       files
   in
   map_s
     (fun file ->
-      match Protocol_hash.of_b58check_opt file with
-      | Some ph ->
-          return (ph, file)
-      | None ->
-          fail (Invalid_protocol_file file))
+       match Protocol_hash.of_b58check_opt file with
+       | Some ph ->
+         return (ph, file)
+       | None ->
+         fail (Invalid_protocol_file file))
     protocol_files
   >>=? fun protocols ->
   Lwt_utils_unix.display_progress
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Copying protocols: %d/%d" i (List.length protocols))
+        Format.fprintf fmt "Copying protocols: %d/%d" i (List.length protocols))
     (fun notify ->
-      let validate_and_copy (expected_hash, protocol_filename) =
-        lwt_emit (Validate_protocol_sources expected_hash)
-        >>= fun () ->
-        let src = Naming.(snapshot_protocol_dir // protocol_filename) in
-        let dst = Naming.(dst_protocol_dir // protocol_filename) in
-        ( if should_rename then Lwt_unix.rename src dst
-        else Lwt_utils_unix.copy_file ~src ~dst )
-        >>= fun () ->
-        Lwt_utils_unix.read_file dst
-        >>= fun protocol_sources ->
-        match Protocol.of_bytes (Bytes.unsafe_of_string protocol_sources) with
-        | None ->
-            fail (Cannot_decode_protocol protocol_filename)
-        | Some p ->
-            let hash = Protocol.hash p in
-            notify ()
-            >>= fun () ->
-            fail_unless
-              (Protocol_hash.equal expected_hash hash)
-              (Inconsistent_protocol_hash
-                 {expected = expected_hash; got = hash})
-      in
-      iter_s validate_and_copy protocols)
+       let validate_and_copy (expected_hash, protocol_filename) =
+         lwt_emit (Validate_protocol_sources expected_hash)
+         >>= fun () ->
+         let src = Naming.(snapshot_protocol_dir // protocol_filename) in
+         let dst = Naming.(dst_protocol_dir // protocol_filename) in
+         ( if should_rename then Lwt_unix.rename src dst
+           else Lwt_utils_unix.copy_file ~src ~dst )
+         >>= fun () ->
+         Lwt_utils_unix.read_file dst
+         >>= fun protocol_sources ->
+         match Protocol.of_bytes (Bytes.unsafe_of_string protocol_sources) with
+         | None ->
+           fail (Cannot_decode_protocol protocol_filename)
+         | Some p ->
+           let hash = Protocol.hash p in
+           notify ()
+           >>= fun () ->
+           fail_unless
+             (Protocol_hash.equal expected_hash hash)
+             (Inconsistent_protocol_hash
+                {expected = expected_hash; got = hash})
+       in
+       iter_s validate_and_copy protocols)
   >>=? fun () -> return protocol_levels
 
 let import_log_notice ?snapshot_metadata filename block =
@@ -1671,9 +1671,9 @@ let import_log_notice ?snapshot_metadata filename block =
   lwt_emit (Import_info {filename; metadata})
   >>= fun () ->
   ( match block with
-  | None ->
+    | None ->
       lwt_emit Import_unspecified_hash
-  | Some _ ->
+    | Some _ ->
       Lwt.return_unit )
   >>= fun () -> lwt_emit Import_loading
 
@@ -1709,10 +1709,10 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
   let pred_context_hash = predecessor_header.shell.context in
   Context.checkout context_index pred_context_hash
   >>= (function
-        | Some ch ->
-            return ch
-        | None ->
-            fail (Inconsistent_context pred_context_hash))
+      | Some ch ->
+        return ch
+      | None ->
+        fail (Inconsistent_context pred_context_hash))
   >>=? fun predecessor_context ->
   let apply_environment =
     {
@@ -1727,17 +1727,17 @@ let restore_and_apply_context ?expected_block ~context_index ~snapshot_dir
   in
   Block_validation.apply apply_environment block_header operations
   >>= (function
-        | Ok block_validation_result ->
-            return block_validation_result
-        | Error errs ->
-            Format.kasprintf
-              (fun errs ->
-                fail
-                  (Target_block_validation_failed
-                     (Block_header.hash block_header, errs)))
-              "%a"
-              pp_print_error
-              errs)
+      | Ok block_validation_result ->
+        return block_validation_result
+      | Error errs ->
+        Format.kasprintf
+          (fun errs ->
+             fail
+               (Target_block_validation_failed
+                  (Block_header.hash block_header, errs)))
+          "%a"
+          pp_print_error
+          errs)
   >>=? fun block_validation_result ->
   check_context_hash_consistency
     block_validation_result.validation_store
@@ -1768,7 +1768,7 @@ let import ?patch_context ?block:expected_block ?(check_consistency = true)
     (Sys.file_exists snapshot_file)
     (Snapshot_file_not_found snapshot_file)
   >>=? fun () ->
-  read_snapshot_metadata ~snapshot_file
+  read_snapshot_metadata ~snapshot_file (* XXX: Read snapshot metadata *)
   >>=? fun snapshot_metadata ->
   fail_unless
     (Distributed_db_version.Name.equal chain_name snapshot_metadata.chain_name)
@@ -1778,16 +1778,16 @@ let import ?patch_context ?block:expected_block ?(check_consistency = true)
   import_log_notice ~snapshot_metadata snapshot_file expected_block
   >>= fun () ->
   ( if Sys.is_directory snapshot_file then
-    (* Not compressed *)
-    return (false, snapshot_file)
-  else
-    let snapshot_dir =
-      Filename.concat dst_store_dir (Filename.basename snapshot_file)
-    in
-    Lwt_utils_unix.create_dir snapshot_dir
-    >>= fun () ->
-    protect (fun () -> unzip_snapshot snapshot_file snapshot_dir)
-    >>=? fun () -> return (true, snapshot_dir) )
+      (* Not compressed *)
+      return (false, snapshot_file)
+    else
+      let snapshot_dir =
+        Filename.concat dst_store_dir (Filename.basename snapshot_file)
+      in
+      Lwt_utils_unix.create_dir snapshot_dir
+      >>= fun () ->
+      protect (fun () -> unzip_snapshot snapshot_file snapshot_dir)
+      >>=? fun () -> return (true, snapshot_dir) )
   >>=? fun (is_compressed, snapshot_dir) ->
   Context.init ~readonly:false ?patch_context dst_context_dir
   >>= fun context_index ->
@@ -1834,12 +1834,12 @@ let import ?patch_context ?block:expected_block ?(check_consistency = true)
   let metadata =
     Some
       ( {
-          message = validation_store.message;
-          max_operations_ttl = validation_store.max_operations_ttl;
-          last_allowed_fork_level = validation_store.last_allowed_fork_level;
-          block_metadata;
-          operations_metadata = ops_metadata;
-        }
+        message = validation_store.message;
+        max_operations_ttl = validation_store.max_operations_ttl;
+        last_allowed_fork_level = validation_store.last_allowed_fork_level;
+        block_metadata;
+        operations_metadata = ops_metadata;
+      }
         : Block_repr.metadata )
   in
   let new_head_with_metadata =
@@ -1848,36 +1848,36 @@ let import ?patch_context ?block:expected_block ?(check_consistency = true)
   in
   (* Set the history mode with the default offset *)
   (let open History_mode in
-  match snapshot_metadata.history_mode with
-  | Archive ->
-      assert false
-  | Rolling _ ->
-      return (Rolling {offset = default_offset})
-  | Full _ ->
-      return (Full {offset = default_offset}))
+   match snapshot_metadata.history_mode with
+   | Archive ->
+     assert false
+   | Rolling _ ->
+     return (Rolling {offset = default_offset})
+   | Full _ ->
+     return (Full {offset = default_offset}))
   >>=? fun history_mode ->
   Lwt_utils_unix.display_progress
     ~every:100
     ~pp_print_step:(fun fmt i ->
-      Format.fprintf fmt "Storing floating blocks: %d blocks wrote" i)
+        Format.fprintf fmt "Storing floating blocks: %d blocks wrote" i)
     (fun notify ->
-      Store.Unsafe.restore_from_snapshot
-        ~notify
-        ~store_dir:dst_store_dir
-        ~context_index
-        ~genesis
-        ~genesis_context_hash
-        ~floating_blocks_stream
-        ~new_head_with_metadata
-        ~protocol_levels
-        ~history_mode)
+       Store.Unsafe.restore_from_snapshot
+         ~notify
+         ~store_dir:dst_store_dir
+         ~context_index
+         ~genesis
+         ~genesis_context_hash
+         ~floating_blocks_stream
+         ~new_head_with_metadata
+         ~protocol_levels
+         ~history_mode)
   >>=? fun () ->
   reading_thread
   >>=? fun () ->
   Context.close context_index
   >>= fun () ->
   ( if is_compressed then Lwt_utils_unix.remove_dir snapshot_dir
-  else Lwt.return_unit )
+    else Lwt.return_unit )
   >>= fun () ->
   lwt_emit (Import_success snapshot_dir) >>= fun () -> return_unit
 
@@ -1886,23 +1886,23 @@ let import ?patch_context ?block:expected_block ?(check_consistency = true)
 let legacy_verify_predecessors header_opt pred_hash =
   match header_opt with
   | None ->
-      return_unit
+    return_unit
   | Some header ->
-      fail_unless
-        ( header.Block_header.shell.level >= 2l
+    fail_unless
+      ( header.Block_header.shell.level >= 2l
         && Block_hash.equal header.shell.predecessor pred_hash )
-        Inconsistent_predecessors
+      Inconsistent_predecessors
 
 let legacy_check_operations_consistency block_header operations
     operation_hashes =
   (* Compute operations hashes and compare *)
   List.iter2
     (fun (_, op) (_, oph) ->
-      let expected_op_hash = List.map Operation.hash op in
-      List.iter2
-        (fun expected found -> assert (Operation_hash.equal expected found))
-        expected_op_hash
-        oph)
+       let expected_op_hash = List.map Operation.hash op in
+       List.iter2
+         (fun expected found -> assert (Operation_hash.equal expected found))
+         expected_op_hash
+         oph)
     operations
     operation_hashes ;
   (* Check header hashes based on merkle tree *)
@@ -1958,54 +1958,54 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
   >>= fun context_index ->
   Lwt.finalize
     (fun () ->
-      (* Start by commiting genesis in the context *)
-      Context.commit_genesis
-        context_index
-        ~chain_id
-        ~time:genesis.Genesis.time
-        ~protocol:genesis.protocol
-      >>=? fun genesis_context_hash ->
-      let cycle_length = Legacy.Hardcoded.cycle_length ~chain_name in
-      let floating_blocks = ref [] in
-      let current_blocks = ref [] in
-      let has_reached_cemented = ref false in
-      let partial_protocol_levels = ref [] in
-      let genesis_block =
-        Store.Chain.create_genesis_block ~genesis genesis_context_hash
-      in
-      Cemented_block_store.init
-        ~cemented_blocks_dir:dst_cemented_dir
-        ~readonly:false
-      >>=? fun cemented_store ->
-      Lwt.finalize
-        (fun () ->
-          let handle_block snapshot_history_mode =
-            let is_rolling =
-              snapshot_history_mode = History_mode.Legacy.Rolling
-            in
-            fun ((hash : Block_hash.t), (block : Context.Pruned_block.t)) ->
-              (let proj (hash, (block : Context.Pruned_block.t)) =
-                 let contents =
-                   {
-                     Block_repr.header = block.block_header;
-                     operations = List.map (fun (_, l) -> l) block.operations;
-                   }
+       (* Start by commiting genesis in the context *)
+       Context.commit_genesis
+         context_index
+         ~chain_id
+         ~time:genesis.Genesis.time
+         ~protocol:genesis.protocol
+       >>=? fun genesis_context_hash ->
+       let cycle_length = Legacy.Hardcoded.cycle_length ~chain_name in
+       let floating_blocks = ref [] in
+       let current_blocks = ref [] in
+       let has_reached_cemented = ref false in
+       let partial_protocol_levels = ref [] in
+       let genesis_block =
+         Store.Chain.create_genesis_block ~genesis genesis_context_hash
+       in
+       Cemented_block_store.init
+         ~cemented_blocks_dir:dst_cemented_dir
+         ~readonly:false
+       >>=? fun cemented_store ->
+       Lwt.finalize
+         (fun () ->
+            let handle_block snapshot_history_mode =
+              let is_rolling =
+                snapshot_history_mode = History_mode.Legacy.Rolling
+              in
+              fun ((hash : Block_hash.t), (block : Context.Pruned_block.t)) ->
+                (let proj (hash, (block : Context.Pruned_block.t)) =
+                   let contents =
+                     {
+                       Block_repr.header = block.block_header;
+                       operations = List.map (fun (_, l) -> l) block.operations;
+                     }
+                   in
+                   {Block_repr.hash; contents; metadata = None}
                  in
-                 {Block_repr.hash; contents; metadata = None}
-               in
-               let block = proj (hash, block) in
-               (* Blocks are stored in reverse order in legacy snapshots so
-                  consing them puts them back in correct order. *)
-               if is_rolling then (
-                 current_blocks := block :: !current_blocks ;
-                 return_unit )
-               else
-                 (* Full snapshot *)
-                 match Block_repr.level block with
-                 (* Hardcoded special treatment for the first two blocks. *)
-                 | 0l ->
+                 let block = proj (hash, block) in
+                 (* Blocks are stored in reverse order in legacy snapshots so
+                    consing them puts them back in correct order. *)
+                 if is_rolling then (
+                   current_blocks := block :: !current_blocks ;
+                   return_unit )
+                 else
+                   (* Full snapshot *)
+                   match Block_repr.level block with
+                   (* Hardcoded special treatment for the first two blocks. *)
+                   | 0l ->
                      (* No genesis in previous format *) assert false
-                 | 1l ->
+                   | 1l ->
                      (* Cement from genesis to this block *)
                      if !current_blocks <> [] then (
                        assert (!floating_blocks = []) ;
@@ -2015,13 +2015,13 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
                        cemented_store
                        ~write_metadata:false
                        [Store.Unsafe.repr_of_block genesis_block; block]
-                 | level ->
+                   | level ->
                      (* 4 cases :
                         - in future floating blocks => after the cementing part
                         - at the end of a cycle
                         - in the middle of a cycle
                         - at the dawn of a cycle
-                      *)
+                     *)
                      let is_end_of_a_cycle =
                        Compare.Int32.equal
                          1l
@@ -2055,135 +2055,135 @@ let import_legacy ?patch_context ?block:expected_block ~dst_store_dir
                        else (
                          current_blocks := block :: !current_blocks ;
                          return_unit ))
-              >>=? fun () -> return_unit
-          in
-          let handle_protocol_data (transition_level, protocol) =
-            let open Context.Protocol_data_legacy in
-            let open Protocol_levels in
-            let { info = {author; message; _};
-                  protocol_hash;
+                >>=? fun () -> return_unit
+            in
+            let handle_protocol_data (transition_level, protocol) =
+              let open Context.Protocol_data_legacy in
+              let open Protocol_levels in
+              let { info = {author; message; _};
+                    protocol_hash;
+                    test_chain_status;
+                    data_key;
+                    parents } =
+                protocol
+              in
+              let commit_info =
+                {
+                  author;
+                  message;
                   test_chain_status;
-                  data_key;
-                  parents } =
-              protocol
+                  data_merkle_root = data_key;
+                  parents_contexts = parents;
+                }
+              in
+              partial_protocol_levels :=
+                (transition_level, protocol_hash, Some commit_info)
+                :: !partial_protocol_levels ;
+              return_unit
             in
-            let commit_info =
-              {
-                author;
-                message;
-                test_chain_status;
-                data_merkle_root = data_key;
-                parents_contexts = parents;
-              }
-            in
-            partial_protocol_levels :=
-              (transition_level, protocol_hash, Some commit_info)
-              :: !partial_protocol_levels ;
-            return_unit
-          in
-          (* Restore context and fetch data *)
-          Context.restore_context_legacy
-            ?expected_block:
-              (Option.map (fun b -> Block_hash.to_b58check b) expected_block)
-            context_index
-            ~snapshot_file
-            ~handle_block
-            ~handle_protocol_data
-            ~block_validation:legacy_block_validation)
-        (fun () ->
-          Cemented_block_store.close cemented_store ;
-          Lwt.return_unit)
-      >>=? fun ( pred_block_header,
-                 block_data,
-                 _oldest_header_opt,
-                 legacy_history_mode ) ->
-      let history_mode = History_mode.convert legacy_history_mode in
-      (* Floating blocks should be initialized now *)
-      let floating_blocks =
-        if not !has_reached_cemented then !current_blocks else !floating_blocks
-      in
-      (* Apply pred block *)
-      let pred_context_hash = pred_block_header.shell.context in
-      Context.checkout context_index pred_context_hash
-      >>= (function
-            | Some ctxt ->
-                return ctxt
-            | None ->
-                fail
-                  (Cannot_checkout_context
-                     (Block_header.hash pred_block_header, pred_context_hash)))
-      >>=? fun predecessor_context ->
-      let {Context.Block_data_legacy.block_header; operations} = block_data in
-      let apply_environment =
-        {
-          Block_validation.max_operations_ttl =
-            Int32.to_int pred_block_header.shell.level;
-          chain_id;
-          predecessor_block_header = pred_block_header;
-          predecessor_context;
-          user_activated_upgrades;
-          user_activated_protocol_overrides;
-        }
-      in
-      Block_validation.apply apply_environment block_header operations
-      >>= (function
-            | Ok block_validation_result ->
-                return block_validation_result
-            | Error errs ->
-                Format.kasprintf
-                  (fun errs ->
-                    fail
-                      (Target_block_validation_failed
-                         (Block_header.hash block_header, errs)))
-                  "%a"
-                  pp_print_error
-                  errs)
-      >>=? fun block_validation_result ->
-      check_context_hash_consistency
-        block_validation_result.validation_store
-        block_header
-      >>=? fun () ->
-      let {Block_validation.validation_store; block_metadata; ops_metadata; _}
-          =
-        block_validation_result
-      in
-      let contents = {Block_repr.header = block_header; operations} in
-      let { Block_validation.message;
-            max_operations_ttl;
-            last_allowed_fork_level;
-            _ } =
-        validation_store
-      in
-      let metadata =
-        Some
-          {
-            Block_repr.message;
-            max_operations_ttl;
-            last_allowed_fork_level;
-            block_metadata;
-            operations_metadata = ops_metadata;
-          }
-      in
-      let new_head_with_metadata =
-        ( {hash = Block_header.hash block_header; contents; metadata}
-          : Block_repr.block )
-      in
-      (* Append the new head with the floating blocks *)
-      Lwt_utils_unix.display_progress
-        ~every:100
-        ~pp_print_step:(fun fmt i ->
-          Format.fprintf fmt "Storing floating blocks: %d blocks wrote" i)
-        (fun notify ->
-          Store.Unsafe.restore_from_legacy_snapshot
-            ~notify
-            ~store_dir:dst_store_dir
-            ~context_index
-            ~genesis
-            ~genesis_context_hash
-            ~floating_blocks_stream:(Lwt_stream.of_list floating_blocks)
-            ~new_head_with_metadata
-            ~partial_protocol_levels:!partial_protocol_levels
-            ~history_mode))
+            (* Restore context and fetch data *)
+            Context.restore_context_legacy
+              ?expected_block:
+                (Option.map (fun b -> Block_hash.to_b58check b) expected_block)
+              context_index
+              ~snapshot_file
+              ~handle_block
+              ~handle_protocol_data
+              ~block_validation:legacy_block_validation)
+         (fun () ->
+            Cemented_block_store.close cemented_store ;
+            Lwt.return_unit)
+       >>=? fun ( pred_block_header,
+                  block_data,
+                  _oldest_header_opt,
+                  legacy_history_mode ) ->
+       let history_mode = History_mode.convert legacy_history_mode in
+       (* Floating blocks should be initialized now *)
+       let floating_blocks =
+         if not !has_reached_cemented then !current_blocks else !floating_blocks
+       in
+       (* Apply pred block *)
+       let pred_context_hash = pred_block_header.shell.context in
+       Context.checkout context_index pred_context_hash
+       >>= (function
+           | Some ctxt ->
+             return ctxt
+           | None ->
+             fail
+               (Cannot_checkout_context
+                  (Block_header.hash pred_block_header, pred_context_hash)))
+       >>=? fun predecessor_context ->
+       let {Context.Block_data_legacy.block_header; operations} = block_data in
+       let apply_environment =
+         {
+           Block_validation.max_operations_ttl =
+             Int32.to_int pred_block_header.shell.level;
+           chain_id;
+           predecessor_block_header = pred_block_header;
+           predecessor_context;
+           user_activated_upgrades;
+           user_activated_protocol_overrides;
+         }
+       in
+       Block_validation.apply apply_environment block_header operations
+       >>= (function
+           | Ok block_validation_result ->
+             return block_validation_result
+           | Error errs ->
+             Format.kasprintf
+               (fun errs ->
+                  fail
+                    (Target_block_validation_failed
+                       (Block_header.hash block_header, errs)))
+               "%a"
+               pp_print_error
+               errs)
+       >>=? fun block_validation_result ->
+       check_context_hash_consistency
+         block_validation_result.validation_store
+         block_header
+       >>=? fun () ->
+       let {Block_validation.validation_store; block_metadata; ops_metadata; _}
+         =
+         block_validation_result
+       in
+       let contents = {Block_repr.header = block_header; operations} in
+       let { Block_validation.message;
+             max_operations_ttl;
+             last_allowed_fork_level;
+             _ } =
+         validation_store
+       in
+       let metadata =
+         Some
+           {
+             Block_repr.message;
+             max_operations_ttl;
+             last_allowed_fork_level;
+             block_metadata;
+             operations_metadata = ops_metadata;
+           }
+       in
+       let new_head_with_metadata =
+         ( {hash = Block_header.hash block_header; contents; metadata}
+           : Block_repr.block )
+       in
+       (* Append the new head with the floating blocks *)
+       Lwt_utils_unix.display_progress
+         ~every:100
+         ~pp_print_step:(fun fmt i ->
+             Format.fprintf fmt "Storing floating blocks: %d blocks wrote" i)
+         (fun notify ->
+            Store.Unsafe.restore_from_legacy_snapshot
+              ~notify
+              ~store_dir:dst_store_dir
+              ~context_index
+              ~genesis
+              ~genesis_context_hash
+              ~floating_blocks_stream:(Lwt_stream.of_list floating_blocks)
+              ~new_head_with_metadata
+              ~partial_protocol_levels:!partial_protocol_levels
+              ~history_mode))
     (fun () -> Context.close context_index)
   >>=? fun () ->
   (* Protocol will be stored next time the store is loaded *)
