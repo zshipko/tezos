@@ -245,6 +245,7 @@ type index = {
   path : string;
   repo : Store.Repo.t;
   patch_context : (context -> context tzresult Lwt.t) option;
+  readonly : bool;
 }
 
 and context = {index : index; parents : Store.Commit.t list; tree : Store.tree}
@@ -279,11 +280,15 @@ let restore_integrity ?ppf index =
            "unable to fix the corrupted context: %d bad entries detected"
            n)
 
+let syncs index = Store.sync index.repo
+
 let exists index key =
+  if index.readonly then syncs index ;
   Store.Commit.of_hash index.repo (Hash.of_context_hash key)
   >|= function None -> false | Some _ -> true
 
 let checkout index key =
+  if index.readonly then syncs index ;
   Store.Commit.of_hash index.repo (Hash.of_context_hash key)
   >>= function
   | None ->
@@ -490,11 +495,11 @@ let set_predecessor_ops_metadata_hash v hash =
 
 (*-- Initialisation ----------------------------------------------------------*)
 
-let init ?patch_context ?mapsize:_ ?readonly root =
+let init ?patch_context ?mapsize:_ ?(readonly = false) root =
   Store.Repo.v
-    (Irmin_pack.config ?readonly ?index_log_size:!index_log_size root)
+    (Irmin_pack.config ~readonly ?index_log_size:!index_log_size root)
   >>= fun repo ->
-  let v = {path = root; repo; patch_context} in
+  let v = {path = root; repo; patch_context; readonly} in
   Lwt.return v
 
 let close index = Store.Repo.close index.repo
