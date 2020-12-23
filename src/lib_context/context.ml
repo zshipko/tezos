@@ -40,10 +40,10 @@ let () =
     ~title:"Cannot open file for context dump"
     ~description:""
     ~pp:(fun ppf uerr ->
-        Format.fprintf
-          ppf
-          "@[Error while opening file for context dumping: %s@]"
-          uerr)
+      Format.fprintf
+        ppf
+        "@[Error while opening file for context dumping: %s@]"
+        uerr)
     Data_encoding.(obj1 (req "context_dump_cannot_open" string))
     (function Cannot_create_file e -> Some e | _ -> None)
     (fun e -> Cannot_create_file e) ;
@@ -53,10 +53,10 @@ let () =
     ~title:"Cannot open file for context restoring"
     ~description:""
     ~pp:(fun ppf uerr ->
-        Format.fprintf
-          ppf
-          "@[Error while opening file for context restoring: %s@]"
-          uerr)
+      Format.fprintf
+        ppf
+        "@[Error while opening file for context restoring: %s@]"
+        uerr)
     Data_encoding.(obj1 (req "context_restore_cannot_open" string))
     (function Cannot_open_file e -> Some e | _ -> None)
     (fun e -> Cannot_open_file e) ;
@@ -66,7 +66,7 @@ let () =
     ~title:"Cannot find protocol"
     ~description:""
     ~pp:(fun ppf () ->
-        Format.fprintf ppf "@[Cannot find protocol in context@]")
+      Format.fprintf ppf "@[Cannot find protocol in context@]")
     Data_encoding.unit
     (function Cannot_find_protocol -> Some () | _ -> None)
     (fun () -> Cannot_find_protocol) ;
@@ -76,10 +76,10 @@ let () =
     ~title:"Suspicious file: data after end"
     ~description:""
     ~pp:(fun ppf uerr ->
-        Format.fprintf
-          ppf
-          "@[Remaining bytes in file after context restoring: %d@]"
-          uerr)
+      Format.fprintf
+        ppf
+        "@[Remaining bytes in file after context restoring: %d@]"
+        uerr)
     Data_encoding.(obj1 (req "context_restore_suspicious" int31))
     (function Suspicious_file e -> Some e | _ -> None)
     (fun e -> Suspicious_file e)
@@ -127,24 +127,24 @@ let () =
   let overcommit () = overcommit := true in
   match Unix.getenv "TEZOS_STORAGE" with
   | exception Not_found ->
-    ()
+      ()
   | v ->
-    let args = String.split ',' v in
-    List.iter
-      (function
-        | "v" | "verbose" ->
-          verbose_app ()
-        | "vv" ->
-          verbose_debug ()
-        | "overcommit" ->
-          overcommit ()
-        | v -> (
+      let args = String.split ',' v in
+      List.iter
+        (function
+          | "v" | "verbose" ->
+              verbose_app ()
+          | "vv" ->
+              verbose_debug ()
+          | "overcommit" ->
+              overcommit ()
+          | v -> (
             match String.split '=' v with
             | ["index-log-size"; n] ->
-              index_log_size n
+                index_log_size n
             | _ ->
-              () ))
-      args
+                () ))
+        args
 
 module Hash : sig
   include Irmin.Hash.S
@@ -154,8 +154,8 @@ module Hash : sig
   val of_context_hash : Context_hash.t -> t
 end = struct
   module H = Digestif.Make_BLAKE2B (struct
-      let digest_size = 32
-    end)
+    let digest_size = 32
+  end)
 
   type t = H.t
 
@@ -168,14 +168,14 @@ end = struct
   let of_string x =
     match Context_hash.of_b58check x with
     | Ok x ->
-      Ok (of_context_hash x)
+        Ok (of_context_hash x)
     | Error err ->
-      Error
-        (`Msg
-           (Format.asprintf
-              "Failed to read b58check_encoding data: %a"
-              Error_monad.pp_print_error
-              err))
+        Error
+          (`Msg
+            (Format.asprintf
+               "Failed to read b58check_encoding data: %a"
+               Error_monad.pp_print_error
+               err))
 
   let hash_key = Irmin.Type.(unstage (short_hash string))
 
@@ -222,13 +222,13 @@ module Node = struct
       let none = "\000\000\000\000\000\000\000\000" in
       Irmin.Type.(map (string_of (`Fixed 8)))
         (fun s ->
-           match s.[0] with
-           | '\255' ->
-             None
-           | '\000' ->
-             Some ()
-           | _ ->
-             assert false)
+          match s.[0] with
+          | '\255' ->
+              None
+          | '\000' ->
+              Some ()
+          | _ ->
+              assert false)
         (function Some _ -> some | None -> none)
 
     (* Irmin 1.4 uses int64 to store list lengths *)
@@ -238,10 +238,10 @@ module Node = struct
           let kind = match kind with None -> `Node | Some m -> `Contents m in
           {kind; name; node})
       |+ field "kind" metadata_t (function
-          | {kind = `Node; _} ->
-            None
-          | {kind = `Contents m; _} ->
-            Some m)
+             | {kind = `Node; _} ->
+                 None
+             | {kind = `Contents m; _} ->
+                 Some m)
       |+ field "name" step_t (fun {name; _} -> name)
       |+ field "node" Hash.t (fun {node; _} -> node)
       |> sealr
@@ -252,9 +252,9 @@ module Node = struct
     let import_entry (s, v) =
       match v with
       | `Node h ->
-        {name = s; kind = `Node; node = h}
+          {name = s; kind = `Node; node = h}
       | `Contents (h, m) ->
-        {name = s; kind = `Contents m; node = h}
+          {name = s; kind = `Contents m; node = h}
 
     let import t = List.map import_entry (M.list t)
 
@@ -349,26 +349,26 @@ let restore_integrity ?ppf index =
   let l = Store.integrity_check ?ppf ~auto_repair:true index.repo in
   let rec report expected = function
     | (Error (`Cannot_fix msg), layer) :: _ when expected = `Cannot_fix ->
-      error (failure "%s in layer %a" msg Irmin_layers.Layer_id.pp layer)
+        error (failure "%s in layer %a" msg Irmin_layers.Layer_id.pp layer)
     | (Error (`Corrupted n), layer) :: _ when expected = `Corrupted ->
-      error
-        (failure
-           "unable to fix the corrupted context: %d bad entries detected in \
-            layer %a"
-           n
-           Irmin_layers.Layer_id.pp
-           layer)
+        error
+          (failure
+             "unable to fix the corrupted context: %d bad entries detected in \
+              layer %a"
+             n
+             Irmin_layers.Layer_id.pp
+             layer)
     | (Ok (`Fixed n), _) :: _ when expected = `Fixed ->
-      Ok (Some n)
+        Ok (Some n)
     | _ :: tl ->
-      report expected tl
+        report expected tl
     | [] ->
-      raise Not_found
+        raise Not_found
   in
   try report `Cannot_fix l
   with Not_found -> (
-      try report `Corrupted l
-      with Not_found -> ( try report `Fixed l with Not_found -> Ok None ) )
+    try report `Corrupted l
+    with Not_found -> ( try report `Fixed l with Not_found -> Ok None ) )
 
 let syncs index = Store.sync index.repo
 
@@ -382,11 +382,11 @@ let checkout index key =
   Store.Commit.of_hash index.repo (Hash.of_context_hash key)
   >>= function
   | None ->
-    Lwt.return_none
+      Lwt.return_none
   | Some commit ->
-    let tree = Store.Commit.tree commit in
-    let ctxt = {index; tree; parents = [commit]} in
-    Lwt.return_some ctxt
+      let tree = Store.Commit.tree commit in
+      let ctxt = {index; tree; parents = [commit]} in
+      Lwt.return_some ctxt
 
 let checkout_exn index key =
   checkout index key
@@ -401,17 +401,18 @@ let unshallow context =
   P.Repo.batch context.index.repo (fun x y _ ->
       Lwt_list.iter_s
         (fun (s, k) ->
-           match k with
-           | `Contents ->
-             Lwt.return ()
-           | `Node ->
-             Store.Tree.get_tree context.tree [s]
-             >>= fun tree ->
-             Store.save_tree ~clear:true context.index.repo x y tree
-             >|= fun _ -> ())
+          match k with
+          | `Contents ->
+              Lwt.return ()
+          | `Node ->
+              Store.Tree.get_tree context.tree [s]
+              >>= fun tree ->
+              Store.save_tree ~clear:true context.index.repo x y tree
+              >|= fun _ -> ())
         children)
 
 let count = ref 0
+
 let total = ref 0
 
 let commit_stats () =
@@ -473,7 +474,7 @@ let raw_commit ~time ?(message = "") context =
   >>= fun () ->
   Store.Commit.v context.index.repo ~info ~parents context.tree
   >|= fun h ->
-  maxrss_stat ();
+  maxrss_stat () ;
   Store.Tree.clear context.tree ;
   h
 
@@ -542,24 +543,24 @@ let copy ctxt ~from ~to_ =
   Store.Tree.find_tree ctxt.tree (data_key from)
   >>= function
   | None ->
-    Lwt.return_none
+      Lwt.return_none
   | Some sub_tree ->
-    Store.Tree.add_tree ctxt.tree (data_key to_) sub_tree
-    >>= fun tree -> Lwt.return_some {ctxt with tree}
+      Store.Tree.add_tree ctxt.tree (data_key to_) sub_tree
+      >>= fun tree -> Lwt.return_some {ctxt with tree}
 
 let fold ctxt key ~init ~f =
   Store.Tree.list ctxt.tree (data_key key)
   >>= fun keys ->
   Lwt_list.fold_left_s
     (fun acc (name, kind) ->
-       let key =
-         match kind with
-         | `Contents ->
-           `Key (key @ [name])
-         | `Node ->
-           `Dir (key @ [name])
-       in
-       f key acc)
+      let key =
+        match kind with
+        | `Contents ->
+            `Key (key @ [name])
+        | `Node ->
+            `Dir (key @ [name])
+      in
+      f key acc)
     init
     keys
 
@@ -569,21 +570,21 @@ let get_protocol v =
   raw_get v current_protocol_key
   >>= function
   | None ->
-    fail Cannot_find_protocol
+      fail Cannot_find_protocol
   | Some data -> (
-      match Protocol_hash.of_bytes data with
-      | Ok x ->
+    match Protocol_hash.of_bytes data with
+    | Ok x ->
         return x
-      | Error e ->
+    | Error e ->
         Lwt.return (Error e) )
 
 let get_protocol_exn v =
   get_protocol v
   >>= function
   | Ok x ->
-    Lwt.return x
+      Lwt.return x
   | Error _ ->
-    Lwt.fail (Failure "Unexpected error (Context.get_protocol_exn)")
+      Lwt.fail (Failure "Unexpected error (Context.get_protocol_exn)")
 
 let set_protocol v key =
   let key = Protocol_hash.to_bytes key in
@@ -593,16 +594,16 @@ let get_test_chain v =
   raw_get v current_test_chain_key
   >>= function
   | None ->
-    Lwt.fail (Failure "Unexpected error (Context.get_test_chain)")
+      Lwt.fail (Failure "Unexpected error (Context.get_test_chain)")
   | Some data -> (
-      match Data_encoding.Binary.of_bytes Test_chain_status.encoding data with
-      | Error re ->
+    match Data_encoding.Binary.of_bytes Test_chain_status.encoding data with
+    | Error re ->
         Format.kasprintf
           (fun s -> Lwt.fail (Failure s))
           "Error in Context.get_test_chain: %a"
           Data_encoding.Binary.pp_read_error
           re
-      | Ok r ->
+    | Ok r ->
         Lwt.return r )
 
 let set_test_chain v id =
@@ -617,14 +618,14 @@ let fork_test_chain v ~protocol ~expiration =
 (*-- Initialisation ----------------------------------------------------------*)
 
 let config ?readonly root =
-  let index_throttle =
+  let merge_throttle =
     if !overcommit then `Overcommit_memory else `Block_writes
   in
   let conf =
     Irmin_pack.config
       ?readonly
       ?index_log_size:!index_log_size
-      ~index_throttle
+      ~merge_throttle
       root
   in
   Irmin_pack.config_layers
@@ -648,12 +649,12 @@ let init ?patch_context ?(readonly = false) root =
   in
   Lwt.catch open_store (function
       | Irmin_pack.Unsupported_version `V1 ->
-        Logs.app (fun l -> l "Migrating store to v2, this may take a while") ;
-        Store.migrate config ;
-        Logs.app (fun l -> l "Migration ended, opening the store") ;
-        open_store ()
+          Logs.app (fun l -> l "Migrating store to v2, this may take a while") ;
+          Store.migrate config ;
+          Logs.app (fun l -> l "Migration ended, opening the store") ;
+          open_store ()
       | exn ->
-        Lwt.fail exn)
+          Lwt.fail exn)
 
 let close index = Store.Repo.close index.repo
 
@@ -663,9 +664,9 @@ let commit_genesis index ~chain_id ~time ~protocol =
   let tree = Store.Tree.empty in
   let ctxt = {index; tree; parents = []} in
   ( match index.patch_context with
-    | None ->
+  | None ->
       return ctxt
-    | Some patch_context ->
+  | Some patch_context ->
       patch_context ctxt )
   >>=? fun ctxt ->
   set_protocol ctxt protocol
@@ -724,17 +725,17 @@ let set_head index chain_id commit =
   Store.Commit.of_hash index.repo (Hash.of_context_hash commit)
   >>= function
   | None ->
-    assert false
+      assert false
   | Some commit ->
-    Store.Branch.set index.repo branch commit
+      Store.Branch.set index.repo branch commit
 
 let set_master index commit =
   Store.Commit.of_hash index.repo (Hash.of_context_hash commit)
   >>= function
   | None ->
-    assert false
+      assert false
   | Some commit ->
-    Store.Branch.set index.repo Store.Branch.master commit
+      Store.Branch.set index.repo Store.Branch.master commit
 
 (* Context dumping *)
 
@@ -749,9 +750,9 @@ module Pruned_block = struct
     let open Data_encoding in
     conv
       (fun {block_header; operations; operation_hashes} ->
-         (operations, operation_hashes, block_header))
+        (operations, operation_hashes, block_header))
       (fun (operations, operation_hashes, block_header) ->
-         {block_header; operations; operation_hashes})
+        {block_header; operations; operation_hashes})
       (obj3
          (req
             "operations"
@@ -785,9 +786,9 @@ module Block_data = struct
     let open Data_encoding in
     conv
       (fun {block_header; operations; predecessor_header} ->
-         (operations, block_header, predecessor_header))
+        (operations, block_header, predecessor_header))
       (fun (operations, block_header, predecessor_header) ->
-         {block_header; operations; predecessor_header})
+        {block_header; operations; predecessor_header})
       (obj3
          (req "operations" (list (list (dynamic_size Operation.encoding))))
          (req "block_header" (dynamic_size Block_header.encoding))
@@ -824,11 +825,11 @@ module Protocol_data = struct
     let open Data_encoding in
     conv
       (fun {info; protocol_hash; test_chain_status; data_key; parents; protocol}
-        ->
-          (info, protocol_hash, test_chain_status, data_key, parents, protocol))
+           ->
+        (info, protocol_hash, test_chain_status, data_key, parents, protocol))
       (fun (info, protocol_hash, test_chain_status, data_key, parents, protocol)
-        ->
-          {info; protocol_hash; test_chain_status; data_key; parents; protocol})
+           ->
+        {info; protocol_hash; test_chain_status; data_key; parents; protocol})
       (obj6
          (req "info" info_encoding)
          (req "protocol_hash" Protocol_hash.encoding)
@@ -873,9 +874,9 @@ module Protocol_data_legacy = struct
     let open Data_encoding in
     conv
       (fun {info; protocol_hash; test_chain_status; data_key; parents} ->
-         (info, protocol_hash, test_chain_status, data_key, parents))
+        (info, protocol_hash, test_chain_status, data_key, parents))
       (fun (info, protocol_hash, test_chain_status, data_key, parents) ->
-         {info; protocol_hash; test_chain_status; data_key; parents})
+        {info; protocol_hash; test_chain_status; data_key; parents})
       (obj5
          (req "info" info_encoding)
          (req "protocol_hash" Protocol_hash.encoding)
@@ -935,10 +936,10 @@ module Dumpable_context = struct
     let open Data_encoding in
     conv
       (fun irmin_info ->
-         let author = Irmin.Info.author irmin_info in
-         let message = Irmin.Info.message irmin_info in
-         let date = Irmin.Info.date irmin_info in
-         (author, message, date))
+        let author = Irmin.Info.author irmin_info in
+        let message = Irmin.Info.message irmin_info in
+        let date = Irmin.Info.date irmin_info in
+        (author, message, date))
       (fun (author, message, date) -> Irmin.Info.v ~author ~date message)
       (obj3 (req "author" string) (req "message" string) (req "date" int64))
 
@@ -948,14 +949,14 @@ module Dumpable_context = struct
     conv
       (function
         | `Blob h ->
-          (`Blob, Context_hash.to_bytes (Hash.to_context_hash h))
+            (`Blob, Context_hash.to_bytes (Hash.to_context_hash h))
         | `Node h ->
-          (`Node, Context_hash.to_bytes (Hash.to_context_hash h)))
+            (`Node, Context_hash.to_bytes (Hash.to_context_hash h)))
       (function
         | (`Blob, h) ->
-          `Blob (Hash.of_context_hash (Context_hash.of_bytes_exn h))
+            `Blob (Hash.of_context_hash (Context_hash.of_bytes_exn h))
         | (`Node, h) ->
-          `Node (Hash.of_context_hash (Context_hash.of_bytes_exn h)))
+            `Node (Hash.of_context_hash (Context_hash.of_bytes_exn h)))
       (obj2 (req "kind" kind_encoding) (req "value" bytes))
 
   let hash_equal (h1 : hash) (h2 : hash) = h1 = h2
@@ -963,17 +964,17 @@ module Dumpable_context = struct
   let context_parents ctxt =
     match ctxt with
     | {parents = [commit]; _} ->
-      let parents = Store.Commit.parents commit in
-      let parents = List.map Hash.to_context_hash parents in
-      List.sort Context_hash.compare parents
+        let parents = Store.Commit.parents commit in
+        let parents = List.map Hash.to_context_hash parents in
+        List.sort Context_hash.compare parents
     | _ ->
-      assert false
+        assert false
 
   let context_info = function
     | {parents = [c]; _} ->
-      Store.Commit.info c
+        Store.Commit.info c
     | _ ->
-      assert false
+        assert false
 
   let get_context idx bh = checkout idx bh.Block_header.shell.context
 
@@ -994,9 +995,9 @@ module Dumpable_context = struct
     tree |> Store.Tree.destruct
     |> function
     | `Node _ ->
-      `Node (Store.Tree.hash tree)
+        `Node (Store.Tree.hash tree)
     | `Contents (b, _) ->
-      `Blob (Store.Contents.hash b)
+        `Blob (Store.Contents.hash b)
 
   type binding = {
     key : string;
@@ -1013,19 +1014,19 @@ module Dumpable_context = struct
     keys
     |> List.sort (fun (a, _) (b, _) -> String.compare a b)
     |> Lwt_list.map_s (fun (key, value_kind) ->
-        Store.Tree.get_tree tree [key]
-        >|= fun value ->
-        let value_hash = tree_hash value in
-        {key; value; value_kind; value_hash})
+           Store.Tree.get_tree tree [key]
+           >|= fun value ->
+           let value_hash = tree_hash value in
+           {key; value; value_kind; value_hash})
     >|= fun bindings -> Store.Tree.clear tree ; bindings
 
   module Hashtbl = Hashtbl.MakeSeeded (struct
-      type t = hash
+    type t = hash
 
-      let hash = Hashtbl.seeded_hash
+    let hash = Hashtbl.seeded_hash
 
-      let equal = hash_equal
-    end)
+    let equal = hash_equal
+  end)
 
   let tree_iteri_unique f tree =
     let total_visited = ref 0 in
@@ -1037,23 +1038,23 @@ module Dumpable_context = struct
       Hashtbl.add visited_hash h ()
     in
     let rec aux : type a. tree -> (unit -> a) -> a Lwt.t =
-      fun tree k ->
-        bindings tree
-        >>= Lwt_list.map_s (fun {key; value; value_hash; value_kind} ->
-            let kv = (key, value_hash) in
-            if visited value_hash then Lwt.return kv
-            else
-              match value_kind with
-              | `Node ->
-                (* Visit children first, in left-to-right order. *)
-                (aux [@ocaml.tailcall]) value (fun () ->
-                    (* There cannot be a cycle. *)
-                    set_visit value_hash ; kv)
-              | `Contents ->
-                Store.Tree.get value []
-                >>= fun data ->
-                f (`Leaf data) >|= fun () -> set_visit value_hash ; kv)
-        >>= fun sub_keys -> f (`Branch sub_keys) >|= k
+     fun tree k ->
+      bindings tree
+      >>= Lwt_list.map_s (fun {key; value; value_hash; value_kind} ->
+              let kv = (key, value_hash) in
+              if visited value_hash then Lwt.return kv
+              else
+                match value_kind with
+                | `Node ->
+                    (* Visit children first, in left-to-right order. *)
+                    (aux [@ocaml.tailcall]) value (fun () ->
+                        (* There cannot be a cycle. *)
+                        set_visit value_hash ; kv)
+                | `Contents ->
+                    Store.Tree.get value []
+                    >>= fun data ->
+                    f (`Leaf data) >|= fun () -> set_visit value_hash ; kv)
+      >>= fun sub_keys -> f (`Branch sub_keys) >|= k
     in
     aux tree Fun.id >>= fun () -> Lwt.return !total_visited
 
@@ -1065,17 +1066,17 @@ module Dumpable_context = struct
     Store.Contents.of_hash repo hash
     >>= function
     | None ->
-      Lwt.return_none
+        Lwt.return_none
     | Some v ->
-      Store.Tree.add tree key v >>= Lwt.return_some
+        Store.Tree.add tree key v >>= Lwt.return_some
 
   let add_node_hash (Batch (repo, _, _)) tree key hash =
     Store.Tree.of_hash repo hash
     >>= function
     | None ->
-      Lwt.return_none
+        Lwt.return_none
     | Some t ->
-      Store.Tree.add_tree tree key (t :> tree) >>= Lwt.return_some
+        Store.Tree.add_tree tree key (t :> tree) >>= Lwt.return_some
 
   let add_string (Batch (_, t, _)) string =
     (* Save the contents in the store *)
@@ -1084,28 +1085,28 @@ module Dumpable_context = struct
   let add_dir batch l =
     let rec fold_list sub_tree = function
       | [] ->
-        Lwt.return_some sub_tree
+          Lwt.return_some sub_tree
       | (step, hash) :: tl -> (
-          match hash with
-          | `Blob hash -> (
-              add_blob_hash batch sub_tree [step] hash
-              >>= function
-              | None -> Lwt.return_none | Some sub_tree -> fold_list sub_tree tl
+        match hash with
+        | `Blob hash -> (
+            add_blob_hash batch sub_tree [step] hash
+            >>= function
+            | None -> Lwt.return_none | Some sub_tree -> fold_list sub_tree tl
             )
-          | `Node hash -> (
-              add_node_hash batch sub_tree [step] hash
-              >>= function
-              | None -> Lwt.return_none | Some sub_tree -> fold_list sub_tree tl
+        | `Node hash -> (
+            add_node_hash batch sub_tree [step] hash
+            >>= function
+            | None -> Lwt.return_none | Some sub_tree -> fold_list sub_tree tl
             ) )
     in
     fold_list Store.Tree.empty l
     >>= function
     | None ->
-      Lwt.return_none
+        Lwt.return_none
     | Some tree ->
-      let (Batch (repo, x, y)) = batch in
-      (* Save the node in the store ... *)
-      Store.save_tree ~clear:true repo x y tree >|= fun _ -> Some tree
+        let (Batch (repo, x, y)) = batch in
+        (* Save the node in the store ... *)
+        Store.save_tree ~clear:true repo x y tree >|= fun _ -> Some tree
 
   module Commit_hash = Context_hash
   module Block_header = Block_header
@@ -1136,10 +1137,10 @@ module Dumpable_context_legacy = struct
     let open Data_encoding in
     conv
       (fun irmin_info ->
-         let author = Irmin.Info.author irmin_info in
-         let message = Irmin.Info.message irmin_info in
-         let date = Irmin.Info.date irmin_info in
-         (author, message, date))
+        let author = Irmin.Info.author irmin_info in
+        let message = Irmin.Info.message irmin_info in
+        let date = Irmin.Info.date irmin_info in
+        (author, message, date))
       (fun (author, message, date) -> Irmin.Info.v ~author ~date message)
       (obj3 (req "author" string) (req "message" string) (req "date" int64))
 
@@ -1149,14 +1150,14 @@ module Dumpable_context_legacy = struct
     conv
       (function
         | `Blob h ->
-          (`Blob, Context_hash.to_bytes (Hash.to_context_hash h))
+            (`Blob, Context_hash.to_bytes (Hash.to_context_hash h))
         | `Node h ->
-          (`Node, Context_hash.to_bytes (Hash.to_context_hash h)))
+            (`Node, Context_hash.to_bytes (Hash.to_context_hash h)))
       (function
         | (`Blob, h) ->
-          `Blob (Hash.of_context_hash (Context_hash.of_bytes_exn h))
+            `Blob (Hash.of_context_hash (Context_hash.of_bytes_exn h))
         | (`Node, h) ->
-          `Node (Hash.of_context_hash (Context_hash.of_bytes_exn h)))
+            `Node (Hash.of_context_hash (Context_hash.of_bytes_exn h)))
       (obj2 (req "kind" kind_encoding) (req "value" bytes))
 
   let hash_equal (h1 : hash) (h2 : hash) = h1 = h2
@@ -1164,17 +1165,17 @@ module Dumpable_context_legacy = struct
   let context_parents ctxt =
     match ctxt with
     | {parents = [commit]; _} ->
-      let parents = Store.Commit.parents commit in
-      let parents = List.map Hash.to_context_hash parents in
-      List.sort Context_hash.compare parents
+        let parents = Store.Commit.parents commit in
+        let parents = List.map Hash.to_context_hash parents in
+        List.sort Context_hash.compare parents
     | _ ->
-      assert false
+        assert false
 
   let context_info = function
     | {parents = [c]; _} ->
-      Store.Commit.info c
+        Store.Commit.info c
     | _ ->
-      assert false
+        assert false
 
   let get_context idx bh = checkout idx bh.Block_header.shell.context
 
@@ -1195,9 +1196,9 @@ module Dumpable_context_legacy = struct
     tree |> Store.Tree.destruct
     |> function
     | `Node _ ->
-      `Node (Store.Tree.hash tree)
+        `Node (Store.Tree.hash tree)
     | `Contents (b, _) ->
-      `Blob (Store.Contents.hash b)
+        `Blob (Store.Contents.hash b)
 
   type binding = {
     key : string;
@@ -1214,18 +1215,18 @@ module Dumpable_context_legacy = struct
     keys
     |> List.sort (fun (a, _) (b, _) -> String.compare a b)
     |> Lwt_list.map_s (fun (key, value_kind) ->
-        Store.Tree.get_tree tree [key]
-        >|= fun value ->
-        let value_hash = tree_hash value in
-        {key; value; value_kind; value_hash})
+           Store.Tree.get_tree tree [key]
+           >|= fun value ->
+           let value_hash = tree_hash value in
+           {key; value; value_kind; value_hash})
 
   module Hashtbl = Hashtbl.MakeSeeded (struct
-      type t = hash
+    type t = hash
 
-      let hash = Hashtbl.seeded_hash
+    let hash = Hashtbl.seeded_hash
 
-      let equal = hash_equal
-    end)
+    let equal = hash_equal
+  end)
 
   let tree_iteri_unique f tree =
     let total_visited = ref 0 in
@@ -1237,24 +1238,24 @@ module Dumpable_context_legacy = struct
       Hashtbl.add visited_hash h ()
     in
     let rec aux : type a. tree -> (unit -> a) -> a Lwt.t =
-      fun tree k ->
-        bindings tree
-        >>= Lwt_list.map_s (fun {key; value; value_hash; value_kind} ->
-            let kv = (key, value_hash) in
-            if visited value_hash then Lwt.return kv
-            else
-              match value_kind with
-              | `Node ->
-                (* Visit children first, in left-to-right order. *)
-                (aux [@ocaml.tailcall]) value (fun () ->
-                    (* There cannot be a cycle. *)
-                    set_visit value_hash ; kv)
-              | `Contents ->
-                Store.Tree.get value []
-                >>= fun data ->
-                f !total_visited (`Leaf data)
-                >|= fun () -> set_visit value_hash ; kv)
-        >>= fun sub_keys -> f !total_visited (`Branch sub_keys) >|= k
+     fun tree k ->
+      bindings tree
+      >>= Lwt_list.map_s (fun {key; value; value_hash; value_kind} ->
+              let kv = (key, value_hash) in
+              if visited value_hash then Lwt.return kv
+              else
+                match value_kind with
+                | `Node ->
+                    (* Visit children first, in left-to-right order. *)
+                    (aux [@ocaml.tailcall]) value (fun () ->
+                        (* There cannot be a cycle. *)
+                        set_visit value_hash ; kv)
+                | `Contents ->
+                    Store.Tree.get value []
+                    >>= fun data ->
+                    f !total_visited (`Leaf data)
+                    >|= fun () -> set_visit value_hash ; kv)
+      >>= fun sub_keys -> f !total_visited (`Branch sub_keys) >|= k
     in
     aux tree Fun.id
 
@@ -1266,17 +1267,17 @@ module Dumpable_context_legacy = struct
     Store.Contents.of_hash repo hash
     >>= function
     | None ->
-      Lwt.return_none
+        Lwt.return_none
     | Some v ->
-      Store.Tree.add tree key v >>= Lwt.return_some
+        Store.Tree.add tree key v >>= Lwt.return_some
 
   let add_node_hash (Batch (repo, _, _)) tree key hash =
     Store.Tree.of_hash repo hash
     >>= function
     | None ->
-      Lwt.return_none
+        Lwt.return_none
     | Some t ->
-      Store.Tree.add_tree tree key (t :> tree) >>= Lwt.return_some
+        Store.Tree.add_tree tree key (t :> tree) >>= Lwt.return_some
 
   let add_string (Batch (_, t, _)) string =
     (* Save the contents in the store *)
@@ -1285,28 +1286,28 @@ module Dumpable_context_legacy = struct
   let add_dir batch l =
     let rec fold_list sub_tree = function
       | [] ->
-        Lwt.return_some sub_tree
+          Lwt.return_some sub_tree
       | (step, hash) :: tl -> (
-          match hash with
-          | `Blob hash -> (
-              add_blob_hash batch sub_tree [step] hash
-              >>= function
-              | None -> Lwt.return_none | Some sub_tree -> fold_list sub_tree tl
+        match hash with
+        | `Blob hash -> (
+            add_blob_hash batch sub_tree [step] hash
+            >>= function
+            | None -> Lwt.return_none | Some sub_tree -> fold_list sub_tree tl
             )
-          | `Node hash -> (
-              add_node_hash batch sub_tree [step] hash
-              >>= function
-              | None -> Lwt.return_none | Some sub_tree -> fold_list sub_tree tl
+        | `Node hash -> (
+            add_node_hash batch sub_tree [step] hash
+            >>= function
+            | None -> Lwt.return_none | Some sub_tree -> fold_list sub_tree tl
             ) )
     in
     fold_list Store.Tree.empty l
     >>= function
     | None ->
-      Lwt.return_none
+        Lwt.return_none
     | Some tree ->
-      let (Batch (repo, x, y)) = batch in
-      (* Save the node in the store ... *)
-      Store.save_tree ~clear:true repo x y tree >|= fun _ -> Some tree
+        let (Batch (repo, x, y)) = batch in
+        (* Save the node in the store ... *)
+        Store.save_tree ~clear:true repo x y tree >|= fun _ -> Some tree
 
   module Commit_hash = Context_hash
   module Block_header = Block_header
@@ -1404,19 +1405,19 @@ let dump_context idx data ~context_file_path =
   (* TODO better naming *)
   Lwt.catch
     (fun () ->
-       Lwt_unix.openfile
-         context_file_path
-         Lwt_unix.[O_WRONLY; O_CREAT; O_TRUNC]
-         0o644
-       >>= return)
+      Lwt_unix.openfile
+        context_file_path
+        Lwt_unix.[O_WRONLY; O_CREAT; O_TRUNC]
+        0o644
+      >>= return)
     (function
       | Unix.Unix_error (e, _, _) ->
-        fail (Cannot_create_file (Unix.error_message e))
+          fail (Cannot_create_file (Unix.error_message e))
       | exc ->
-        let msg =
-          Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
-        in
-        fail (Cannot_create_file msg))
+          let msg =
+            Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
+          in
+          fail (Cannot_create_file msg))
   >>=? fun context_fd ->
   Lwt.finalize
     (fun () -> Context_dumper.dump_context_fd idx data ~context_fd)
@@ -1426,32 +1427,32 @@ let restore_context ?expected_block idx ~context_file_path ~target_block
     ~nb_context_elements =
   Lwt.catch
     (fun () ->
-       Lwt_unix.openfile context_file_path Lwt_unix.[O_RDONLY] 0o444 >>= return)
+      Lwt_unix.openfile context_file_path Lwt_unix.[O_RDONLY] 0o444 >>= return)
     (function
       | Unix.Unix_error (e, _, _) ->
-        fail (Cannot_open_file (Unix.error_message e))
+          fail (Cannot_open_file (Unix.error_message e))
       | exc ->
-        let msg =
-          Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
-        in
-        fail (Cannot_open_file msg))
+          let msg =
+            Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
+          in
+          fail (Cannot_open_file msg))
   >>=? fun fd ->
   Lwt.finalize
     (fun () ->
-       Context_dumper.restore_context_fd
-         idx
-         ~fd
-         ?expected_block
-         ~target_block
-         ~nb_context_elements
-       >>=? fun result ->
-       Lwt_unix.lseek fd 0 Lwt_unix.SEEK_CUR
-       >>= fun current ->
-       Lwt_unix.fstat fd
-       >>= fun stats ->
-       let total = stats.Lwt_unix.st_size in
-       if current = total then return result
-       else fail (Suspicious_file (total - current)))
+      Context_dumper.restore_context_fd
+        idx
+        ~fd
+        ?expected_block
+        ~target_block
+        ~nb_context_elements
+      >>=? fun result ->
+      Lwt_unix.lseek fd 0 Lwt_unix.SEEK_CUR
+      >>= fun current ->
+      Lwt_unix.fstat fd
+      >>= fun stats ->
+      let total = stats.Lwt_unix.st_size in
+      if current = total then return result
+      else fail (Suspicious_file (total - current)))
     (fun () -> Lwt_unix.close fd)
 
 let legacy_restore_contexts idx ~filename k_store_pruned_block
@@ -1461,80 +1462,80 @@ let legacy_restore_contexts idx ~filename k_store_pruned_block
   in
   Lwt.catch file_init (function
       | Unix.Unix_error (e, _, _) ->
-        fail @@ Cannot_open_file (Unix.error_message e)
+          fail @@ Cannot_open_file (Unix.error_message e)
       | exc ->
-        let msg =
-          Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
-        in
-        fail (Cannot_open_file msg))
+          let msg =
+            Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
+          in
+          fail (Cannot_open_file msg))
   >>=? fun fd ->
   Lwt.finalize
     (fun () ->
-       Context_dumper_legacy.legacy_restore_contexts_fd
-         idx
-         ~fd
-         k_store_pruned_block
-         pipeline_validation
-       >>=? fun result ->
-       Lwt_unix.lseek fd 0 Lwt_unix.SEEK_CUR
-       >>= fun current ->
-       Lwt_unix.fstat fd
-       >>= fun stats ->
-       let total = stats.Lwt_unix.st_size in
-       if current = total then return result
-       else fail @@ Suspicious_file (total - current))
+      Context_dumper_legacy.legacy_restore_contexts_fd
+        idx
+        ~fd
+        k_store_pruned_block
+        pipeline_validation
+      >>=? fun result ->
+      Lwt_unix.lseek fd 0 Lwt_unix.SEEK_CUR
+      >>= fun current ->
+      Lwt_unix.fstat fd
+      >>= fun stats ->
+      let total = stats.Lwt_unix.st_size in
+      if current = total then return result
+      else fail @@ Suspicious_file (total - current))
     (fun () -> Lwt_unix.close fd)
 
 let restore_context_legacy ?expected_block idx ~snapshot_file ~handle_block
     ~handle_protocol_data ~block_validation =
   Lwt.catch
     (fun () ->
-       Lwt_unix.openfile snapshot_file [Unix.O_RDONLY] 0o600 >>= return)
+      Lwt_unix.openfile snapshot_file [Unix.O_RDONLY] 0o600 >>= return)
     (function
       | Unix.Unix_error (e, _, _) ->
-        fail (Cannot_open_file (Unix.error_message e))
+          fail (Cannot_open_file (Unix.error_message e))
       | exc ->
-        let msg =
-          Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
-        in
-        fail (Cannot_open_file msg))
+          let msg =
+            Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
+          in
+          fail (Cannot_open_file msg))
   >>=? fun fd ->
   Lwt.finalize
     (fun () ->
-       Context_dumper_legacy.restore_context_fd
-         idx
-         ~fd
-         ?expected_block
-         ~handle_block
-         ~handle_protocol_data
-         ~block_validation
-       >>=? fun result ->
-       Lwt_unix.lseek fd 0 Lwt_unix.SEEK_CUR
-       >>= fun current ->
-       Lwt_unix.fstat fd
-       >>= fun stats ->
-       let total = stats.Lwt_unix.st_size in
-       if current = total then return result
-       else fail (Suspicious_file (total - current)))
+      Context_dumper_legacy.restore_context_fd
+        idx
+        ~fd
+        ?expected_block
+        ~handle_block
+        ~handle_protocol_data
+        ~block_validation
+      >>=? fun result ->
+      Lwt_unix.lseek fd 0 Lwt_unix.SEEK_CUR
+      >>= fun current ->
+      Lwt_unix.fstat fd
+      >>= fun stats ->
+      let total = stats.Lwt_unix.st_size in
+      if current = total then return result
+      else fail (Suspicious_file (total - current)))
     (fun () -> Lwt_unix.close fd)
 
 (* For testing purposes only *)
 let dump_legacy_snapshot idx datas ~filename =
   Lwt.catch
     (fun () ->
-       Lwt_unix.openfile filename Lwt_unix.[O_WRONLY; O_CREAT; O_TRUNC] 0o666
-       >>= fun fd ->
-       Lwt.finalize
-         (fun () -> Context_dumper_legacy.dump_contexts_fd idx datas ~fd)
-         (fun () -> Lwt_unix.close fd))
+      Lwt_unix.openfile filename Lwt_unix.[O_WRONLY; O_CREAT; O_TRUNC] 0o666
+      >>= fun fd ->
+      Lwt.finalize
+        (fun () -> Context_dumper_legacy.dump_contexts_fd idx datas ~fd)
+        (fun () -> Lwt_unix.close fd))
     (function
       | Unix.Unix_error (e, _, _) ->
-        fail @@ Cannot_create_file (Unix.error_message e)
+          fail @@ Cannot_create_file (Unix.error_message e)
       | exc ->
-        let msg =
-          Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
-        in
-        fail (Cannot_create_file msg))
+          let msg =
+            Printf.sprintf "unknown error: %s" (Printexc.to_string exc)
+          in
+          fail (Cannot_create_file msg))
 
 (* For testing purposes only *)
 let validate_context_hash_consistency_and_commit ~data_hash
