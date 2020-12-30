@@ -25,6 +25,9 @@
 
 let term_name = "storage"
 
+
+let ( // ) = Filename.concat
+
 module Term = struct
   open Cmdliner
 
@@ -36,37 +39,9 @@ module Term = struct
   type subcommand = {
     name : string;
     description : string;
-    term : (unit -> unit) Term.t;
+    term : unit Term.t;
   }
 
-  let terms =
-    let open Context.Checks in
-    [ {
-        name = "check-self-contained";
-        description =
-          "Check that the upper layer of the store is self-contained.";
-        term = Pack.Check_self_contained.term;
-      };
-      {
-        name = "integrity-check-index";
-        description = "Search the store for integrity faults and corruption.";
-        term = Index.Integrity_check.term;
-      };
-      {
-        name = "stat-index";
-        description = "Print high-level statistics about the index store.";
-        term = Index.Stat.term;
-      };
-      {
-        name = "stat-pack";
-        description = "Print high-level statistics about the pack file.";
-        term = Pack.Stat.term;
-      };
-      {
-        name = "reconstruct-index";
-        description = "Reconstruct index from pack file.";
-        term = Pack.Reconstruct_index.term;
-      } ]
 
   let read_data_dir (config : Node_config_file.t) data_dir =
     let data_dir = Option.value ~default:config.data_dir data_dir in
@@ -80,14 +55,7 @@ module Term = struct
     | None ->
         return Node_config_file.default_config
 
-  let head_hash (config : string option) data_dir =
-    let ( // ) = Filename.concat in
-    read_config_file config
-    >>= fun config ->
-    let config = Result.get_ok config in
-    read_data_dir config data_dir
-    >>= fun root ->
-    let root = Result.get_ok root in
+  let head_hash config root =
     let {Node_config_file.genesis; _} =
       config.Node_config_file.blockchain_network
     in
@@ -100,7 +68,89 @@ module Term = struct
     Store.Chain.current_head chain_store
     >|= fun b -> Block_hash.to_hex (Store.Block.hash b) |> Hex.show
 
-  let dispatch_subcommand config_file data_dir = function
+  let cmd f param =
+    let open Term in
+    const (fun data_dir config_file arg ->
+      let main = read_config_file config_file >>= fun config ->
+        let config = Result.get_ok config in
+        read_data_dir config data_dir >>= fun root ->
+        let root = Result.get_ok root in
+        f config root arg
+      in Lwt_main.run main
+    ) $ Node_shared_arg.Term.data_dir $ Node_shared_arg.Term.config_file $ param
+
+  let cmd' f = cmd f (Term.const ())
+
+  let check_self_contained =
+    cmd' (fun config root () ->
+        head_hash config root >>= fun head ->
+        let heads = Some [head] in
+        let root = root // "context" in
+        Context.Checks.Pack.Check_self_contained.run ~heads ~root
+    )
+
+  let integrity_check_index =
+    cmd' (fun _config root () ->
+      Lwt.wrap (fun () ->
+        Context.Checks.Index.Integrity_check.run ~root
+      )
+    )
+
+  let stat_index =
+    cmd' (fun _config root () ->
+      Lwt.wrap (fun () ->
+        Context.Checks.Index.Stat.run ~root
+      )
+    )
+
+  let stat_pack =
+    cmd' (fun _config root () ->
+      Context.Checks.Pack.Stat.run ~root
+    )
+
+  let dest =
+    let open Cmdliner.Arg in
+    value
+      & opt (some string) None
+      @@ info ~doc:"Path to the new index file" ~docv:"DEST" ["output"; "o"]
+
+
+  let reconstruct_index =
+    cmd (fun _config root output ->
+      Lwt.wrap (fun () ->
+        Context.Checks.Pack.Reconstruct_index.run ~root ~output
+      )
+    ) dest
+
+  let terms =
+    [ {
+        name = "check-self-contained";
+        description =
+          "Check that the upper layer of the store is self-contained.";
+        term = check_self_contained;
+      };
+      {
+        name = "integrity-check-index";
+        description = "Search the store for integrity faults and corruption.";
+        term = integrity_check_index;
+      };
+      {
+        name = "stat-index";
+        description = "Print high-level statistics about the index store.";
+        term = stat_index;
+      };
+      {
+        name = "stat-pack";
+        description = "Print high-level statistics about the pack file.";
+        term = stat_pack;
+      };
+      {
+        name = "reconstruct-index";
+        description = "Reconstruct index from pack file.";
+        term = reconstruct_index;
+      } ]
+
+  let dispatch_subcommand _ _ = function
     | None ->
         `Help (`Auto, Some term_name)
     | Some n -> (
@@ -131,12 +181,6 @@ module Term = struct
           let noop_formatter =
             Format.make_formatter (fun _ _ _ -> ()) (fun () -> ())
           in
-          let argv =
-            if command.name = "check-self-contained" then
-              let head = Lwt_main.run @@ head_hash config_file data_dir in
-              Array.append argv [|"--heads"; head|]
-            else argv
-          in
           Term.eval
             ~argv
             ~err:noop_formatter (* Defaults refer to non-existent help *)
@@ -144,8 +188,7 @@ module Term = struct
             ( command.term,
               Term.info (binary_name ^ " " ^ term_name ^ " " ^ command.name) )
           |> function
-          | `Ok f ->
-              `Ok (f ())
+          | `Ok () -> `Ok ()
           | `Help | `Version ->
               (* Parent term evaluation intercepts [--help] and [--version] *)
               assert false
@@ -165,13 +208,12 @@ module Term = struct
       (* NOTE: [Cmdliner] doesn't have a wildcard argument or mechanism for
          deferring the parsing of arguments, so this term must explicitly
          support any options required by the subcommands *)
-      Arg.(value @@ pos_all string [] (info ~docv:"COMMAND" []))
-      |> Term.(app (const List.hd_opt))
+      Arg.(value @@ (pos 0) (some string) None (info ~docv:"COMMAND" []))
     in
     Term.(
       ret
-        ( const dispatch_subcommand $ Node_shared_arg.Term.config_file
-        $ Node_shared_arg.Term.data_dir $ subcommand ))
+        ( const dispatch_subcommand $
+        Node_shared_arg.Term.config_file $ Node_shared_arg.Term.data_dir $ subcommand  ))
 end
 
 module Manpage = struct
