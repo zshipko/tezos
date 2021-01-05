@@ -31,6 +31,8 @@ let ( // ) = Filename.concat
 module Term = struct
   open Cmdliner
 
+  open Node_shared_arg.Term
+
   (* [Cmdliner] terms are not nestable, so we implement an ad-hoc mechanism for
      delegating to one of several "subcommand"s by parsing a single positional
      argument and then calling [Term.eval] again with the remaining
@@ -41,7 +43,6 @@ module Term = struct
     description : string;
     term : unit Term.t;
   }
-
 
   let read_data_dir (config : Node_config_file.t) data_dir =
     let data_dir = Option.value ~default:config.data_dir data_dir in
@@ -77,7 +78,7 @@ module Term = struct
         let root = Result.get_ok root in
         f config root arg
       in Lwt_main.run main
-    ) $ Node_shared_arg.Term.data_dir $ Node_shared_arg.Term.config_file $ param
+    ) $ data_dir $ config_file $ param
 
   let cmd' f = cmd f (Term.const ())
 
@@ -92,6 +93,8 @@ module Term = struct
   let integrity_check_index =
     cmd' (fun _config root () ->
       Lwt.wrap (fun () ->
+        let root = root // "context" // "upper0"  in
+        print_endline root;
         Context.Checks.Index.Integrity_check.run ~root
       )
     )
@@ -99,12 +102,14 @@ module Term = struct
   let stat_index =
     cmd' (fun _config root () ->
       Lwt.wrap (fun () ->
-        Context.Checks.Index.Stat.run ~root
+        let root = root // "context" // "upper0" in
+        Context.Checks.Index.Stat.run ~root;
       )
     )
 
   let stat_pack =
     cmd' (fun _config root () ->
+      let root = root // "context" in
       Context.Checks.Pack.Stat.run ~root
     )
 
@@ -114,11 +119,16 @@ module Term = struct
       & opt (some string) None
       @@ info ~doc:"Path to the new index file" ~docv:"DEST" ["output"; "o"]
 
-
   let reconstruct_index =
     cmd (fun _config root output ->
+      let store = "upper0" in
+      let output = match output with
+        | Some x -> Some x
+        | None -> Some (root // "context" // store // "index")
+      in
       Lwt.wrap (fun () ->
-        Context.Checks.Pack.Reconstruct_index.run ~root ~output
+        let root = root // "context" // store in
+        Context.Checks.Pack.Reconstruct_index.run ~root ~output;
       )
     ) dest
 
@@ -213,7 +223,7 @@ module Term = struct
     Term.(
       ret
         ( const dispatch_subcommand $
-        Node_shared_arg.Term.config_file $ Node_shared_arg.Term.data_dir $ subcommand  ))
+        config_file $ data_dir $ subcommand  ))
 end
 
 module Manpage = struct
