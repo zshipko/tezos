@@ -56,48 +56,43 @@ module Term = struct
     | None ->
         return Node_config_file.default_config
 
-  let cmd f param =
+  let get_root data_dir config_file =
+    read_config_file config_file >>= fun config ->
+    let config = Result.get_ok config in
+    read_data_dir config data_dir >|= fun root ->
+    Result.get_ok root
+
+  let auto_repair =
+    let open Cmdliner.Arg in
+    value & (flag @@ info ~doc:"Automatically repair issues" [ "auto-repair" ])
+
+  let integrity_check =
     let open Term in
-    const (fun data_dir config_file arg ->
-      let main = read_config_file config_file >>= fun config ->
-        let config = Result.get_ok config in
-        read_data_dir config data_dir >>= fun root ->
-        let root = Result.get_ok root in
-        f root arg
-      in Lwt_main.run main
-    ) $ data_dir $ config_file $ param
-
-  let cmd' f = cmd f (Term.const ())
-
-  let check_self_contained =
-    cmd' (fun root () ->
-        let heads = None in
+    const (fun data_dir config_file auto_repair ->
+      let main =
+        get_root data_dir config_file >>= fun root ->
         let root = root // "context" in
-        Context.Checks.Pack.Check_self_contained.run ~heads ~root
-    )
-
-  let integrity_check_index =
-    cmd' (fun root () ->
-      Lwt.wrap (fun () ->
-        let root = root // "context" // "upper0"  in
-        print_endline root;
-        Context.Checks.Index.Integrity_check.run ~root
-      )
-    )
+        Context.Checks.Pack.Integrity_check.run ~root ~auto_repair
+      in Lwt_main.run main
+    ) $ data_dir $ config_file $ auto_repair
 
   let stat_index =
-    cmd' (fun root () ->
-      Lwt.wrap (fun () ->
-        let root = root // "context" // "upper0" in
-        Context.Checks.Index.Stat.run ~root;
-      )
-    )
+    let open Term in
+    const (fun data_dir config_file ->
+      let root = Lwt_main.run (get_root data_dir config_file) in
+      let root = root // "context" in
+      Context.Checks.Index.Stat.run ~root
+    ) $ data_dir $ config_file
 
   let stat_pack =
-    cmd' (fun root () ->
-      let root = root // "context" in
-      Context.Checks.Pack.Stat.run ~root
-    )
+    let open Term in
+    const (fun data_dir config_file ->
+      let main =
+        get_root data_dir config_file >>= fun root ->
+        let root = root // "context" in
+        Context.Checks.Pack.Stat.run ~root
+      in Lwt_main.run main
+    ) $ data_dir $ config_file
 
   let dest =
     let open Cmdliner.Arg in
@@ -106,29 +101,18 @@ module Term = struct
       @@ info ~doc:"Path to the new index file" ~docv:"DEST" ["output"; "o"]
 
   let reconstruct_index =
-    cmd (fun root output ->
-      let store = "upper0" in
-      let output = match output with
-        | Some x -> Some x
-        | None -> Some (root // "context" // store // "index")
-      in
-      Lwt.wrap (fun () ->
-        let root = root // "context" // store in
-        Context.Checks.Pack.Reconstruct_index.run ~root ~output;
-      )
-    ) dest
+    let open Term in
+    const (fun data_dir config_file output ->
+      let root = Lwt_main.run (get_root data_dir config_file) in
+      let root = root // "context" in
+      Context.Checks.Pack.Reconstruct_index.run ~root ~output;
+    ) $ data_dir $ config_file $ dest
 
   let terms =
     [ {
-        name = "check-self-contained";
-        description =
-          "Check that the upper layer of the store is self-contained.";
-        term = check_self_contained;
-      };
-      {
-        name = "integrity-check-index";
+        name = "integrity-check";
         description = "Search the store for integrity faults and corruption.";
-        term = integrity_check_index;
+        term = integrity_check;
       };
       {
         name = "stat-index";
