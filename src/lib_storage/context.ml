@@ -242,13 +242,12 @@ module Store =
 module P = Store.Private
 
 module Checks = struct
+  module Store = struct
+    module Hash = Hash
+    module Store = Store
+  end
   module Pack =
-    Irmin_pack.Checks.Make (Conf) (Irmin.Metadata.None) (Contents)
-      (Irmin.Path.String_list)
-      (Irmin.Branch.String)
-      (Hash)
-      (Node)
-      (Commit)
+    Irmin_pack.Checks.Make (Conf)
 
   module Index = struct
     module I = Irmin_pack.Index.Make (Hash)
