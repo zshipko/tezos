@@ -248,7 +248,7 @@ let raw_commit ~time ?(message = "") context =
   unshallow context >>= fun () ->
   Store.Commit.v context.index.repo ~info ~parents context.tree >|= fun h ->
   Store.Tree.clear context.tree ;
-  h
+  Lwt.return h
 
 let hash ~time ?(message = "") context =
   let info =
@@ -474,11 +474,32 @@ let add_predecessor_ops_metadata_hash v hash =
   raw_add v current_predecessor_ops_metadata_hash_key data
 
 (*-- Initialisation ----------------------------------------------------------*)
+let config ?readonly ~with_lower root =
+  let conf =
+    Irmin_pack.config
+      ?readonly
+      ?index_log_size:!index_log_size
+      ~freeze_throttle:`Cancel_existing
+      root
+  in
+  Irmin_pack_layered.config ~conf ~with_lower ~blocking_copy_size:1000000 ()
 
 let init ?patch_context ?(readonly = false) root =
-  Store.Repo.v
-    (Irmin_pack.config ~readonly ?index_log_size:!index_log_size root)
-  >|= fun repo -> {path = root; repo; patch_context; readonly}
+  let config = config ~readonly ~with_lower:false root in
+  let open_store () =
+    Store.Repo.v config
+    >>= fun repo ->
+    let v = {path = root; repo; patch_context; readonly} in
+    Lwt.return v
+  in
+  Lwt.catch open_store (function
+      | Irmin_pack.Version.(Invalid {expected = `V2; found = `V1}) ->
+          Logs.app (fun l -> l "Migrating store to v2, this may take a while") ;
+          Store.migrate config ;
+          Logs.app (fun l -> l "Migration ended, opening the store") ;
+          open_store ()
+      | exn ->
+          Lwt.fail exn)
 
 let close index = Store.Repo.close index.repo
 
