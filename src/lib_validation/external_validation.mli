@@ -45,6 +45,7 @@ type request =
       operations : Operation.t list list;
       max_operations_ttl : int;
     }
+  | Unload of {max_upper : Context_hash.t list; min_upper : Context_hash.t}
   | Commit_genesis of {chain_id : Chain_id.t}
   | Fork_test_chain of {
       context_hash : Context_hash.t;

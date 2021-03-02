@@ -145,24 +145,18 @@ module Conf = struct
   let stable_hash = 256
 end
 
-module V1 = struct
-   let version = `V1
-end
-
-module Maker = Irmin_pack.Maker_ext (V1) (Conf) (Node) (Commit)
+module Maker = Irmin_pack_layered.Maker_ext (Conf) (Node) (Commit)
 module Store = Maker.Make (Metadata) (Contents) (Path) (Branch) (Hash)
-
 module P = Store.Private
 
 module Checks = struct
   module Maker (V : Irmin_pack.Version.S) = struct
     module Maker = Irmin_pack.Maker_ext (V) (Conf) (Node) (Commit)
-     
-    include
-      Maker.Make (Irmin.Metadata.None) (Irmin.Contents.String) (Path)
-        (Irmin.Branch.String)
-        (Hash)
+    include Maker.Make (Irmin.Metadata.None) (Irmin.Contents.String) (Path)
+              (Irmin.Branch.String)
+              (Hash)
   end
+
   module Pack : Irmin_pack.Checks.S = Irmin_pack.Checks.Make (Maker)
 
   module Index = struct
@@ -253,6 +247,33 @@ let unshallow context =
               >|= fun _ -> ())
         children)
 
+let pp_stats () =
+  Format.printf "Irmin stats: %t\n@." Irmin_layers.Stats.pp_latest
+
+let freeze index ~max_upper ~min_upper =
+  (* First, we call [wait_for_freeze] to make sure that the previous
+     freeze is over. This prevents to start a new freeze while another
+     freeze is running, which would result in canceling the first
+     one. The [wait_for_freeze] is blocking while the freeze is not
+     completed. *)
+  Store.Private_layer.wait_for_freeze index.repo
+  >>= fun () ->
+  let to_commit ctxt_hash =
+    let hash = Hash.of_context_hash ctxt_hash in
+    Store.Commit.of_hash index.repo hash
+    >>= function None -> assert false | Some commit -> Lwt.return commit
+  in
+  List.map_s to_commit max_upper
+  >>= fun max_upper_commits ->
+  to_commit min_upper
+  >>= fun min_upper_commit ->
+  Store.freeze
+    ~max_upper:max_upper_commits
+    ~min_upper:[min_upper_commit]
+    ~max_lower:[min_upper_commit]
+    index.repo
+  >>= fun () -> pp_stats () ; Lwt.return_unit
+
 let raw_commit ~time ?(message = "") context =
   let info =
     Irmin.Info.v ~date:(Time.Protocol.to_seconds time) ~author:"Tezos" message
@@ -261,9 +282,9 @@ let raw_commit ~time ?(message = "") context =
   unshallow context
   >>= fun () ->
   Store.Commit.v context.index.repo ~info ~parents context.tree
-  >|= fun h ->
+  >>= fun h ->
   Store.Tree.clear context.tree ;
-  h
+  Lwt.return h
 
 let hash ~time ?(message = "") context =
   let info =
@@ -508,11 +529,32 @@ let add_predecessor_ops_metadata_hash v hash =
   raw_add v current_predecessor_ops_metadata_hash_key data
 
 (*-- Initialisation ----------------------------------------------------------*)
+let config ?readonly ~with_lower root =
+  let conf =
+    Irmin_pack.config
+      ?readonly
+      ?index_log_size:!index_log_size
+      ~freeze_throttle:`Cancel_existing
+      root
+  in
+  Irmin_pack_layered.config ~conf ~with_lower ~blocking_copy_size:1000000 ()
 
 let init ?patch_context ?(readonly = false) root =
-  Store.Repo.v
-    (Irmin_pack.config ~readonly ?index_log_size:!index_log_size root)
-  >|= fun repo -> {path = root; repo; patch_context; readonly}
+  let config = config ~readonly ~with_lower:false root in
+  let open_store () =
+    Store.Repo.v config
+    >>= fun repo ->
+    let v = {path = root; repo; patch_context; readonly} in
+    Lwt.return v
+  in
+  Lwt.catch open_store (function
+      | Irmin_pack.Version.(Invalid {expected = `V2; found = `V1}) ->
+          Logs.app (fun l -> l "Migrating store to v2, this may take a while") ;
+          Store.migrate config ;
+          Logs.app (fun l -> l "Migration ended, opening the store") ;
+          open_store ()
+      | exn ->
+          Lwt.fail exn)
 
 let close index = Store.Repo.close index.repo
 
