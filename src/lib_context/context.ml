@@ -239,6 +239,8 @@ let pp_stats () =
   Format.printf "Irmin stats: %t\n@." Irmin_layers.Stats.pp_latest
 
 let freeze index ~max_upper ~min_upper =
+  Format.printf "Start the wait_for_freeze@." ;
+  let start = Systime_os.now () in
   (* First, we call [wait_for_freeze] to make sure that the previous
      freeze is over. This prevents to start a new freeze while another
      freeze is running, which would result in canceling the first
@@ -246,6 +248,8 @@ let freeze index ~max_upper ~min_upper =
      completed. *)
   Store.Private_layer.wait_for_freeze index.repo
   >>= fun () ->
+  let elapsed = Ptime.diff (Systime_os.now ()) start in
+  Format.printf "Freeze wait (wait_for_freeze) : %a@." Ptime.Span.pp elapsed ;
   let to_commit ctxt_hash =
     let hash = Hash.of_context_hash ctxt_hash in
     Store.Commit.of_hash index.repo hash
