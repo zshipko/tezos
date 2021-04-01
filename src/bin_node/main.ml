@@ -94,7 +94,8 @@ let commands =
     Node_upgrade_command.cmd;
     Node_snapshot_command.cmd;
     Node_reconstruct_command.cmd;
-    Node_storage_command.cmd ]
+    Node_storage_command.cmd;
+    Node_bench_command.cmd ]
 
 (* This call is not strictly necessary as the parameters are initialized
    lazily the first time a Sapling operation (validation or forging) is
