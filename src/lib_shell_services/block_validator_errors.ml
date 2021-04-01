@@ -391,6 +391,7 @@ type error +=
   | Missing_test_protocol of Protocol_hash.t
   | Validation_process_failed of validation_process_error
   | Cannot_validate_while_shutting_down
+  | Expected_validation_failure of Block_header.t
 
 let () =
   Error_monad.register_recursive_error_kind
@@ -532,6 +533,21 @@ let () =
         "Cannot validate block while the node is shutting down.")
     Data_encoding.empty
     (function Cannot_validate_while_shutting_down -> Some () | _ -> None)
-    (fun () -> Cannot_validate_while_shutting_down)
+    (fun () -> Cannot_validate_while_shutting_down) ;
+  Error_monad.register_error_kind
+    `Temporary
+    ~id:"validator.expected_validation_failure"
+    ~title:"Expected validation failure"
+    ~description:"Expected validation failure"
+    ~pp:(fun ppf header ->
+      Format.fprintf
+        ppf
+        "Expected validation failure. The last validated block is the \
+         predecessor of %a@."
+        Block_header.pp
+        header)
+    Data_encoding.(obj1 (req "header" Block_header.encoding))
+    (function Expected_validation_failure header -> Some header | _ -> None)
+    (fun header -> Expected_validation_failure header)
 
 let invalid_block block error = Invalid_block {block; error}

@@ -73,5 +73,6 @@ type error +=
   | Missing_test_protocol of Protocol_hash.t
   | Validation_process_failed of validation_process_error
   | Cannot_validate_while_shutting_down
+  | Expected_validation_failure of Block_header.t
 
 val invalid_block : Block_hash.t -> block_error -> error
