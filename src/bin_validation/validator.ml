@@ -166,6 +166,12 @@ let init input =
       user_activated_protocol_overrides )
 
 let run input output =
+  (* DEBUG: Aims to stop the validation when that block is reached *)
+  let validation_limit =
+    Option.map
+      (fun s -> Int32.of_int (Stdlib.int_of_string s))
+      (Sys.getenv_opt "VALIDATION_LIMIT")
+  in
   handshake input output
   >>=? fun () ->
   init input
@@ -223,6 +229,16 @@ let run input output =
           Events.(emit validation_request block_header)
           >>= fun () ->
           Error_monad.protect (fun () ->
+              ( match validation_limit with
+              | None ->
+                  return_unit
+              | Some limit ->
+                  if block_header.shell.level >= limit then
+                    fail
+                      (Block_validator_errors.Expected_validation_failure
+                         block_header)
+                  else return_unit )
+              >>=? fun () ->
               let pred_context_hash = predecessor_block_header.shell.context in
               Context.checkout context_index pred_context_hash
               >>= function
