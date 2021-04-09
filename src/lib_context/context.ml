@@ -479,7 +479,7 @@ let config ?readonly ~with_lower root =
     Irmin_pack.config
       ?readonly
       ?index_log_size:!index_log_size
-      ~freeze_throttle:`Cancel_existing
+      ~freeze_throttle:`Block_writes
       root
   in
   Irmin_pack_layered.config ~conf ~with_lower ~blocking_copy_size:1000000 ()
