@@ -144,12 +144,16 @@ struct
       fun (x, _) (y, _) -> compare_key x y
 
     let pre_hash t =
-      M.list t |> List.fast_sort compare_entry |> pre_hash_entries
+         M.list t
+         |> List.map str_key
+         |> List.fast_sort compare_entry
+         |> pre_hash_entries
   end
-
+  
   include M
 
   let t = Irmin.Type.(like t ~pre_hash:(stage @@ fun x -> V1.pre_hash x))
+end
 end
 
 module Commit (Hash : Irmin.Type.S) = struct
@@ -161,7 +165,10 @@ module Commit (Hash : Irmin.Type.S) = struct
 
   let pre_hash_v1 t = pre_hash_v1_t (V1.import t)
 
-  let t = Irmin.Type.(like t ~pre_hash:(stage @@ fun x -> pre_hash_v1 x))
+     let pre_hash_v1_t = Irmin.Type.(unstage (pre_hash V1.t))
+     let pre_hash_v1 t = pre_hash_v1_t (V1.import t)
+     let t = Irmin.Type.(like t ~pre_hash:(stage @@ fun x -> pre_hash_v1 x))
+   end
 end
 
 module Contents = struct
