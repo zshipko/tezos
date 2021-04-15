@@ -240,6 +240,8 @@ let set_hash_version c v =
   if Context_hash.Version.(of_int 0 = v) then return c
   else fail (Tezos_context_helpers.Context.Unsupported_context_hash_version v)
 
+let is_freezing index = Store.async_freeze index.repo
+
 let raw_commit ~time ?(message = "") context =
   let info =
     Info.v ~author:"Tezos" ~date:(Time.Protocol.to_seconds time) message
