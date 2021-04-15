@@ -116,6 +116,13 @@ val freeze :
    RO or RW [index] instance.*)
 val is_freezing : index -> bool
 
+val wip_self_contained : index -> Context_hash.t -> unit Lwt.t
+
+val wip_is_self_contained :
+  index ->
+  Context_hash.t ->
+  ([> `Msg of string], [> `Msg of string]) result Lwt.t
+
 val commit :
   time:Time.Protocol.t -> ?message:string -> context -> Context_hash.t Lwt.t
 

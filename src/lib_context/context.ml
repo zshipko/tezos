@@ -242,6 +242,24 @@ let set_hash_version c v =
 
 let is_freezing index = Store.async_freeze index.repo
 
+let wip_self_contained index hash =
+  let to_commit ctxt_hash =
+    let hash = Hash.of_context_hash ctxt_hash in
+    Store.Commit.of_hash index.repo hash
+    >>= function None -> assert false | Some commit -> Lwt.return commit
+  in
+  to_commit hash
+  >>= fun commit -> Store.self_contained ~max:[commit] index.repo
+
+let wip_is_self_contained index hash =
+  let to_commit ctxt_hash =
+    let hash = Hash.of_context_hash ctxt_hash in
+    Store.Commit.of_hash index.repo hash
+    >>= function None -> assert false | Some commit -> Lwt.return commit
+  in
+  to_commit hash
+  >>= fun commit -> Store.check_self_contained index.repo ~heads:[commit]
+
 let raw_commit ~time ?(message = "") context =
   let info =
     Info.v ~author:"Tezos" ~date:(Time.Protocol.to_seconds time) message
