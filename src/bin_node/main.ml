@@ -78,7 +78,8 @@ let description =
     `P Node_upgrade_command.Manpage.command_description;
     `P Node_snapshot_command.Manpage.command_description;
     `P Node_reconstruct_command.Manpage.command_description;
-    `P Node_storage_command.Manpage.command_description ]
+    `P Node_storage_command.Manpage.command_description;
+    `P Node_selfcontained_command.Manpage.command_description ]
 
 let man = description @ Node_run_command.Manpage.examples
 
@@ -95,7 +96,8 @@ let commands =
     Node_snapshot_command.cmd;
     Node_reconstruct_command.cmd;
     Node_storage_command.cmd;
-    Node_bench_command.cmd ]
+    Node_bench_command.cmd;
+    Node_selfcontained_command.cmd ]
 
 (* This call is not strictly necessary as the parameters are initialized
    lazily the first time a Sapling operation (validation or forging) is
