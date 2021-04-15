@@ -111,6 +111,11 @@ val freeze :
   min_upper:Context_hash.t ->
   unit Lwt.t
 
+(* [is_freezing index] returns whether or not the given repo is
+   currently executing a context freeze. It can be executed on both a
+   RO or RW [index] instance.*)
+val is_freezing : index -> bool
+
 val commit :
   time:Time.Protocol.t -> ?message:string -> context -> Context_hash.t Lwt.t
 

@@ -255,6 +255,8 @@ let freeze index ~max_upper ~min_upper =
     index.repo
   >>= fun () -> pp_stats () ; Lwt.return_unit
 
+let is_freezing index = Store.async_freeze index.repo
+
 let raw_commit ~time ?(message = "") context =
   let info =
     Irmin.Info.v ~date:(Time.Protocol.to_seconds time) ~author:"Tezos" message
