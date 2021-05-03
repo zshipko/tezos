@@ -35,3 +35,7 @@ val encoding : t Data_encoding.t
 val get_protocol : t -> Protocol_hash.t Lwt.t
 
 val add_protocol : t -> Protocol_hash.t -> t Lwt.t
+
+type repo = Tree.repo
+
+val make_repo : unit -> repo Lwt.t

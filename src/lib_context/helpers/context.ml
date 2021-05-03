@@ -149,8 +149,6 @@ module Make_tree (Store : DB) = struct
 
   type repo = Store.repo
 
-  let make_repo = Store.Repo.v (Irmin_mem.config ())
-
   let shallow repo kinded_hash =
     Store.Tree.shallow
       repo

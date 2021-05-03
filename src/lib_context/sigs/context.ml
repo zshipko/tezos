@@ -193,8 +193,6 @@ module type S = sig
 
     type repo
 
-    val make_repo : repo Lwt.t
-
     val shallow : repo -> kinded_hash -> tree
   end
 end
