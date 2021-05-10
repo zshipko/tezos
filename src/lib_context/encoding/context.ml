@@ -154,9 +154,10 @@ end
 end
 
 module Commit : Irmin.Private.Commit.Maker = struct
+   module Info = Irmin.Info.Default
    module Make (Hash : Irmin.Type.S) = struct
      module M = Irmin.Private.Commit.Make (Hash)
-     module V1 = Irmin.Private.Commit.V1 (M)
+     module V1 = Irmin.Private.Commit.V1.Make (M)
      include M
 
      let pre_hash_v1_t = Irmin.Type.(unstage (pre_hash V1.t))
