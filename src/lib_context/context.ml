@@ -253,15 +253,17 @@ let freeze index ~max_upper ~min_upper =
     ~min_upper:[min_upper_commit]
     ~max_lower:[min_upper_commit]
     index.repo
-  >>= fun () -> pp_stats () ; Lwt.return_unit
+  >>= fun () -> pp_stats () ;
+ Lwt.return_unit
 
 let is_freezing index = Store.async_freeze index.repo
 
 let wip_self_contained index hash =
   let to_commit ctxt_hash =
     let hash = Hash.of_context_hash ctxt_hash in
-    Store.Commit.of_hash index.repo hash
-    >>= function None -> assert false | Some commit -> Lwt.return commit
+(*    Store.Commit.of_hash index.repo hash
+    >>= function None -> assert false | Some commit -> Lwt.return commit*)
+    Lwt.return hash
   in
   to_commit hash
   >>= fun commit -> Store.self_contained ~max:[commit] index.repo
@@ -275,7 +277,7 @@ let wip_is_self_contained index hash =
   to_commit hash
   >>= fun commit -> Store.check_self_contained index.repo ~heads:[commit]
 
-let raw_commit ~time ?(message = "") context =
+let raw_commit' ~time ?(message = "") context =
   let info =
     Store.Info.v (Time.Protocol.to_seconds time) ~author:"Tezos" ~message
   in
@@ -285,6 +287,15 @@ let raw_commit ~time ?(message = "") context =
   Store.Commit.v context.index.repo ~info ~parents context.tree
   >>= fun h ->
   Store.Tree.clear context.tree ;
+  Lwt.return h
+
+let raw_commit ~time ?message context =
+  let t0 = Mtime_clock.counter () in
+  raw_commit' ~time ?message context >>= fun h ->
+  let duration =
+      Mtime_clock.count t0 |> Mtime.Span.to_s
+  in
+  Format.printf "[commit] %f\n%!" duration;
   Lwt.return h
 
 let hash ~time ?(message = "") context =
