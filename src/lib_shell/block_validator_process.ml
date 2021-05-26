@@ -696,14 +696,14 @@ let apply_block (E {validator_process = (module VP); validator}) chain_store
   Store.Block.get_block_metadata chain_store predecessor >>=? fun metadata ->
   let max_operations_ttl = Store.Block.max_operations_ttl metadata in
   Store.Chain.compute_live_blocks chain_store ~block:predecessor
-  >>=? fun (live_blocks, live_operations) ->
-  let block_hash = Block_header.hash header in
-  Block_validation.check_liveness
-    ~live_operations
-    ~live_blocks
-    block_hash
-    operations
-  >>?= fun () ->
+  >>=? fun (_live_blocks, _live_operations) ->
+  let _block_hash = Block_header.hash header in
+  (* Block_validation.check_liveness
+   *   ~live_operations
+   *   ~live_blocks
+   *   block_hash
+   *   operations
+   * >>?= fun () -> *)
   VP.apply_block
     validator
     chain_store
