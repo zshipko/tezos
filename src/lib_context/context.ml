@@ -219,21 +219,32 @@ let checkout_exn index key =
 (* unshallow possible 1-st level objects from previous partial
    checkouts ; might be better to pass directly the list of shallow
    objects. *)
-let unshallow context =
+let _unshallow t0 context =
   Store.Tree.list context.tree []
   >>= fun children ->
-  P.Repo.batch context.index.repo (fun x y _ ->
-      List.iter_s
-        (fun (s, k) ->
-          match Store.Tree.destruct k with
-          | `Contents _ ->
-              Lwt.return ()
-          | `Node _ ->
-              Store.Tree.get_tree context.tree [s]
-              >>= fun tree ->
-              Store.save_tree ~clear:true context.index.repo x y tree
-              >|= fun _ -> ())
-        children)
+  let duration =
+      Mtime_clock.count t0 |> Mtime.Span.to_s
+  in
+  Format.printf "[after list] t=%f\n%!" duration;
+  List.iter_s
+    (fun (s, k) ->
+      match Store.Tree.destruct k with
+      | `Contents _ ->
+          Lwt.return ()
+      | `Node _ -> (
+          Store.Tree.get_tree context.tree [s]
+          >>= fun tree ->
+          P.Repo.batch context.index.repo (fun x y _ ->
+            Store.save_tree ~clear:true context.index.repo x y tree
+          >|= fun _ -> () )))
+      children
+  >>= fun () ->
+  let duration =
+      Mtime_clock.count t0 |> Mtime.Span.to_s
+  in
+  Format.printf "[after batch] n=%d, t=%f\n%!" (List.length children) duration;
+  Lwt.return_unit
+
 
 let pp_stats () =
   Format.printf "Irmin stats: %t\n@." Irmin_layers.Stats.pp_latest
@@ -261,7 +272,7 @@ let is_freezing index = Store.async_freeze index.repo
 let wip_self_contained index hash =
   let to_commit ctxt_hash =
     let hash = Hash.of_context_hash ctxt_hash in
-(*    Store.Commit.of_hash index.repo hash
+    (*Store.Commit.of_hash index.repo hash
     >>= function None -> assert false | Some commit -> Lwt.return commit*)
     Lwt.return hash
   in
@@ -282,15 +293,26 @@ let raw_commit' ~time ?(message = "") context =
     Store.Info.v (Time.Protocol.to_seconds time) ~author:"Tezos" ~message
   in
   let parents = List.map Store.Commit.hash context.parents in
-  unshallow context
-  >>= fun () ->
+  let t0 = Mtime_clock.counter () in
+  (*Format.printf "[unshallow] t=0.0\n";
+  unshallow t0 context
+  >>= fun () -> *)
+  let duration =
+      Mtime_clock.count t0 |> Mtime.Span.to_s
+  in
+  Format.printf "[Commit.v] t=%f\n" duration;
   Store.Commit.v context.index.repo ~info ~parents context.tree
   >>= fun h ->
+  let duration =
+      Mtime_clock.count t0 |> Mtime.Span.to_s
+  in
+  Format.printf "[Tree.clear] t=%f\n" duration;
   Store.Tree.clear context.tree ;
   Lwt.return h
 
 let raw_commit ~time ?message context =
   let t0 = Mtime_clock.counter () in
+  Format.printf "[commit begin]\n";
   raw_commit' ~time ?message context >>= fun h ->
   let duration =
       Mtime_clock.count t0 |> Mtime.Span.to_s
@@ -310,7 +332,9 @@ let hash ~time ?(message = "") context =
 
 let commit ~time ?message context =
   raw_commit ~time ?message context
-  >|= fun commit -> Hash.to_context_hash (Store.Commit.hash commit)
+  >|= fun commit ->
+  let h = Hash.to_context_hash (Store.Commit.hash commit) in
+  pp_stats (); h
 
 (*-- Generic Store Primitives ------------------------------------------------*)
 
