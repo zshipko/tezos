@@ -245,8 +245,8 @@ let is_freezing index = Store.async_freeze index.repo
 let wip_self_contained index hash =
   let to_commit ctxt_hash =
     let hash = Hash.of_context_hash ctxt_hash in
-(*    Store.Commit.of_hash index.repo hash
-    >>= function None -> assert false | Some commit -> Lwt.return commit*)
+    (* Store.Commit.of_hash index.repo hash *)
+    (* >>= function None -> assert false | Some commit -> Lwt.return commit *)
     Lwt.return hash
   in
   to_commit hash

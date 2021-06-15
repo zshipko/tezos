@@ -153,7 +153,7 @@ struct
   include M
 
   let t = Irmin.Type.(like t ~pre_hash:(stage @@ fun x -> V1.pre_hash x))
-end
+
 end
 
 module Commit (Hash : Irmin.Type.S) = struct
