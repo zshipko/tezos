@@ -146,7 +146,7 @@ module Conf = struct
 end
 
 module Maker = Irmin_pack_layered.Maker_ext (Conf) (Node) (Commit)
-module Store = Maker.Make (Metadata) (Contents) (Path) (Branch) (Hash)
+module Store = Maker (Metadata) (Contents) (Path) (Branch) (Hash)
 module P = Store.Private
 
 module Checks = struct
@@ -258,13 +258,8 @@ let freeze index ~max_upper ~min_upper =
 let is_freezing index = Store.async_freeze index.repo
 
 let wip_self_contained index hash =
-  let to_commit ctxt_hash =
-    let hash = Hash.of_context_hash ctxt_hash in
-    Store.Commit.of_hash index.repo hash
-    >>= function None -> assert false | Some commit -> Lwt.return commit
-  in
-  to_commit hash
-  >>= fun commit -> Store.self_contained ~max:[commit] index.repo
+  let hash = Hash.of_context_hash hash in
+ Store.self_contained ~max:[hash] index.repo
 
 let wip_is_self_contained index hash =
   let to_commit ctxt_hash =

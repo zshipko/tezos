@@ -82,14 +82,13 @@ end = struct
   let hash = H.digesti_string
 end
 
-module Node : Irmin.Private.Node.Maker = struct
-  module Make
+module Node : Irmin.Private.Node.Maker = functor
        (Hash : Irmin.Hash.S) (Path : sig
          type step
 
          val step_t : step Irmin.Type.t
        end)
-       (Metadata : Irmin.Metadata.S) =
+       (Metadata : Irmin.Metadata.S) ->
   struct
   module M = Irmin.Private.Node.Make (Hash) (Path) (Metadata)
 
@@ -146,11 +145,10 @@ module Node : Irmin.Private.Node.Maker = struct
          |> List.fast_sort compare_entry
          |> pre_hash_entries
   end
-  
+
   include M
 
   let t = Irmin.Type.(like t ~pre_hash:(stage @@ fun x -> V1.pre_hash x))
-end
 end
 
 module Commit : Irmin.Private.Commit.Maker = struct
