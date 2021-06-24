@@ -13,6 +13,7 @@
             tezos-context.helpers
             tezos-context.encoding
             mtime mtime.clock.os)
+ (preprocess (pps ppx_deriving_yojson))
  (flags (:standard -open Tezos_shell_services
                    -open Tezos_base__TzPervasives
                    -open Tezos_stdlib_unix

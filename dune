@@ -3,3 +3,8 @@
   (ocamlopt_flags (:standard -O3))))
 
 (vendored_dirs vendors)
+
+(executable
+  (name json_to_repr)
+  (libraries repr ppx_repr fmt ppx_deriving_yojson mtime mtime.clock.os unix re)
+  (preprocess (pps ppx_deriving_yojson ppx_repr)))

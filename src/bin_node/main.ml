@@ -31,6 +31,8 @@ let () =
     prerr_endline "Non-64 bit architectures are not supported." ;
     exit 1 )
 
+let () = Memtrace.trace_if_requested ()
+
 let () =
   if Filename.basename Sys.argv.(0) = Updater.compiler_name then (
     try
@@ -118,10 +120,14 @@ let () =
   Random.self_init () ;
   match Cmdliner.Term.eval_choice (term, info) commands with
   | `Error _ ->
+      let info = Rusage.(get Self) in
+      Printf.printf "%Ld\n" info.maxrss;
       exit 1
   | `Help ->
       exit 0
   | `Version ->
       exit 0
   | `Ok () ->
+      let info = Rusage.(get Self) in
+      Printf.printf "%Ld\n" info.maxrss;
       exit 0

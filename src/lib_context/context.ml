@@ -149,6 +149,44 @@ module Maker = Irmin_pack_layered.Maker_ext (Conf) (Node) (Commit)
 module Store = Maker.Make (Metadata) (Contents) (Path) (Branch) (Hash)
 module P = Store.Private
 
+module Json = struct
+
+  type key = string list [@@deriving yojson]
+  type hash = string [@@deriving yojson]
+  type message = string [@@deriving yojson]
+
+  type op =
+    (* New contexts *)
+    | Checkout of hash * int
+
+    (* Changes context *)
+    | Add of key * string * int * int
+    | Remove of key * int * int
+    | Copy of key * key * int * int
+
+    (* Keep context *)
+    | Find of key * bool * int
+    | Mem of key * bool * int
+    | Mem_tree of key * bool * int
+    | Commit of hash * int64 * message * hash list * int
+
+    (* Never triggered so far *)
+    | Checkout_none of hash
+    | Hash of hash * int64 * message * hash list
+    | Clear
+    | Todo of string
+  [@@deriving yojson]
+
+  let pp_parents parents =
+    parents
+    |> List.map (fun p -> Format.asprintf "%a" (Irmin.Type.pp Hash.t) p)
+
+  let pp_op op =
+    let obj = op_to_yojson op in
+    Yojson.Safe.to_string obj
+
+end
+
 module Checks = struct
   module Maker (V : Irmin_pack.Version.S) = struct
     module Maker = Irmin_pack.Maker_ext (V) (Conf) (Node) (Commit)
@@ -170,11 +208,30 @@ type index = {
   repo : Store.Repo.t;
   patch_context : (context -> context tzresult Lwt.t) option;
   readonly : bool;
+  mutable icounter: int;
 }
 
-and context = {index : index; parents : Store.Commit.t list; tree : Store.tree}
+and context = {index : index; parents : Store.Commit.t list; tree : Store.tree; ccounter : int}
 
 type t = context
+
+let index_counter = ref 0
+let context_counter = ref (-1)
+
+let check_index_count index =
+  if !index_counter <> index.icounter then (
+    Fmt.epr "different index counters %d %d\n %!"
+      !index_counter index.icounter;
+    index_counter := index.icounter);
+  incr index_counter;
+  index.icounter <- (index.icounter + 1)
+
+let check_context_count _context = ()
+
+let check_counts ctxt =
+  check_index_count ctxt.index;
+  check_context_count ctxt
+[@@inline]
 
 module type S = Tezos_context_sigs.Context.S
 
@@ -207,10 +264,31 @@ let exists index key =
 let checkout index key =
   sync index
   >>= fun () ->
+  check_index_count index;
   Store.Commit.of_hash index.repo (Hash.of_context_hash key)
-  >|= Option.map (fun commit ->
-          let tree = Store.Commit.tree commit in
-          {index; tree; parents = [commit]})
+  >|= function
+    | None ->
+        if not index.readonly then Logs.app (fun l ->
+          let op =
+              Hash.of_context_hash key |>
+              Format.asprintf "%a" (Irmin.Type.pp Hash.t)
+              |> fun s -> Json.Checkout_none s
+              |> Json.pp_op
+            in
+            l "[context] %s" op) ;
+        None
+    | Some commit ->
+      let tree = Store.Commit.tree commit in
+      incr context_counter;
+      if not index.readonly then Logs.app (fun l ->
+            let op =
+              Hash.of_context_hash key |>
+              Format.asprintf "%a" (Irmin.Type.pp Hash.t)
+              |> fun s -> Json.Checkout (s, !context_counter)
+              |> Json.pp_op
+            in
+            l "[context] %s" op) ;
+      Some {index; tree; parents = [commit]; ccounter = !context_counter}
 
 let checkout_exn index key =
   checkout index key
@@ -289,6 +367,8 @@ let wip_is_self_contained index hash =
   >>= fun commit -> Store.check_self_contained index.repo ~heads:[commit]
 
 let raw_commit' ~time ?(message = "") context =
+  check_index_count context.index; check_context_count context;
+  let date = Time.Protocol.to_seconds time in
   let info =
     Store.Info.v (Time.Protocol.to_seconds time) ~author:"Tezos" ~message
   in
@@ -306,6 +386,12 @@ let raw_commit' ~time ?(message = "") context =
   let duration =
       Mtime_clock.count t0 |> Mtime.Span.to_s
   in
+  if not context.index.readonly then Logs.app (fun l ->
+      let hash = Store.Commit.hash h |>
+          Format.asprintf "%a" (Irmin.Type.pp Hash.t) in
+      let parents = Json.pp_parents parents in
+      let op = Json.Commit (hash,date,message, parents, context.ccounter) |> Json.pp_op in
+      l "[context] %s" op) ;
   Format.printf "[Tree.clear] t=%f\n" duration;
   Store.Tree.clear context.tree ;
   Lwt.return h
@@ -321,6 +407,8 @@ let raw_commit ~time ?message context =
   Lwt.return h
 
 let hash ~time ?(message = "") context =
+  check_index_count context.index; check_context_count context;
+  let date = Time.Protocol.to_seconds time in
   let info =
     Store.Info.v (Time.Protocol.to_seconds time) ~author:"Tezos" ~message
   in
@@ -328,6 +416,12 @@ let hash ~time ?(message = "") context =
   let node = Store.Tree.hash context.tree in
   let commit = P.Commit.Val.v ~parents ~node ~info in
   let x = P.Commit.Key.hash commit in
+  if not context.index.readonly then Logs.app (fun l ->
+    let hash = x |>
+        Format.asprintf "%a" (Irmin.Type.pp Hash.t) in
+    let parents = Json.pp_parents parents in
+    let op = Json.Hash (hash,date,message, parents) |> Json.pp_op in
+    l "[context] %s" op) ;
   Hash.to_context_hash x
 
 let commit ~time ?message context =
@@ -348,31 +442,64 @@ type tree = Store.tree
 
 module Tree = Tezos_context_helpers.Context.Make_tree (Store)
 
-let mem ctxt key = Tree.mem ctxt.tree (data_key key)
 
-let mem_tree ctxt key = Tree.mem_tree ctxt.tree (data_key key)
+let mem ctxt key =
+  check_counts ctxt;
+  Tree.mem ctxt.tree (data_key key) >>= fun v ->
+  if not ctxt.index.readonly then Logs.app (fun l ->
+        let op = Json.Mem ((data_key key),v, ctxt.ccounter) |> Json.pp_op in
+        l "[context] %s" op) ;
+  Lwt.return v
 
-let raw_find ctxt key = Tree.find ctxt.tree key
+let mem_tree ctxt key =
+  check_counts ctxt;
+  Tree.mem_tree ctxt.tree (data_key key) >>= fun v ->
+  if not ctxt.index.readonly then Logs.app (fun l ->
+        let op = Json.Mem_tree ((data_key key),v, ctxt.ccounter) |> Json.pp_op in
+        l "[context] %s" op) ;
+  Lwt.return v
+
+let raw_find ctxt key =
+  check_counts ctxt;
+  Tree.find ctxt.tree key >>= fun v ->
+  if not ctxt.index.readonly then Logs.app (fun l ->
+    let v = (v <> None) in
+    let op = Json.Find (key,v, ctxt.ccounter) |> Json.pp_op in
+    l "[context] %s" op) ;
+  Lwt.return v
 
 let list ctxt ?offset ?length key =
+  check_counts ctxt;
   Tree.list ctxt.tree ?offset ?length (data_key key)
 
 let find ctxt key = raw_find ctxt (data_key key)
 
 let raw_add ctxt key data =
-  Tree.add ctxt.tree key data >|= fun tree -> {ctxt with tree}
+  check_counts ctxt;
+  Tree.add ctxt.tree key data >|= fun tree ->
+  incr context_counter;
+  if not ctxt.index.readonly then Logs.app (fun l ->
+      let op = Json.Add (key, Bytes.to_string data, ctxt.ccounter, !context_counter) |> Json.pp_op in
+      l "[context] %s" op) ;
+  {ctxt with tree; ccounter = !context_counter}
 
 let add ctxt key data = raw_add ctxt (data_key key) data
 
 let raw_remove ctxt k =
-  Tree.remove ctxt.tree k >|= fun tree -> {ctxt with tree}
+  check_counts ctxt;
+  Tree.remove ctxt.tree k >|= fun tree ->
+  incr context_counter;
+  if not ctxt.index.readonly then Logs.app (fun l ->
+      let op = Json.Remove (k, ctxt.ccounter, !context_counter) |> Json.pp_op in
+      l "[context] %s" op) ;
+  {ctxt with tree; ccounter = !context_counter}
 
 let remove ctxt key = raw_remove ctxt (data_key key)
 
 let find_tree ctxt key = Tree.find_tree ctxt.tree (data_key key)
 
 let add_tree ctxt key tree =
-  Tree.add_tree ctxt.tree (data_key key) tree >|= fun tree -> {ctxt with tree}
+  Tree.add_tree ctxt.tree (data_key key) tree >|= fun tree -> {ctxt with tree; ccounter = !context_counter}
 
 let fold ?depth ctxt key ~init ~f =
   Tree.fold ?depth ctxt.tree (data_key key) ~init ~f
@@ -580,7 +707,7 @@ let init ?patch_context ?(readonly = false) root =
   let open_store () =
     Store.Repo.v config
     >>= fun repo ->
-    let v = {path = root; repo; patch_context; readonly} in
+      let v = {path = root; repo; patch_context; readonly; icounter = 0} in
     Lwt.return v
   in
   Lwt.catch open_store (function
@@ -598,7 +725,9 @@ let get_branch chain_id = Format.asprintf "%a" Chain_id.pp chain_id
 
 let commit_genesis index ~chain_id ~time ~protocol =
   let tree = Store.Tree.empty in
-  let ctxt = {index; tree; parents = []} in
+  check_index_count index;
+  incr context_counter;
+  let ctxt = {index; tree; parents = []; ccounter = !context_counter} in
   ( match index.patch_context with
   | None ->
       return ctxt
@@ -820,9 +949,21 @@ module Dumpable_context = struct
     in
     aux tree Fun.id >>= fun () -> Lwt.return !total_visited
 
-  let make_context index = {index; tree = Store.Tree.empty; parents = []}
+  let make_context index =
+    check_index_count index;
+    incr context_counter;
+    if not index.readonly then Logs.app (fun l ->
+      let op = Json.pp_op (Json.Todo "make_context") in
+      l "[context] %s" op);
+    {index; tree = Store.Tree.empty; parents = []; ccounter = !context_counter}
 
-  let update_context context tree = {context with tree}
+  let update_context context tree =
+    check_index_count context.index; check_context_count context;
+    incr context_counter;
+    if not context.index.readonly then Logs.app (fun l ->
+      let op = Json.pp_op (Json.Todo "update_context") in
+      l "[context] %s" op);
+    {context with tree; ccounter = !context_counter}
 
   let add_hash (Batch (repo, _, _)) tree key hash =
     let irmin_hash =
@@ -1177,9 +1318,9 @@ module Dumpable_context_legacy = struct
     in
     aux tree Fun.id
 
-  let make_context index = {index; tree = Store.Tree.empty; parents = []}
+  let make_context index = {index; tree = Store.Tree.empty; parents = []; ccounter = !context_counter}
 
-  let update_context context tree = {context with tree}
+  let update_context context tree = {context with tree; ccounter = !context_counter}
 
   let add_hash (Batch (repo, _, _)) tree key hash =
     let irmin_hash =
@@ -1312,7 +1453,9 @@ let check_protocol_commit_consistency index ~expected_context_hash
   if Context_hash.equal expected_context_hash computed_context_hash then
     let ctxt =
       let parent = Store.of_private_commit index.repo commit in
-      {index; tree = Store.Tree.empty; parents = [parent]}
+      check_index_count index;
+      incr context_counter;
+      {index; tree = Store.Tree.empty; parents = [parent]; ccounter = !context_counter}
     in
     add_test_chain ctxt test_chain_status
     >>= fun ctxt ->
@@ -1546,7 +1689,9 @@ let validate_context_hash_consistency_and_commit ~data_hash
   if Context_hash.equal expected_context_hash computed_context_hash then
     let ctxt =
       let parent = Store.of_private_commit index.repo commit in
-      {index; tree = Store.Tree.empty; parents = [parent]}
+      check_index_count index;
+      incr context_counter;
+      {index; tree = Store.Tree.empty; parents = [parent]; ccounter = !context_counter}
     in
     add_test_chain ctxt test_chain
     >>= fun ctxt ->

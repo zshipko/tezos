@@ -84,7 +84,8 @@
               (-> void_for_linking-alpha-protocol-plugin-registerer.empty))
              cmdliner
              tls
-             lwt-exit)
+             lwt-exit
+             memtrace rusage)
  (flags (:standard -open Tezos_base__TzPervasives
                    -open Tezos_base
                    -open Tezos_stdlib_unix
