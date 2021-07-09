@@ -25,10 +25,8 @@
 (*****************************************************************************)
 
 open Tezos_context_encoding.Context
-module Store =
-  Irmin_pack_mem.Make (Node) (Commit) (Conf) (Metadata) (Contents) (Path)
-    (Branch)
-    (Hash)
+module Maker = Irmin_pack_mem.Maker (Node) (Commit) (Conf)
+module Store = Maker.Make (Metadata) (Contents) (Path) (Branch) (Hash)
 
 type t = Store.tree
 

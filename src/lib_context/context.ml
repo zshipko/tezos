@@ -136,19 +136,16 @@ let () =
               | _ -> ()))
         args
 
-module Store =
-  Irmin_pack.Make_ext (Irmin_pack.Version.V1) (Conf) (Node) (Commit) (Metadata)
-    (Contents)
-    (Path)
-    (Branch)
-    (Hash)
+module Maker =
+  Irmin_pack.Maker_ext (Irmin_pack.Version.V1) (Conf) (Node) (Commit)
+module Store = Maker.Make (Metadata) (Contents) (Path) (Branch) (Hash)
 module P = Store.Private
 
 module Checks = struct
-  module Maker (V : Irmin_pack.Version.S) =
-    Irmin_pack.Make_ext (V) (Conf) (Node) (Commit) (Metadata) (Contents) (Path)
-      (Branch)
-      (Hash)
+  module Maker (V : Irmin_pack.Version.S) = struct
+    module M = Irmin_pack.Maker (V) (Conf)
+    include M.Make (Metadata) (Contents) (Path) (Branch) (Hash)
+  end
 
   module Pack : Irmin_pack.Checks.S = Irmin_pack.Checks.Make (Maker)
 
@@ -240,54 +237,50 @@ let set_hash_version c v =
   if Context_hash.Version.(of_int 0 = v) then return c
   else fail (Tezos_context_helpers.Context.Unsupported_context_hash_version v)
 
-let is_freezing index = Store.async_freeze index.repo
-
-let wip_self_contained index hash =
+(*let wip_self_contained index hash =
   let to_commit ctxt_hash =
     let hash = Hash.of_context_hash ctxt_hash in
     (* Store.Commit.of_hash index.repo hash *)
     (* >>= function None -> assert false | Some commit -> Lwt.return commit *)
     Lwt.return hash
   in
-  to_commit hash
-  >>= fun commit -> Store.self_contained ~max:[commit] index.repo
+  to_commit hash >>= fun commit -> Store.self_contained ~max:[commit] index.repo
 
 let wip_is_self_contained index hash =
   let to_commit ctxt_hash =
     let hash = Hash.of_context_hash ctxt_hash in
-    Store.Commit.of_hash index.repo hash
-    >>= function None -> assert false | Some commit -> Lwt.return commit
+    Store.Commit.of_hash index.repo hash >>= function
+    | None -> assert false
+    | Some commit -> Lwt.return commit
   in
-  to_commit hash
-  >>= fun commit -> Store.check_self_contained index.repo ~heads:[commit]
+  to_commit hash >>= fun commit ->
+  Store.check_self_contained index.repo ~heads:[commit]*)
 
-let raw_commit' ~time ?(message = "") context =
+let raw_commit' ~time ?(message = "") context : Store.commit Lwt.t =
   let info =
-    Info.v ~author:"Tezos" ~date:(Time.Protocol.to_seconds time) message
+    Store.Info.v ~author:"Tezos" ~message (Time.Protocol.to_seconds time)
   in
   let parents = List.map Store.Commit.hash context.parents in
   unshallow context >>= fun () ->
   Store.Commit.v context.index.repo ~info ~parents context.tree >|= fun h ->
   Store.Tree.clear context.tree ;
-  Lwt.return h
+  h
 
 let get_maxrss () =
   let usage = Rusage.(get Self) in
   let ( / ) = Int64.div in
   Int64.to_int (usage.maxrss / 1024L / 1024L)
 
-let raw_commit ~time ?message context =
+let raw_commit ~time ?message context : Store.commit Lwt.t =
   let t0 = Mtime_clock.counter () in
   raw_commit' ~time ?message context >>= fun h ->
-  let duration =
-      Mtime_clock.count t0 |> Mtime.Span.to_s
-  in
-  Format.printf "[commit] %f, maxrss = %d\n%!" duration (get_maxrss ());
+  let duration = Mtime_clock.count t0 |> Mtime.Span.to_s in
+  Format.printf "[commit] %f, maxrss = %d\n%!" duration (get_maxrss ()) ;
   Lwt.return h
 
 let hash ~time ?(message = "") context =
   let info =
-    Info.v ~author:"Tezos" ~date:(Time.Protocol.to_seconds time) message
+    Store.Info.v ~author:"Tezos" ~message (Time.Protocol.to_seconds time)
   in
   let parents = List.map (fun c -> Store.Commit.hash c) context.parents in
   let node = Store.Tree.hash context.tree in
@@ -520,11 +513,10 @@ let config ?readonly ~with_lower root =
   Irmin_pack_layered.config ~conf ~with_lower ~blocking_copy_size:1000000 ()
 
 let init ?patch_context ?(readonly = false) root =
-  if not readonly then (Memtrace.trace_if_requested ());
+  if not readonly then Memtrace.trace_if_requested () ;
   let config = config ~readonly ~with_lower:true root in
   let open_store () =
-    Store.Repo.v config
-    >>= fun repo ->
+    Store.Repo.v config >>= fun repo ->
     let v = {path = root; repo; patch_context; readonly} in
     Lwt.return v
   in
@@ -534,11 +526,9 @@ let init ?patch_context ?(readonly = false) root =
           Store.migrate config ;
           Logs.app (fun l -> l "Migration ended, opening the store") ;
           open_store ()
-      | exn ->
-          Lwt.fail exn)
+      | exn -> Lwt.fail exn)
 
-let close index = 
-  Store.Repo.close index.repo
+let close index = Store.Repo.close index.repo
 
 let get_branch chain_id = Format.asprintf "%a" Chain_id.pp chain_id
 
@@ -617,7 +607,7 @@ module Dumpable_context = struct
 
   type hash = [`Blob of Store.hash | `Node of Store.hash]
 
-  type commit_info = Info.t
+  type commit_info = Store.Info.t
 
   type batch =
     | Batch of
@@ -630,11 +620,11 @@ module Dumpable_context = struct
     let open Data_encoding in
     conv
       (fun irmin_info ->
-        let author = Info.author irmin_info in
-        let message = Info.message irmin_info in
-        let date = Info.date irmin_info in
+        let author = Store.Info.author irmin_info in
+        let message = Store.Info.message irmin_info in
+        let date = Store.Info.date irmin_info in
         (author, message, date))
-      (fun (author, message, date) -> Info.v ~author ~date message)
+      (fun (author, message, date) -> Store.Info.v ~author ~message date)
       (obj3 (req "author" string) (req "message" string) (req "date" int64))
 
   let hash_encoding : hash Data_encoding.t =
@@ -961,7 +951,7 @@ module Dumpable_context_legacy = struct
 
   type hash = [`Blob of Store.hash | `Node of Store.hash]
 
-  type commit_info = Info.t
+  type commit_info = Store.Info.t
 
   type batch =
     | Batch of
@@ -974,11 +964,11 @@ module Dumpable_context_legacy = struct
     let open Data_encoding in
     conv
       (fun irmin_info ->
-        let author = Info.author irmin_info in
-        let message = Info.message irmin_info in
-        let date = Info.date irmin_info in
+        let author = Store.Info.author irmin_info in
+        let message = Store.Info.message irmin_info in
+        let date = Store.Info.date irmin_info in
         (author, message, date))
-      (fun (author, message, date) -> Info.v ~author ~date message)
+      (fun (author, message, date) -> Store.Info.v ~author ~message date)
       (obj3 (req "author" string) (req "message" string) (req "date" int64))
 
   let hash_encoding : hash Data_encoding.t =
@@ -1142,9 +1132,9 @@ let data_node_hash context =
 let retrieve_commit_info index block_header =
   checkout_exn index block_header.Block_header.shell.context >>= fun context ->
   let irmin_info = Dumpable_context.context_info context in
-  let author = Info.author irmin_info in
-  let message = Info.message irmin_info in
-  let timestamp = Time.Protocol.of_seconds (Info.date irmin_info) in
+  let author = Store.Info.author irmin_info in
+  let message = Store.Info.message irmin_info in
+  let timestamp = Time.Protocol.of_seconds (Store.Info.date irmin_info) in
   get_protocol context >>= fun protocol_hash ->
   get_test_chain context >>= fun test_chain_status ->
   find_predecessor_block_metadata_hash context
@@ -1203,7 +1193,7 @@ let check_protocol_commit_consistency index ~expected_context_hash
   | None -> Lwt.return tree)
   >>= fun tree ->
   let info =
-    Info.v ~author ~date:(Time.Protocol.to_seconds timestamp) message
+    Store.Info.v ~author ~message (Time.Protocol.to_seconds timestamp)
   in
   let data_tree = Store.Tree.shallow index.repo (`Node data_merkle_root) in
   Store.Tree.add_tree tree current_data_key data_tree >>= fun node ->
@@ -1285,9 +1275,9 @@ let legacy_get_protocol_data_from_header index block_header =
   checkout_exn index block_header.Block_header.shell.context >>= fun context ->
   let level = block_header.shell.level in
   let irmin_info = Dumpable_context.context_info context in
-  let date = Info.date irmin_info in
-  let author = Info.author irmin_info in
-  let message = Info.message irmin_info in
+  let date = Store.Info.date irmin_info in
+  let author = Store.Info.author irmin_info in
+  let message = Store.Info.message irmin_info in
   let info = {timestamp = Time.Protocol.of_seconds date; author; message} in
   let parents = Dumpable_context.context_parents context in
   get_protocol context >>= fun protocol_hash ->
@@ -1410,7 +1400,7 @@ let validate_context_hash_consistency_and_commit ~data_hash
   | None -> Lwt.return tree)
   >>= fun tree ->
   let info =
-    Info.v ~author ~date:(Time.Protocol.to_seconds timestamp) message
+    Store.Info.v ~author ~message (Time.Protocol.to_seconds timestamp)
   in
   let data_tree = Store.Tree.shallow index.repo (`Node data_hash) in
   Store.Tree.add_tree tree current_data_key data_tree >>= fun node ->
