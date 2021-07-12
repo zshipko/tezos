@@ -39,8 +39,6 @@ type value = bytes
 module Tree = Tezos_context_helpers.Context.Make_tree (Store)
 include Tree
 
-type repo = Tree.repo
-
 let data_key key = "data" :: key
 
 let mem t key = Tree.mem t (data_key key)
@@ -113,4 +111,4 @@ let encoding : t Data_encoding.t =
     Store.Tree.of_concrete
     concrete_encoding
 
-let make_repo () = Store.Repo.v (Irmin_mem.config ())
+(*let make_repo () = Store.Repo.v (Irmin_mem.config ())*)

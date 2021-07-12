@@ -152,20 +152,20 @@ struct
   let t = Irmin.Type.(like t ~pre_hash:(stage @@ fun x -> V1.pre_hash x))
 end
 
-module Commit (Hash : Irmin.Type.S) = struct
-  module M = Irmin.Private.Commit.Make (Hash)
-  module V1 = Irmin.Private.Commit.V1.Make (M)
-  include M
+module Commit = struct
+  module Info = Info.Default
 
-  let pre_hash_v1_t = Irmin.Type.(unstage (pre_hash V1.t))
+  module Make (Hash : Irmin.Type.S) = struct
+    module M = Irmin.Private.Commit.Make (Hash)
+    module V1 = Irmin.Private.Commit.V1.Make (M)
+    include M
 
-  let pre_hash_v1 t = pre_hash_v1_t (V1.import t)
+    let pre_hash_v1_t = Irmin.Type.(unstage (pre_hash V1.t))
 
-  let pre_hash_v1_t = Irmin.Type.(unstage (pre_hash V1.t))
+    let pre_hash_v1 t = pre_hash_v1_t (V1.import t)
 
-  let pre_hash_v1 t = pre_hash_v1_t (V1.import t)
-
-  let t = Irmin.Type.(like t ~pre_hash:(stage @@ fun x -> pre_hash_v1 x))
+    let t = Irmin.Type.(like t ~pre_hash:(stage @@ fun x -> pre_hash_v1 x))
+  end
 end
 
 module Contents = struct

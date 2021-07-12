@@ -191,10 +191,8 @@ let request_encoding =
            (req "max_upper" (list Context_hash.encoding))
            (req "min_upper" Context_hash.encoding))
         (function
-          | Commit_genesis {chain_id} -> Some chain_id
-          | Init | Validate _ | Fork_test_chain _ | Terminate
-          | Restore_context_integrity ->
-              None)
+          | Unload {max_upper; min_upper} -> Some (max_upper, min_upper)
+          | _ -> None)
         (fun (max_upper, min_upper) -> Unload {max_upper; min_upper});
       case
         (Tag 3)

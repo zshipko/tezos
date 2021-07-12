@@ -98,6 +98,7 @@ let commands =
     Node_snapshot_command.cmd;
     Node_reconstruct_command.cmd;
     Node_storage_command.cmd;
+    Node_bench_command.cmd;
   ]
 
 (* This call is not strictly necessary as the parameters are initialized

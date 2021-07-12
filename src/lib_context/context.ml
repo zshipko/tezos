@@ -136,9 +136,8 @@ let () =
               | _ -> ()))
         args
 
-module Maker =
-  Irmin_pack.Maker_ext (Irmin_pack.Version.V1) (Conf) (Node) (Commit)
-module Store = Maker.Make (Metadata) (Contents) (Path) (Branch) (Hash)
+module Maker = Irmin_pack_layered.Maker_ext (Conf) (Node) (Commit)
+module Store = Maker (Metadata) (Contents) (Path) (Branch) (Hash)
 module P = Store.Private
 
 module Checks = struct
@@ -183,15 +182,9 @@ let current_predecessor_ops_metadata_hash_key =
   ["predecessor_ops_metadata_hash"]
 
 let restore_integrity ?ppf index =
-  match Store.integrity_check ?ppf ~auto_repair:true index.repo with
-  | Ok (`Fixed n) -> Ok (Some n)
-  | Ok `No_error -> Ok None
-  | Error (`Cannot_fix msg) -> error (failure "%s" msg)
-  | Error (`Corrupted n) ->
-      error
-        (failure
-           "unable to fix the corrupted context: %d bad entries detected"
-           n)
+  ignore ppf ;
+  ignore index ;
+  Ok None
 
 let sync index =
   if index.readonly then Store.sync index.repo ;
@@ -215,10 +208,16 @@ let checkout_exn index key =
   | None -> Lwt.fail Not_found
   | Some p -> Lwt.return p
 
+let get_hash_version _c = Context_hash.Version.of_int 0
+
+let set_hash_version c v =
+  if Context_hash.Version.(of_int 0 = v) then return c
+  else fail (Tezos_context_helpers.Context.Unsupported_context_hash_version v)
+
 (* unshallow possible 1-st level objects from previous partial
    checkouts ; might be better to pass directly the list of shallow
    objects. *)
-let unshallow context =
+let _unshallow context =
   Store.Tree.list context.tree [] >>= fun children ->
   P.Repo.batch context.index.repo (fun x y _ ->
       List.iter_s
@@ -231,13 +230,30 @@ let unshallow context =
               >|= fun _ -> ())
         children)
 
-let get_hash_version _c = Context_hash.Version.of_int 0
+let pp_stats () =
+  Format.printf "Irmin stats: %t\n@." Irmin_layers.Stats.pp_latest
 
-let set_hash_version c v =
-  if Context_hash.Version.(of_int 0 = v) then return c
-  else fail (Tezos_context_helpers.Context.Unsupported_context_hash_version v)
+let freeze index ~max_upper ~min_upper =
+  let to_commit ctxt_hash =
+    let hash = Hash.of_context_hash ctxt_hash in
+    Store.Commit.of_hash index.repo hash >>= function
+    | None -> assert false
+    | Some commit -> Lwt.return commit
+  in
+  List.map_s to_commit max_upper >>= fun max_upper_commits ->
+  to_commit min_upper >>= fun min_upper_commit ->
+  Store.freeze
+    ~max_upper:max_upper_commits
+    ~min_upper:[min_upper_commit]
+    ~max_lower:[min_upper_commit]
+    index.repo
+  >>= fun () ->
+  pp_stats () ;
+  Lwt.return_unit
 
-(*let wip_self_contained index hash =
+let is_freezing index = Store.async_freeze index.repo
+
+let wip_self_contained index hash =
   let to_commit ctxt_hash =
     let hash = Hash.of_context_hash ctxt_hash in
     (* Store.Commit.of_hash index.repo hash *)
@@ -254,14 +270,13 @@ let wip_is_self_contained index hash =
     | Some commit -> Lwt.return commit
   in
   to_commit hash >>= fun commit ->
-  Store.check_self_contained index.repo ~heads:[commit]*)
+  Store.check_self_contained index.repo ~heads:[commit]
 
 let raw_commit' ~time ?(message = "") context : Store.commit Lwt.t =
   let info =
     Store.Info.v ~author:"Tezos" ~message (Time.Protocol.to_seconds time)
   in
   let parents = List.map Store.Commit.hash context.parents in
-  unshallow context >>= fun () ->
   Store.Commit.v context.index.repo ~info ~parents context.tree >|= fun h ->
   Store.Tree.clear context.tree ;
   h

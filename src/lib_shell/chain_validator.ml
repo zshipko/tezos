@@ -422,16 +422,14 @@ let may_unload_context w chain_store ~pred_checkpoint:(_, pred_checkpoint_level)
         pred_checkpoint_level
         new_checkpoint_level
     in
-    Store.Chain.known_heads chain_store
-    >>= fun known_heads ->
+    Store.Chain.known_heads chain_store >>= fun known_heads ->
     List.map_es
       (fun (h, _) ->
-        Store.Block.read_block chain_store h
-        >>=? fun b -> return (Store.Block.context_hash b))
+        Store.Block.read_block chain_store h >>=? fun b ->
+        return (Store.Block.context_hash b))
       known_heads
     >>=? fun known_heads ->
-    Store.Block.read_block chain_store new_checkpoint_hash
-    >>=? fun b ->
+    Store.Block.read_block chain_store new_checkpoint_hash >>=? fun b ->
     let checkpoint = Store.Block.context_hash b in
     let nv = Worker.state w in
     Block_validator.unload_context
@@ -461,12 +459,15 @@ let on_validation_request w start_testchain active_chains spawn_child block =
   in
   if not accepted_head then return Event.Ignored_head
   else
+    Store.Chain.checkpoint chain_store >>= fun checkpoint ->
     Store.Chain.set_head chain_store block >>=? function
     | None ->
         (* None means that the given head is below a new_head and
            therefore it must not be broadcasted *)
         return Event.Ignored_head
     | Some previous ->
+        may_unload_context w chain_store ~pred_checkpoint:checkpoint
+        >>=? fun () ->
         broadcast_head w ~previous block >>= fun () ->
         may_update_protocol_level chain_store ~prev:previous ~block
         >>=? fun () ->
